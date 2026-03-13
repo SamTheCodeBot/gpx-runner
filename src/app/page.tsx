@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage";
 import { GPXRoute, RouteStats, RouteFilter, RouteSuggestion } from "./types";
 import { storage } from "@/lib/firebase";
+import { useAuth, login, register, logout } from "@/lib/auth";
 
 // Dynamically import Map to avoid SSR issues
 const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
@@ -17,6 +18,13 @@ const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
 });
 
 export default function Home() {
+  const { user, loading: authLoading } = useAuth();
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [filteredRoutes, setFilteredRoutes] = useState<GPXRoute[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
@@ -412,6 +420,98 @@ ${gpxPoints}
     return filteredRoutes;
   };
 
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError("");
+    try {
+      if (isRegistering) {
+        await register(email, password);
+      } else {
+        await login(email, password);
+      }
+      setShowLoginModal(false);
+      setEmail("");
+      setPassword("");
+    } catch (error: any) {
+      setAuthError(error.message || "Authentication failed");
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setRoutes([]);
+    localStorage.removeItem("gpx-routes");
+  };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center">
+        <div className="text-zinc-500">Loading...</div>
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center">
+              <svg className="w-8 h-8 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-white">GPX Runner</h1>
+            <p className="text-zinc-500 mt-2">Sign in to save your routes</p>
+          </div>
+          
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                required
+                minLength={6}
+              />
+            </div>
+            {authError && <p className="text-red-400 text-sm">{authError}</p>}
+            <button
+              type="submit"
+              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-black font-medium rounded-lg hover:from-cyan-400 hover:to-cyan-500 transition-all"
+            >
+              {isRegistering ? "Create Account" : "Sign In"}
+            </button>
+          </form>
+          
+          <p className="text-center text-zinc-500 text-sm mt-6">
+            {isRegistering ? "Already have an account?" : "Don't have an account?"}{" "}
+            <button
+              onClick={() => { setIsRegistering(!isRegistering); setAuthError(""); }}
+              className="text-cyan-400 hover:underline"
+            >
+              {isRegistering ? "Sign In" : "Create Account"}
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
       {/* Header */}
@@ -495,6 +595,17 @@ ${gpxPoints}
                 className="hidden"
               />
             </label>
+            
+            {/* User info / Logout */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-zinc-400 hidden md:inline">{user.email}</span>
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors text-sm"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </header>
