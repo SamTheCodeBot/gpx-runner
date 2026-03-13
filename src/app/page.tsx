@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage";
+import type { FirebaseStorage } from "firebase/storage";
 import { GPXRoute, RouteStats, RouteFilter, RouteSuggestion } from "./types";
-import { storage } from "@/lib/firebase";
-import { useAuth, login, register, logout } from "@/lib/auth";
+import { storage as firebaseStorage } from "@/lib/firebase";
+import { useAuth, login, register, logout, resetPassword } from "@/lib/auth";
 
 // Dynamically import Map to avoid SSR issues
 const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
@@ -21,9 +22,11 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth();
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
   
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [filteredRoutes, setFilteredRoutes] = useState<GPXRoute[]>([]);
@@ -132,8 +135,12 @@ export default function Home() {
 
   // Upload GPX file to Firebase Storage
   const uploadToFirebase = async (file: File, routeId: string) => {
+    if (!firebaseStorage) {
+      console.error("Firebase storage not initialized");
+      return null;
+    }
     try {
-      const storageRef = ref(storage, `gpx-files/${routeId}.gpx`);
+      const storageRef = ref(firebaseStorage as FirebaseStorage, `gpx-files/${routeId}.gpx`);
       await uploadBytes(storageRef, file);
       const downloadUrl = await getDownloadURL(storageRef);
       return downloadUrl;
@@ -423,6 +430,19 @@ ${gpxPoints}
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
+    setAuthSuccess("");
+    
+    if (showForgotPassword) {
+      try {
+        await resetPassword(email);
+        setAuthSuccess("Check your email for password reset instructions");
+        setShowForgotPassword(false);
+      } catch (error: any) {
+        setAuthError(error.message || "Failed to send reset email");
+      }
+      return;
+    }
+    
     try {
       if (isRegistering) {
         await register(email, password);
@@ -454,6 +474,55 @@ ${gpxPoints}
 
   // Show login if not authenticated
   if (!user) {
+    // Show different content based on forgot password state
+    if (showForgotPassword) {
+      return (
+        <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center">
+                <svg className="w-8 h-8 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-white">Reset Password</h1>
+              <p className="text-zinc-500 mt-2">Enter your email to receive reset instructions</p>
+            </div>
+            
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <label className="block text-sm text-zinc-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                  required
+                />
+              </div>
+              {authError && <p className="text-red-400 text-sm">{authError}</p>}
+              {authSuccess && <p className="text-green-400 text-sm">{authSuccess}</p>}
+              <button
+                type="submit"
+                className="w-full py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-black font-medium rounded-lg hover:from-cyan-400 hover:to-cyan-500 transition-all"
+              >
+                Send Reset Email
+              </button>
+            </form>
+            
+            <p className="text-center text-zinc-500 text-sm mt-6">
+              <button
+                onClick={() => { setShowForgotPassword(false); setAuthError(""); setAuthSuccess(""); }}
+                className="text-cyan-400 hover:underline"
+              >
+                Back to Sign In
+              </button>
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
@@ -497,6 +566,17 @@ ${gpxPoints}
               {isRegistering ? "Create Account" : "Sign In"}
             </button>
           </form>
+          
+          {!isRegistering && (
+            <p className="text-center text-zinc-500 text-sm mt-4">
+              <button
+                onClick={() => setShowForgotPassword(true)}
+                className="text-cyan-400 hover:underline"
+              >
+                Forgot Password?
+              </button>
+            </p>
+          )}
           
           <p className="text-center text-zinc-500 text-sm mt-6">
             {isRegistering ? "Already have an account?" : "Don't have an account?"}{" "}

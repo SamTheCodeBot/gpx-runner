@@ -1,6 +1,6 @@
-import { initializeApp } from 'firebase/app';
-import { getStorage } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
+import { getAuth, Auth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAXfw2fx-P6DrB0yKZuQ6pBjfXrHYZRCRw",
@@ -12,9 +12,20 @@ const firebaseConfig = {
   measurementId: "G-TY9Z9WB4ZW"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const storage = getStorage(app);
-export const auth = getAuth(app);
+// Initialize Firebase - only on client side
+let app: FirebaseApp | undefined;
+let storage: FirebaseStorage | undefined;
+let auth: Auth | undefined;
 
+if (typeof window !== 'undefined') {
+  try {
+    app = initializeApp(firebaseConfig);
+    storage = getStorage(app);
+    auth = getAuth(app);
+  } catch (e) {
+    console.error("Firebase init error:", e);
+  }
+}
+
+export { storage, auth };
 export default app;
