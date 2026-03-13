@@ -35,4 +35,5 @@ export interface RouteSuggestion {
   distance: number;
   elevationGain: number;
   name: string;
+  startPoint?: [number, number]; // [lon, lat]
 }

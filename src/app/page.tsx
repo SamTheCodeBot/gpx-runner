@@ -27,7 +27,9 @@ export default function Home() {
   const [showFilters, setShowFilters] = useState(false);
   const [showSuggestPanel, setShowSuggestPanel] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
-  const [suggestType, setSuggestType] = useState<'road' | 'trail' | 'mixed'>('road');
+  const [avoidFamiliar, setAvoidFamiliar] = useState(true); // true = avoid familiar paths
+  const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
+  const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -250,14 +252,20 @@ ${gpxPoints}
     setApiKeyMissing(false);
 
     try {
-      // Get center from existing routes or default to Stockholm
-      let centerLat = 59.3293;
-      let centerLon = 18.0686;
+      // Use selected start point, or center from existing routes, or default to Stockholm
+      let centerLat: number;
+      let centerLon: number;
 
-      if (routes.length > 0) {
+      if (selectedStartPoint) {
+        centerLat = selectedStartPoint[1];
+        centerLon = selectedStartPoint[0];
+      } else if (routes.length > 0) {
         const allCoords = routes.flatMap(r => r.coordinates);
         centerLat = allCoords.reduce((sum, [, lat]) => sum + lat, 0) / allCoords.length;
         centerLon = allCoords.reduce((sum, [lon]) => sum + lon, 0) / allCoords.length;
+      } else {
+        centerLat = 59.3293;
+        centerLon = 18.0686;
       }
 
       const response = await fetch('/api/routes/suggest', {
@@ -265,7 +273,8 @@ ${gpxPoints}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           distance: suggestDistance,
-          type: suggestType,
+          type: 'mixed', // Using mixed since we removed type selection
+          avoidFamiliar,
           centerLat,
           centerLon,
         }),
@@ -282,6 +291,7 @@ ${gpxPoints}
       const suggestion = await response.json();
       setSuggestedRoute(suggestion);
       setShowSuggestPanel(false);
+      setIsSelectingStartPoint(false);
     } catch (error: any) {
       console.error('Suggestion error:', error);
       if (!apiKeyMissing) {
@@ -289,6 +299,13 @@ ${gpxPoints}
       }
     } finally {
       setIsSuggesting(false);
+    }
+  };
+
+  const handleMapClick = (lat: number, lon: number) => {
+    if (isSelectingStartPoint) {
+      setSelectedStartPoint([lon, lat]);
+      setIsSelectingStartPoint(false);
     }
   };
 
@@ -397,26 +414,51 @@ ${gpxPoints}
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Type:</label>
+              <label className="text-sm text-zinc-400">Route type:</label>
               <select
-                value={suggestType}
-                onChange={(e) => setSuggestType(e.target.value as any)}
+                value={avoidFamiliar ? 'unfamiliar' : 'familiar'}
+                onChange={(e) => setAvoidFamiliar(e.target.value === 'unfamiliar')}
                 className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
               >
-                <option value="road">Road</option>
-                <option value="trail">Trail</option>
-                <option value="mixed">Mixed</option>
+                <option value="unfamiliar">🆕 New paths (unfamiliar)</option>
+                <option value="familiar">🔄 Familiar paths</option>
               </select>
             </div>
             <button
+              onClick={() => setIsSelectingStartPoint(true)}
+              className={`px-4 py-2 border rounded-lg transition-colors flex items-center gap-2 ${
+                selectedStartPoint 
+                  ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
+                  : isSelectingStartPoint
+                  ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              {selectedStartPoint ? "Start point set ✓" : "Pick start point"}
+            </button>
+            <button
               onClick={getSuggestion}
               disabled={isSuggesting}
-              className="px-4 py-2 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              {isSuggesting ? 'Generating...' : 'Get Suggestion'}
+              {isSuggesting ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating route...
+                </>
+              ) : (
+                'Get Suggestion'
+              )}
             </button>
-            {apiKeyMissing && (
-              <span className="text-amber-400 text-sm">⚠️ API key not configured</span>
+            {isSelectingStartPoint && (
+              <span className="text-amber-400 text-sm">👆 Click on the map to set start point</span>
             )}
           </div>
         </div>
@@ -614,11 +656,12 @@ ${gpxPoints}
           {suggestedRoute && (
             <div className="mb-4 p-4 bg-gradient-to-r from-pink-500/10 to-violet-500/10 border border-pink-500/30 rounded-xl">
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex-1">
                   <h3 className="font-bold text-pink-400">{suggestedRoute.name}</h3>
                   <div className="flex gap-4 mt-1 text-sm text-zinc-400">
                     <span>📏 {(suggestedRoute.distance / 1000).toFixed(1)} km</span>
                     <span>⬆️ {suggestedRoute.elevationGain}m elevation</span>
+                    <span>{avoidFamiliar ? "🆕 New paths" : "🔄 Familiar paths"}</span>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -649,6 +692,9 @@ ${gpxPoints}
                 selectedRoute={selectedRoute}
                 showHeatmap={showHeatmap}
                 suggestedRoute={suggestedRoute}
+                selectedStartPoint={selectedStartPoint}
+                onMapClick={handleMapClick}
+                isSelectingStartPoint={isSelectingStartPoint}
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">

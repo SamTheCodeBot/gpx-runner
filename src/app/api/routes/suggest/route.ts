@@ -6,6 +6,7 @@ const OSRM_BASE = 'https://router.project-osrm.org';
 interface SuggestionRequest {
   distance: number; // km
   type: 'road' | 'trail' | 'mixed';
+  avoidFamiliar: boolean;
   centerLat: number;
   centerLon: number;
 }
@@ -13,22 +14,22 @@ interface SuggestionRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: SuggestionRequest = await request.json();
-    const { distance, centerLat, centerLon } = body;
+    const { distance, avoidFamiliar, centerLat, centerLon } = body;
 
     const targetDistanceMeters = distance * 1000;
     
-    // Generate random start point
-    const radiusKm = 1.5;
-    const startLat = centerLat + (Math.random() - 0.5) * (radiusKm / 111);
-    const startLon = centerLon + (Math.random() - 0.5) * (radiusKm / 111);
+    // Use the provided center coordinates as the starting point
+    const startLat = centerLat;
+    const startLon = centerLon;
 
-    // Calculate waypoint that's roughly half the distance away (to create an out-and-back)
+    // Generate a waypoint that's roughly half the distance away
+    // Then we'll return to start to make it a round trip
     const angle = Math.random() * 2 * Math.PI;
     const waypointDistanceKm = distance * 0.5;
     const waypointLat = startLat + (Math.sin(angle) * waypointDistanceKm / 111);
     const waypointLon = startLon + (Math.cos(angle) * waypointDistanceKm / 111);
 
-    // Get route from start to waypoint
+    // Get the outbound route from start to waypoint
     const response = await axios.get(
       `${OSRM_BASE}/route/v1/foot/${startLon},${startLat};${waypointLon},${waypointLat}`,
       {
@@ -50,18 +51,19 @@ export async function POST(request: NextRequest) {
 
     const outboundRoute = response.data.routes[0];
     const outboundCoords = outboundRoute.geometry.coordinates.map((c: number[]) => [c[0], c[1]] as [number, number]);
-    const halfDistance = outboundRoute.distance;
     
-    // Create loop by reversing and appending the route
-    const returnCoords = [...outboundCoords].reverse();
-    // Remove the last point (it's the same as the waypoint)
-    returnCoords.pop();
+    // Create a proper loop by:
+    // 1. Taking the outbound route
+    // 2. Reversing it (to return)
+    // 3. Removing first/last points to avoid duplicates at junction
+    const returnCoords = [...outboundCoords].reverse().slice(1, -1);
     const fullCoords = [...outboundCoords, ...returnCoords];
     
-    // Calculate actual total distance (there and back)
+    // Calculate total distance (there and back)
+    const halfDistance = outboundRoute.distance;
     const totalDistance = halfDistance * 2;
     
-    // Estimate elevation gain (rough approximation: 10m per km for flat terrain)
+    // Estimate elevation (rough approximation)
     const estimatedElevation = Math.round(distance * 10);
 
     const routeNames = [
@@ -73,14 +75,20 @@ export async function POST(request: NextRequest) {
       'City Route',
       'Sunset Run',
       'Quick Loop',
+      'Exploration Run',
+      'Discovery Trail',
     ];
     const name = routeNames[Math.floor(Math.random() * routeNames.length)];
+
+    // Start coordinates for the response (same as end for round trip)
+    const startCoord: [number, number] = [startLon, startLat];
 
     return NextResponse.json({
       coordinates: fullCoords,
       distance: totalDistance,
       elevationGain: estimatedElevation,
       name: `${name} - ${distance}km`,
+      startPoint: startCoord,
     });
 
   } catch (error: any) {

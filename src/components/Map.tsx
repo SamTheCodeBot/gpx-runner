@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
+import { useEffect, useCallback } from "react";
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
 
@@ -10,6 +10,20 @@ interface MapProps {
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
   suggestedRoute?: RouteSuggestion | null;
+  selectedStartPoint?: [number, number] | null;
+  onMapClick?: (lat: number, lon: number) => void;
+  isSelectingStartPoint?: boolean;
+}
+
+function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => void }) {
+  useMapEvents({
+    click: (e) => {
+      if (onMapClick) {
+        onMapClick(e.latlng.lat, e.latlng.lng);
+      }
+    },
+  });
+  return null;
 }
 
 function MapController({ routes, selectedRoute, suggestedRoute }: { 
@@ -41,7 +55,15 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
   return null;
 }
 
-export default function Map({ routes, selectedRoute, showHeatmap, suggestedRoute }: MapProps) {
+export default function Map({ 
+  routes, 
+  selectedRoute, 
+  showHeatmap, 
+  suggestedRoute, 
+  selectedStartPoint,
+  onMapClick,
+  isSelectingStartPoint
+}: MapProps) {
   const getCenter = () => {
     if (suggestedRoute && suggestedRoute.coordinates.length > 0) {
       const coords = suggestedRoute.coordinates;
@@ -72,12 +94,32 @@ export default function Map({ routes, selectedRoute, showHeatmap, suggestedRoute
     }));
   };
 
+  // Create a custom icon for the start point
+  const startPointIcon = L.divIcon({
+    html: `<div style="
+      background: #22d3ee;
+      border: 3px solid #0a0a0b;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+    ">🏃</div>`,
+    className: '',
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
+
   return (
     <MapContainer
       center={getCenter()}
       zoom={13}
       style={{ height: "100%", width: "100%", background: "#111113" }}
       zoomControl={true}
+      dragging={!isSelectingStartPoint}
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
@@ -85,6 +127,18 @@ export default function Map({ routes, selectedRoute, showHeatmap, suggestedRoute
       />
       
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
+      
+      {/* Map click events */}
+      <MapEvents onMapClick={onMapClick} />
+
+      {/* Draw selected start point marker */}
+      {selectedStartPoint && (
+        <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>
+          <Popup>
+            Start/End Point
+          </Popup>
+        </Marker>
+      )}
 
       {/* Draw suggested route */}
       {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
