@@ -7,6 +7,7 @@ export interface GPXRoute {
   elevationGain: number; // meters
   duration?: number; // minutes
   color: string;
+  type: 'road' | 'trail' | 'mixed';
 }
 
 export interface RouteStats {
@@ -14,4 +15,26 @@ export interface RouteStats {
   totalDistance: number; // km
   totalElevation: number; // meters
   totalTime: number; // minutes
+}
+
+export interface RouteFilter {
+  month?: string; // YYYY-MM
+  minDistance?: number; // km
+  maxDistance?: number; // km
+  type?: 'road' | 'trail' | 'mixed' | 'all';
+}
+
+export interface RouteSuggestionRequest {
+  distance: number; // km
+  type: 'road' | 'trail' | 'mixed';
+  avoidFamiliar: boolean;
+  centerLat: number;
+  centerLon: number;
+}
+
+export interface RouteSuggestion {
+  coordinates: [number, number][];
+  distance: number;
+  elevationGain: number;
+  name: string;
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import { GPXRoute, RouteStats } from "./types";
+import { GPXRoute, RouteStats, RouteFilter, RouteSuggestion } from "./types";
 
 // Dynamically import Map to avoid SSR issues
 const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
@@ -16,10 +16,19 @@ const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
 
 export default function Home() {
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
+  const [filteredRoutes, setFilteredRoutes] = useState<GPXRoute[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
+  const [suggestedRoute, setSuggestedRoute] = useState<RouteSuggestion | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [stats, setStats] = useState<RouteStats | null>(null);
+  const [filter, setFilter] = useState<RouteFilter>({ type: 'all' });
+  const [showFilters, setShowFilters] = useState(false);
+  const [showSuggestPanel, setShowSuggestPanel] = useState(false);
+  const [suggestDistance, setSuggestDistance] = useState(5);
+  const [suggestType, setSuggestType] = useState<'road' | 'trail' | 'mixed'>('road');
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load routes from localStorage on mount
@@ -29,19 +38,49 @@ export default function Home() {
       try {
         const parsed = JSON.parse(saved);
         setRoutes(parsed);
-        calculateStats(parsed);
+        applyFilter(parsed, filter);
       } catch (e) {
         console.error("Failed to load saved routes:", e);
       }
     }
   }, []);
 
+  // Apply filter whenever filter or routes change
+  useEffect(() => {
+    applyFilter(routes, filter);
+  }, [filter, routes]);
+
+  const applyFilter = (routeList: GPXRoute[], currentFilter: RouteFilter) => {
+    let filtered = [...routeList];
+
+    // Filter by month
+    if (currentFilter.month) {
+      filtered = filtered.filter(r => r.date.startsWith(currentFilter.month!));
+    }
+
+    // Filter by distance
+    if (currentFilter.minDistance !== undefined) {
+      filtered = filtered.filter(r => r.distance / 1000 >= currentFilter.minDistance!);
+    }
+    if (currentFilter.maxDistance !== undefined) {
+      filtered = filtered.filter(r => r.distance / 1000 <= currentFilter.maxDistance!);
+    }
+
+    // Filter by type
+    if (currentFilter.type && currentFilter.type !== 'all') {
+      filtered = filtered.filter(r => r.type === currentFilter.type);
+    }
+
+    setFilteredRoutes(filtered);
+    calculateStats(filtered);
+  };
+
   // Save routes to localStorage
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
     localStorage.setItem("gpx-routes", JSON.stringify(newRoutes));
     setRoutes(newRoutes);
-    calculateStats(newRoutes);
-  }, []);
+    applyFilter(newRoutes, filter);
+  }, [filter]);
 
   const calculateStats = (routeList: GPXRoute[]) => {
     if (routeList.length === 0) {
@@ -62,9 +101,9 @@ export default function Home() {
 
     setStats({
       totalRuns,
-      totalDistance: Math.round(totalDistance / 1000 * 10) / 10, // km
+      totalDistance: Math.round(totalDistance / 1000 * 10) / 10,
       totalElevation: Math.round(totalElevation),
-      totalTime, // minutes
+      totalTime,
     });
   };
 
@@ -81,11 +120,9 @@ export default function Home() {
         const file = files[i];
         const text = await file.text();
         
-        // Parse GPX XML
         const parser = new DOMParser();
         const xml = parser.parseFromString(text, "application/xml");
         
-        // Extract track points
         const trkpts = xml.querySelectorAll("trkpt");
         const coordinates: [number, number][] = [];
         let elevationGain = 0;
@@ -98,14 +135,12 @@ export default function Home() {
 
           coordinates.push([lon, lat]);
 
-          // Calculate elevation gain
           if (lastElevation !== null && ele > lastElevation) {
             elevationGain += ele - lastElevation;
           }
           lastElevation = ele;
         });
 
-        // Calculate distance using Haversine formula
         let distance = 0;
         for (let i = 1; i < coordinates.length; i++) {
           distance += haversine(
@@ -116,13 +151,14 @@ export default function Home() {
           );
         }
 
-        // Get date from GPX
         const timeEl = xml.querySelector("time");
         const date = timeEl?.textContent ? new Date(timeEl.textContent) : new Date();
 
-        // Get route name
         const nameEl = xml.querySelector("name");
         const name = nameEl?.textContent || file.name.replace(".gpx", "");
+
+        // Auto-detect type based on elevation change and average speed
+        const type = detectRouteType(coordinates, elevationGain, distance);
 
         newRoutes.push({
           id: `route-${Date.now()}-${i}`,
@@ -132,13 +168,13 @@ export default function Home() {
           distance,
           elevationGain,
           color: getRandomColor(),
+          type,
         });
       }
 
       const updatedRoutes = [...routes, ...newRoutes];
       saveRoutes(updatedRoutes);
       
-      // Auto-select first new route
       if (newRoutes.length > 0) {
         setSelectedRoute(newRoutes[0]);
       }
@@ -153,8 +189,16 @@ export default function Home() {
     }
   };
 
+  const detectRouteType = (coordinates: [number, number][], elevationGain: number, distance: number): 'road' | 'trail' | 'mixed' => {
+    // Simple heuristic: high elevation gain per km = trail
+    const elevationPerKm = (elevationGain / distance) * 1000;
+    if (elevationPerKm > 50) return 'trail';
+    if (elevationPerKm > 20) return 'mixed';
+    return 'road';
+  };
+
   const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371000; // Earth's radius in meters
+    const R = 6371000;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
     const a =
@@ -168,14 +212,8 @@ export default function Home() {
 
   const getRandomColor = () => {
     const colors = [
-      "#22d3ee", // cyan
-      "#f472b6", // pink
-      "#a78bfa", // violet
-      "#34d399", // emerald
-      "#fbbf24", // amber
-      "#fb923c", // orange
-      "#ef4444", // red
-      "#3b82f6", // blue
+      "#22d3ee", "#f472b6", "#a78bfa", "#34d399",
+      "#fbbf24", "#fb923c", "#ef4444", "#3b82f6",
     ];
     return colors[Math.floor(Math.random() * colors.length)];
   };
@@ -185,6 +223,53 @@ export default function Home() {
     saveRoutes(updated);
     if (selectedRoute?.id === id) {
       setSelectedRoute(null);
+    }
+  };
+
+  const getSuggestion = async () => {
+    setIsSuggesting(true);
+    setApiKeyMissing(false);
+
+    try {
+      // Get center from existing routes or default to Stockholm
+      let centerLat = 59.3293;
+      let centerLon = 18.0686;
+
+      if (routes.length > 0) {
+        const allCoords = routes.flatMap(r => r.coordinates);
+        centerLat = allCoords.reduce((sum, [, lat]) => sum + lat, 0) / allCoords.length;
+        centerLon = allCoords.reduce((sum, [lon]) => sum + lon, 0) / allCoords.length;
+      }
+
+      const response = await fetch('/api/routes/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          distance: suggestDistance,
+          type: suggestType,
+          centerLat,
+          centerLon,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.error.includes('API key')) {
+          setApiKeyMissing(true);
+        }
+        throw new Error(error.error || 'Failed to get suggestion');
+      }
+
+      const suggestion = await response.json();
+      setSuggestedRoute(suggestion);
+      setShowSuggestPanel(false);
+    } catch (error: any) {
+      console.error('Suggestion error:', error);
+      if (!apiKeyMissing) {
+        alert(error.message || 'Failed to get route suggestion');
+      }
+    } finally {
+      setIsSuggesting(false);
     }
   };
 
@@ -201,6 +286,16 @@ export default function Home() {
       day: "numeric",
       year: "numeric",
     });
+  };
+
+  const getMonthOptions = () => {
+    const months = new Set(routes.map(r => r.date.substring(0, 7)));
+    return Array.from(months).sort().reverse();
+  };
+
+  const getDisplayRoutes = () => {
+    if (suggestedRoute) return [];
+    return filteredRoutes;
   };
 
   return (
@@ -223,6 +318,28 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSuggestPanel(!showSuggestPanel)}
+              className="px-4 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg transition-all duration-200 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              Suggest Route
+            </button>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`px-4 py-2 border rounded-lg transition-all duration-200 flex items-center gap-2 ${
+                showFilters || filter.type !== 'all' || filter.month
+                  ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+              Filter
+            </button>
             <label className="cursor-pointer px-4 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg transition-all duration-200 flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -240,6 +357,109 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* Suggest Route Panel */}
+      {showSuggestPanel && (
+        <div className="border-b border-zinc-800 bg-zinc-900/50 p-4 animate-fade-in">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Distance:</label>
+              <select
+                value={suggestDistance}
+                onChange={(e) => setSuggestDistance(Number(e.target.value))}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
+              >
+                <option value={3}>3 km</option>
+                <option value={5}>5 km</option>
+                <option value={10}>10 km</option>
+                <option value={15}>15 km</option>
+                <option value={21}>21 km (half marathon)</option>
+                <option value={42}>42 km (marathon)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Type:</label>
+              <select
+                value={suggestType}
+                onChange={(e) => setSuggestType(e.target.value as any)}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
+              >
+                <option value="road">Road</option>
+                <option value="trail">Trail</option>
+                <option value="mixed">Mixed</option>
+              </select>
+            </div>
+            <button
+              onClick={getSuggestion}
+              disabled={isSuggesting}
+              className="px-4 py-2 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isSuggesting ? 'Generating...' : 'Get Suggestion'}
+            </button>
+            {apiKeyMissing && (
+              <span className="text-amber-400 text-sm">⚠️ API key not configured</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Filters Panel */}
+      {showFilters && (
+        <div className="border-b border-zinc-800 bg-zinc-900/50 p-4 animate-fade-in">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Month:</label>
+              <select
+                value={filter.month || ''}
+                onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
+              >
+                <option value="">All months</option>
+                {getMonthOptions().map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Type:</label>
+              <select
+                value={filter.type}
+                onChange={(e) => setFilter({ ...filter, type: e.target.value as any })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
+              >
+                <option value="all">All types</option>
+                <option value="road">Road</option>
+                <option value="trail">Trail</option>
+                <option value="mixed">Mixed</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Distance:</label>
+              <input
+                type="number"
+                placeholder="Min km"
+                value={filter.minDistance || ''}
+                onChange={(e) => setFilter({ ...filter, minDistance: e.target.value ? Number(e.target.value) : undefined })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white w-20"
+              />
+              <span className="text-zinc-500">-</span>
+              <input
+                type="number"
+                placeholder="Max km"
+                value={filter.maxDistance || ''}
+                onChange={(e) => setFilter({ ...filter, maxDistance: e.target.value ? Number(e.target.value) : undefined })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white w-20"
+              />
+            </div>
+            <button
+              onClick={() => setFilter({ type: 'all' })}
+              className="px-3 py-2 text-sm text-zinc-400 hover:text-white transition-colors"
+            >
+              Clear filters
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 py-6 flex gap-6">
         {/* Sidebar */}
@@ -273,7 +493,11 @@ export default function Home() {
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <h2 className="font-medium">Your Routes</h2>
-              <span className="text-xs text-zinc-500">{routes.length} routes</span>
+              <span className="text-xs text-zinc-500">
+                {filteredRoutes.length !== routes.length 
+                  ? `${filteredRoutes.length} / ${routes.length} routes` 
+                  : `${routes.length} routes`}
+              </span>
             </div>
             
             {routes.length === 0 ? (
@@ -288,10 +512,10 @@ export default function Home() {
               </div>
             ) : (
               <div className="max-h-96 overflow-y-auto">
-                {routes.map((route, index) => (
+                {getDisplayRoutes().map((route, index) => (
                   <div
                     key={route.id}
-                    onClick={() => setSelectedRoute(route)}
+                    onClick={() => { setSelectedRoute(route); setSuggestedRoute(null); }}
                     className={`p-4 border-b border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-800/30 ${
                       selectedRoute?.id === route.id ? "bg-zinc-800/50 border-l-2 border-l-cyan-400" : ""
                     }`}
@@ -317,6 +541,13 @@ export default function Home() {
                     <div className="flex gap-3 mt-2 text-xs text-zinc-500">
                       <span>{(route.distance / 1000).toFixed(1)} km</span>
                       <span>↑{Math.round(route.elevationGain)}m</span>
+                      <span className={`px-1.5 py-0.5 rounded ${
+                        route.type === 'road' ? 'bg-blue-500/20 text-blue-400' :
+                        route.type === 'trail' ? 'bg-green-500/20 text-green-400' :
+                        'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {route.type}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -345,12 +576,13 @@ export default function Home() {
 
         {/* Map */}
         <div className="flex-1">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" style={{ height: "calc(100vh - 180px)" }}>
-            {routes.length > 0 ? (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" style={{ height: "calc(100vh - 280px)" }}>
+            {routes.length > 0 || suggestedRoute ? (
               <MapWithNoSSR
-                routes={routes}
+                routes={suggestedRoute ? [] : getDisplayRoutes()}
                 selectedRoute={selectedRoute}
                 showHeatmap={showHeatmap}
+                suggestedRoute={suggestedRoute}
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">

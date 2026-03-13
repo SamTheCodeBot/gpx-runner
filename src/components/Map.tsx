@@ -3,43 +3,54 @@
 import { useEffect } from "react";
 import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
-import { GPXRoute } from "@/app/types";
+import { GPXRoute, RouteSuggestion } from "@/app/types";
 
 interface MapProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
+  suggestedRoute?: RouteSuggestion | null;
 }
 
-function MapController({ routes, selectedRoute }: { routes: GPXRoute[]; selectedRoute: GPXRoute | null }) {
+function MapController({ routes, selectedRoute, suggestedRoute }: { 
+  routes: GPXRoute[]; 
+  selectedRoute: GPXRoute | null;
+  suggestedRoute: RouteSuggestion | null;
+}) {
   const map = useMap();
 
   useEffect(() => {
-    if (routes.length === 0) return;
+    let targetCoords: [number, number][] = [];
 
-    if (selectedRoute && selectedRoute.coordinates.length > 0) {
-      // Fit to selected route
-      const bounds = L.latLngBounds(
-        selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])
-      );
-      map.fitBounds(bounds, { padding: [50, 50] });
+    if (suggestedRoute && suggestedRoute.coordinates.length > 0) {
+      targetCoords = suggestedRoute.coordinates;
+    } else if (selectedRoute && selectedRoute.coordinates.length > 0) {
+      targetCoords = selectedRoute.coordinates;
     } else if (routes.length > 0) {
-      // Fit to all routes
-      const allCoords = routes.flatMap((r) => r.coordinates);
-      const bounds = L.latLngBounds(
-        allCoords.map(([lon, lat]) => [lat, lon] as [number, number])
-      );
-      map.fitBounds(bounds, { padding: [50, 50] });
+      targetCoords = routes.flatMap((r) => r.coordinates);
     }
-  }, [map, routes, selectedRoute]);
+
+    if (targetCoords.length === 0) return;
+
+    const bounds = L.latLngBounds(
+      targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
+    );
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }, [map, routes, selectedRoute, suggestedRoute]);
 
   return null;
 }
 
-export default function Map({ routes, selectedRoute, showHeatmap }: MapProps) {
-  // Calculate center from routes or use default ( Stockholm)
+export default function Map({ routes, selectedRoute, showHeatmap, suggestedRoute }: MapProps) {
   const getCenter = () => {
-    if (routes.length === 0) return [59.3293, 18.0686] as [number, number]; // Stockholm
+    if (suggestedRoute && suggestedRoute.coordinates.length > 0) {
+      const coords = suggestedRoute.coordinates;
+      const avgLat = coords.reduce((sum, [, lat]) => sum + lat, 0) / coords.length;
+      const avgLon = coords.reduce((sum, [lon]) => sum + lon, 0) / coords.length;
+      return [avgLat, avgLon] as [number, number];
+    }
+    
+    if (routes.length === 0) return [59.3293, 18.0686] as [number, number];
     
     const allCoords = routes.flatMap((r) => r.coordinates);
     if (allCoords.length === 0) return [59.3293, 18.0686] as [number, number];
@@ -50,13 +61,11 @@ export default function Map({ routes, selectedRoute, showHeatmap }: MapProps) {
     return [avgLat, avgLon] as [number, number];
   };
 
-  // Create heatmap-like effect by drawing lines with opacity based on frequency
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
-    // Simple approach: draw all routes with some transparency
     return routes.map((route) => ({
-      positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]), // eslint-disable-line no-unused-vars
+      positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
       color: route.color || "#22d3ee",
       weight: selectedRoute?.id === route.id ? 4 : 2,
       opacity: selectedRoute?.id === route.id ? 1 : 0.4,
@@ -75,7 +84,19 @@ export default function Map({ routes, selectedRoute, showHeatmap }: MapProps) {
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
       
-      <MapController routes={routes} selectedRoute={selectedRoute} />
+      <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
+
+      {/* Draw suggested route */}
+      {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
+        <Polyline
+          positions={suggestedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{
+            color: "#f472b6",
+            weight: 5,
+            opacity: 1,
+          }}
+        />
+      )}
 
       {/* Draw heatmap routes */}
       {getHeatmapRoutes().map((route, index) => (
