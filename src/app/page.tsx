@@ -533,21 +533,21 @@ ${gpxPoints}
             </div>
 
             <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Distance:</label>
+              <span className={`text-sm ${darkMode ? 'text-zinc-400' : 'text-gray-600'}`}>Distance (km):</span>
               <input
                 type="number"
-                placeholder="Min km"
+                placeholder="Min"
                 value={filter.minDistance || ''}
                 onChange={(e) => setFilter({ ...filter, minDistance: e.target.value ? Number(e.target.value) : undefined })}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white w-20"
+                className={`w-16 px-2 py-1 text-sm rounded ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'}`}
               />
-              <span className="text-zinc-500">-</span>
+              <span className={darkMode ? 'text-zinc-500' : 'text-gray-400'}>-</span>
               <input
                 type="number"
-                placeholder="Max km"
+                placeholder="Max"
                 value={filter.maxDistance || ''}
                 onChange={(e) => setFilter({ ...filter, maxDistance: e.target.value ? Number(e.target.value) : undefined })}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white w-20"
+                className={`w-16 px-2 py-1 text-sm rounded ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'}`}
               />
             </div>
             <button
@@ -561,8 +561,8 @@ ${gpxPoints}
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-col md:flex-row gap-4 md:gap-6">
-        {/* Sidebar - scrollable independently */}
-        <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 overflow-y-auto max-h-[40vh] md:max-h-[calc(100vh-200px)] ${darkMode ? '' : 'bg-white/50 rounded-2xl p-4'}`}>
+        {/* Sidebar */}
+        <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
           {/* Stats Card */}
           {stats && (
             <div className={`rounded-2xl p-5 animate-fade-in ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
@@ -581,14 +581,16 @@ ${gpxPoints}
                   <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>m elevation</div>
                 </div>
                 <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
-                  <div className="text-2xl font-bold text-amber-500">{formatDuration(stats.totalTime)}</div>
+                  <div className="text-2xl font-bold text-amber-500">
+                    {stats.totalTime > 0 ? formatDuration(stats.totalTime) : '—'}
+                  </div>
                   <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>time</div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Routes List - only show uploaded routes, not suggested */}
+          {/* Routes List - with its own scrollbar */}
           <div className={`rounded-2xl overflow-hidden ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
             <div className={`p-4 flex items-center justify-between ${darkMode ? 'border-zinc-800' : 'border-gray-200'}`} style={{ borderBottomWidth: 1 }}>
               <h2 className="font-medium">Your Routes</h2>
