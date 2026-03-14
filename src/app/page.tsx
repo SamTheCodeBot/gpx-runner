@@ -47,6 +47,7 @@ export default function Home() {
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const [darkMode, setDarkMode] = useState(true); // Dark mode by default
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load routes from localStorage on mount
@@ -644,101 +645,104 @@ ${gpxPoints}
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
       {/* Header */}
+
       <header className={`border-b ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]/80' : 'border-gray-200 bg-white/80'} backdrop-blur-md sticky top-0 z-50`}>
-        <div className="max-w-7xl mx-auto px-2 md:px-4 py-2 md:py-4 flex items-center justify-between overflow-x-auto whitespace-nowrap">
-          <div className="flex items-center gap-1 md:gap-3">
-            <button 
-              onClick={() => window.location.reload()}
-              className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center hover:scale-105 transition-transform"
-            >
+
+        <div className="max-w-7xl mx-auto px-2 md:px-4 py-2 md:py-4 flex items-center justify-between">
+
+          {/* Logo */}
+
+          <div className="flex items-center gap-1 md:gap-3 flex-shrink-0">
+
+            <button onClick={() => window.location.reload()} className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center hover:scale-105 transition-transform">
+
               <svg className="w-6 h-6 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+
               </svg>
+
             </button>
-            <div>
-              <button 
-                onClick={() => window.location.reload()}
-                className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-cyan-200 bg-clip-text text-transparent hover:opacity-80 transition-opacity"
-              >
-                GPX Runner
-              </button>
-              <p className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>Visualize your running journey</p>
+
+            <div className="hidden sm:block">
+
+              <button onClick={() => window.location.reload()} className="text-lg md:text-xl font-bold bg-gradient-to-r from-cyan-400 to-cyan-200 bg-clip-text text-transparent hover:opacity-80 transition-opacity">GPX Runner</button>
+
+              <p className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>Your runs</p>
+
             </div>
+
           </div>
 
-          <div className="flex items-center gap-2 md:gap-3">
-            {/* Dark/Light Mode Toggle */}
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className={`p-2 rounded-lg border transition-colors ${
-                darkMode 
-                  ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600' 
-                  : 'border-gray-300 text-gray-600 hover:border-gray-400'
-              }`}
-              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {darkMode ? (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                </svg>
-              )}
+
+          {/* Desktop menu */}
+
+          <div className="hidden md:flex items-center gap-2 md:gap-3">
+
+            <button onClick={() => setDarkMode(!darkMode)} className={`p-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`} title={darkMode ? "Switch to light mode" : "Switch to dark mode"}>
+
+              {darkMode ? <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg> : <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>}
+
             </button>
-            
-            <button
-              onClick={() => setShowSuggestPanel(!showSuggestPanel)}
-              className="px-2 md:px-4 py-1 md:py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg transition-all duration-200 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
+
+            <button onClick={() => setShowSuggestPanel(!showSuggestPanel)} className="px-3 md:px-4 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg transition-all duration-200 flex items-center gap-2">
+
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+
               Suggest Route
+
             </button>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`px-4 py-2 border rounded-lg transition-all duration-200 flex items-center gap-2 ${
-                showFilters || filter.month
-                  ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
-                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
+
+            <button onClick={() => setShowFilters(!showFilters)} className={`px-3 md:px-4 py-2 border rounded-lg transition-all duration-200 flex items-center gap-2 ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+
               Filter
+
             </button>
-            <label className="cursor-pointer px-2 md:px-4 py-1 md:py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg transition-all duration-200 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
+
+            <label className="cursor-pointer px-3 md:px-4 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg transition-all duration-200 flex items-center gap-2">
+
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+
               Add GPX
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".gpx"
-                multiple
-                onChange={handleFileUpload}
-                className="hidden"
-              />
+
+              <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" />
+
             </label>
-            
-            {/* User info / Logout */}
-            {user && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-zinc-400 hidden md:inline">{user.email}</span>
-                <button
-                  onClick={handleLogout}
-                  className="px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors text-sm"
-                >
-                  Sign Out
-                </button>
-              </div>
-            )}
+
+            {user && <div className="flex items-center gap-2"><span className="text-sm text-zinc-400 hidden xl:inline">{user.email}</span><button onClick={handleLogout} className="px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors text-sm">Sign Out</button></div>}
+
           </div>
+
+
+          {/* Mobile hamburger */}
+
+          <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className={`md:hidden p-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>
+
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+
+          </button>
+
         </div>
+
+
+        {/* Mobile menu dropdown */}
+
+        {mobileMenuOpen && <div className={`md:hidden border-t ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]' : 'border-gray-200 bg-gray-50'} px-2 py-3 space-y-2`}>
+
+          <button onClick={() => setDarkMode(!darkMode)} className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-900' : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-100'}`}>{darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}</button>
+
+          <button onClick={() => { setShowSuggestPanel(!showSuggestPanel); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg">💡 Suggest Route</button>
+
+          <button onClick={() => { setShowFilters(!showFilters); setMobileMenuOpen(false); }} className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>🔍 Filter</button>
+
+          <label className="w-full block px-3 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg cursor-pointer text-center">➕ Add GPX<input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" /></label>
+
+          {user && <><div className="px-3 py-2 text-sm text-zinc-400">{user.email}</div><button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors">🚪 Sign Out</button></> }
+
+        </div>}
+
       </header>
 
       {/* Suggest Route Panel */}
