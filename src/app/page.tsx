@@ -76,25 +76,29 @@ export default function Home() {
           return;
         }
         
-        const routesQuery = query(collection(db, "routes"), where("userId", "==", user.uid));
+        console.log("Loading routes from Firebase for user:", user?.uid);
+        const routesQuery = query(collection(db, "routes"), where("userId", "==", user!.uid));
         const snapshot = await getDocs(routesQuery);
+        
+        console.log("Firebase query returned", snapshot.docs.length, "routes");
         
         const firebaseRoutes: GPXRoute[] = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
-            // Convert back from Firestore format to [number, number][]
+          console.log("Processing route:", data.name, "with", data.coordinates?.length || 0, "coordinate objects");
+          // Convert back from Firestore format to [number, number][]
+          if (data.coordinates && Array.isArray(data.coordinates)) {
             const coords = data.coordinates.map((c: {lon: number; lat: number}) => [c.lon, c.lat] as [number, number]);
             firebaseRoutes.push({ ...data, coordinates: coords } as GPXRoute);
+          }
         });
         
+        console.log("Loaded", firebaseRoutes.length, "routes from Firebase");
+        
         if (firebaseRoutes.length > 0) {
-          // Merge with local routes, avoiding duplicates
-          const localIds = new Set(routes.map(r => r.id));
-          const newRoutes = firebaseRoutes.filter(r => !localIds.has(r.id));
-          const merged = [...routes, ...newRoutes];
-          setRoutes(merged);
-          applyFilter(merged, filter);
-          localStorage.setItem("gpx-routes", JSON.stringify(merged));
+          // Don't merge with routes from localStorage - just use Firebase routes
+          setRoutes(firebaseRoutes);
+          console.log("Set routes to Firebase routes");
         }
       } catch (e) {
         console.error("Failed to load routes from Firebase:", e);
