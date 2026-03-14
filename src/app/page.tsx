@@ -4,8 +4,21 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage";
 import type { FirebaseStorage } from "firebase/storage";
+import { getFirestore, collection, getDocs, doc, setDoc, query, where } from "firebase/firestore";
 import { GPXRoute, RouteStats, RouteFilter, RouteSuggestion } from "./types";
 import { storage as firebaseStorage } from "@/lib/firebase";
+
+// Initialize Firestore
+let db;
+if (typeof window !== 'undefined') {
+  try {
+    const { getFirestore } = require('firebase/firestore');
+    const app = require('firebase/app').default || require('firebase/app');
+    db = getFirestore(app);
+  } catch (e) {
+    console.error("Firestore init error:", e);
+  }
+}
 import { useAuth, login, register, logout, resetPassword } from "@/lib/auth";
 
 // Dynamically import Map to avoid SSR issues
@@ -60,6 +73,40 @@ export default function Home() {
       }
     }
   }, []);
+
+  // Load routes from Firebase when user logs in
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadRoutesFromFirebase = async () => {
+      try {
+        const { getFirestore, collection, getDocs, query, where } = await import('firebase/firestore');
+        const db = getFirestore();
+        
+        const routesQuery = query(collection(db, "routes"), where("userId", "==", user.uid));
+        const snapshot = await getDocs(routesQuery);
+        
+        const firebaseRoutes: GPXRoute[] = [];
+        snapshot.forEach((doc) => {
+          firebaseRoutes.push(doc.data() as GPXRoute);
+        });
+        
+        if (firebaseRoutes.length > 0) {
+          // Merge with local routes, avoiding duplicates
+          const localIds = new Set(routes.map(r => r.id));
+          const newRoutes = firebaseRoutes.filter(r => !localIds.has(r.id));
+          const merged = [...routes, ...newRoutes];
+          setRoutes(merged);
+          applyFilter(merged, filter);
+          localStorage.setItem("gpx-routes", JSON.stringify(merged));
+        }
+      } catch (e) {
+        console.error("Failed to load routes from Firebase:", e);
+      }
+    };
+    
+    loadRoutesFromFirebase();
+  }, [user]);
 
   // Apply filter whenever filter or routes change
   useEffect(() => {
@@ -165,12 +212,12 @@ export default function Home() {
     try {
       const newRoutes: GPXRoute[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const routeId = `route-${Date.now()}-${i}`;
+      for (let idx = 0; idx < files.length; idx++) {
+        const file = files[idx];
+        const routeIdForDb = `route-${Date.now()}-${idx}`;
         
         // Upload to Firebase Storage
-        const firebaseUrl = await uploadToFirebase(file, routeId);
+        const firebaseUrl = await uploadToFirebase(file, routeIdForDb);
         console.log("Uploaded to Firebase:", firebaseUrl);
         
         const text = await file.text();
@@ -212,15 +259,38 @@ export default function Home() {
         const nameEl = xml.querySelector("name");
         const name = nameEl?.textContent || file.name.replace(".gpx", "");
 
+        const routeIdForDb2 = `route-${Date.now()}-${idx}`;
         newRoutes.push({
-          id: `route-${Date.now()}-${i}`,
+          id: routeIdForDb2,
           name,
           date: date.toISOString(),
           coordinates,
           distance,
           elevationGain,
           color: getRandomColor(),
+          userId: user?.uid,
         });
+        
+        // Save to Firebase Firestore
+        if (user) {
+          try {
+            const { getFirestore, doc, setDoc } = await import('firebase/firestore');
+            const db = getFirestore();
+            await setDoc(doc(db, "routes", routeIdForDb2), {
+              id: routeIdForDb2,
+              name,
+              date: date.toISOString(),
+              coordinates,
+              distance,
+              elevationGain,
+              color: getRandomColor(),
+              userId: user.uid,
+            });
+            console.log("Saved route to Firebase:", routeIdForDb2);
+          } catch (e) {
+            console.error("Failed to save to Firebase:", e);
+          }
+        }
       }
 
       const updatedRoutes = [...routes, ...newRoutes];
@@ -583,7 +653,7 @@ ${gpxPoints}
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
       {/* Header */}
-      <header className={`border-b ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]/80' : 'border-gray-200 bg-white/80'} backdrop-blur-md sticky top-0 z-50`}>
+      <header className={`overflow-x-auto border-b ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]/80' : 'border-gray-200 bg-white/80'} backdrop-blur-md sticky top-0 z-50`}>
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 

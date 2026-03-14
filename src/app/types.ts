@@ -7,6 +7,7 @@ export interface GPXRoute {
   elevationGain: number; // meters
   duration?: number; // minutes
   color: string;
+  userId?: string; // Firebase user ID for cloud sync
 }
 
 export interface RouteStats {
