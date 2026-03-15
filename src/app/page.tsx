@@ -98,8 +98,18 @@ export default function Home() {
         if (firebaseRoutes.length > 0) {
           // Sort by date (newest first) and don't merge with localStorage
           const sortedRoutes = firebaseRoutes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setRoutes(sortedRoutes);
-          console.log("Set routes to Firebase routes, sorted by date");
+          
+          // Deduplicate by route ID
+          const uniqueRoutes = sortedRoutes.filter((route, index, self) => 
+            index === self.findIndex((r) => r.id === route.id)
+          );
+          
+          if (uniqueRoutes.length < sortedRoutes.length) {
+            console.log("Removed", sortedRoutes.length - uniqueRoutes.length, "duplicate routes");
+          }
+          
+          setRoutes(uniqueRoutes);
+          console.log("Set routes to unique routes:", uniqueRoutes.length);
         }
       } catch (e) {
         console.error("Failed to load routes from Firebase:", e);
@@ -335,11 +345,21 @@ export default function Home() {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
-  const deleteRoute = (id: string) => {
+  const deleteRoute = async (id: string) => {
     const updated = routes.filter((r) => r.id !== id);
     saveRoutes(updated);
     if (selectedRoute?.id === id) {
       setSelectedRoute(null);
+    }
+    // Also delete from Firebase
+    if (user && db) {
+      try {
+        const { deleteDoc } = await import("firebase/firestore");
+        await deleteDoc(doc(db, "routes", id));
+        console.log("Deleted route from Firebase:", id);
+      } catch (e) {
+        console.error("Failed to delete from Firebase:", e);
+      }
     }
   };
 
