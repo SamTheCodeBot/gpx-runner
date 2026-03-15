@@ -93,3 +93,46 @@ export function normalizeLoop(points: LatLng[]): LatLng[] {
   if (haversineMeters(first, last) < 20) return points;
   return [...points, first];
 }
+
+export function densifyPolyline(points: LatLng[], stepMeters = 25): LatLng[] {
+  if (points.length < 2) return points;
+  const out: LatLng[] = [points[0]];
+
+  for (let i = 1; i < points.length; i += 1) {
+    const from = points[i - 1];
+    const to = points[i];
+    const dist = haversineMeters(from, to);
+    const steps = Math.max(1, Math.ceil(dist / stepMeters));
+    for (let s = 1; s < steps; s += 1) {
+      const t = s / steps;
+      out.push({
+        lat: from.lat + (to.lat - from.lat) * t,
+        lng: from.lng + (to.lng - from.lng) * t,
+      });
+    }
+    out.push(to);
+  }
+
+  return out;
+}
+
+export function simplifyByDistance(points: LatLng[], minStepMeters = 18): LatLng[] {
+  if (points.length < 2) return points;
+  const out: LatLng[] = [points[0]];
+  let last = points[0];
+
+  for (let i = 1; i < points.length - 1; i += 1) {
+    if (haversineMeters(last, points[i]) >= minStepMeters) {
+      out.push(points[i]);
+      last = points[i];
+    }
+  }
+
+  const finalPoint = points[points.length - 1];
+  if (out[out.length - 1] !== finalPoint) out.push(finalPoint);
+  return out;
+}
+
+export function canonicalPointKey(point: LatLng, decimals = 4): string {
+  return `${point.lat.toFixed(decimals)}:${point.lng.toFixed(decimals)}`;
+}
