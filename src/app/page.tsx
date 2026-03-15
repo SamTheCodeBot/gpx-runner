@@ -409,18 +409,23 @@ ${gpxPoints}
       // Call OSRM directly from client (works on static hosting)
       const targetMeters = suggestDistance * 1000;
       const toleranceMeters = 1000; // ±1km tolerance
+      const numWaypoints = 4; // More waypoints for better shape
       
-      // Calculate initial waypoint distance - aim for half the target (out and back)
-      // Divide by 1.3 to account for road overhead
-      let waypointDistKm = (targetMeters / 1000) / (3 * 1.4);
+      // Calculate radius for a circular route
+      // Total route distance ≈ numWaypoints * (2 * π * radius) / road_factor
+      // radius_km = target / (numWaypoints * 2 * π * road_factor)
+      // road_factor ~1.3 for walking/running paths
+      const roadFactor = 1.3;
+      const waypointDistKm = targetMeters / 1000 / (numWaypoints * 2 * Math.PI * roadFactor);
       const radiusDegrees = waypointDistKm / 111;
       
-      // Generate 3 waypoints at 120-degree intervals (forming a triangle/circle)
+      // Generate waypoints in a circle
       const waypoints: [number, number][] = [];
-      for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * 2 * Math.PI + (Math.random() * 0.5 - 0.25);
-        const lat = centerLat + Math.sin(angle) * radiusDegrees;
-        const lon = centerLon + Math.cos(angle) * radiusDegrees * 0.7;
+      for (let i = 0; i < numWaypoints; i++) {
+        const angle = (i / numWaypoints) * 2 * Math.PI + (Math.random() * 0.3 - 0.15);
+        // Add slight random variation to make it less perfect
+        const lat = centerLat + Math.sin(angle) * radiusDegrees * (0.9 + Math.random() * 0.2);
+        const lon = centerLon + Math.cos(angle) * radiusDegrees * (0.9 + Math.random() * 0.2) * 0.85;
         waypoints.push([lon, lat]);
       }
       
@@ -772,8 +777,8 @@ ${gpxPoints}
 
       </header>
 
-      {/* Suggest Route Panel */}
-      {showSuggestPanel && (
+      {/* Suggest Route Panel - hidden when using left panel controls */}
+      {false && showSuggestPanel && (
         <div className="border-b border-zinc-800 bg-zinc-900/95 p-4">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
@@ -891,8 +896,8 @@ ${gpxPoints}
       <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-col md:flex-row gap-4 md:gap-6">
         {/* Sidebar */}
         <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
-          {/* Stats Card */}
-          {stats && (
+          {/* Stats Card - hidden when suggesting routes */}
+          {!showSuggestPanel && stats && (
             <div className={`rounded-2xl p-5 animate-fade-in ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
               <h2 className={`text-sm font-medium uppercase tracking-wider mb-4 ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Your Running</h2>
               <div className="grid grid-cols-2 gap-4">
@@ -914,6 +919,71 @@ ${gpxPoints}
                   </div>
                   <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>time</div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Suggest Route Controls - shown in left panel when active */}
+          {showSuggestPanel && (
+            <div className={`rounded-2xl overflow-hidden ${darkMode ? 'bg-zinc-900/50 border border-pink-800' : 'bg-white border border-pink-200'}`}>
+              <div className={`p-4 flex items-center justify-between ${darkMode ? 'border-pink-800' : 'border-pink-200'}`} style={{ borderBottomWidth: 1 }}>
+                <h2 className="font-medium text-pink-400">Generate Route</h2>
+                <button onClick={() => setShowSuggestPanel(false)} className={`text-xs ${darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}`}>✕ Close</button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className={`text-sm font-medium block mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Distance (km)</label>
+                  <select
+                    value={suggestDistance}
+                    onChange={(e) => setSuggestDistance(Number(e.target.value))}
+                    className={`w-full px-3 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300'}`}
+                  >
+                    <option value={3}>3 km</option>
+                    <option value={5}>5 km</option>
+                    <option value={10}>10 km</option>
+                    <option value={15}>15 km</option>
+                    <option value={21}>21 km (half marathon)</option>
+                    <option value={42}>42 km (marathon)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={`text-sm font-medium block mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route type</label>
+                  <select
+                    value={avoidFamiliar ? 'unfamiliar' : 'familiar'}
+                    onChange={(e) => setAvoidFamiliar(e.target.value === 'unfamiliar')}
+                    className={`w-full px-3 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300'}`}
+                  >
+                    <option value="unfamiliar">🆕 New paths</option>
+                    <option value="familiar">🔄 Familiar paths</option>
+                  </select>
+                </div>
+                <button
+                  onClick={getSuggestion}
+                  disabled={isSuggesting}
+                  className="w-full py-3 px-4 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isSuggesting ? 'Generating...' : 'Generate Route'}
+                </button>
+                <button
+                  onClick={() => setIsSelectingStartPoint(true)}
+                  className={`w-full py-2 px-4 border rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                    selectedStartPoint 
+                      ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
+                      : isSelectingStartPoint
+                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                      : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  {selectedStartPoint ? "📍 Start point set" : "📍 Pick start point"}
+                </button>
+                {selectedStartPoint && (
+                  <button
+                    onClick={() => setSelectedStartPoint(null)}
+                    className={`w-full py-2 px-4 rounded-lg border ${darkMode ? 'border-zinc-700 text-zinc-400' : 'border-gray-300 text-gray-600'}`}
+                  >
+                    ✕ Clear start point
+                  </button>
+                )}
               </div>
             </div>
           )}
