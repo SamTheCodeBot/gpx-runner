@@ -445,13 +445,17 @@ const getSuggestion = async () => {
         [0, 72, 144, 216, 288], // Pentagon
         [0, 110, 230],      // Triangle variant
         [0, 100, 200, 300], // Diamond
+        [0, 60, 120, 180, 240, 300], // Hexagon
+        [0, 130, 230],      // Wide triangle
+        [0, 80, 180, 280],   // Narrow diamond
+        [0, 150, 270],      // Wide offset
       ];
       
       // Radius multipliers
-      const radiusMults = [0.8, 0.9, 1.0, 1.1, 1.2];
+      const radiusMults = [0.7, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3];
       
       // Bearing offsets
-      const bearingStep = 30;
+      const bearingStep = 15;
       
       for (let bearing = 0; bearing < 360; bearing += bearingStep) {
         for (const mult of radiusMults) {
