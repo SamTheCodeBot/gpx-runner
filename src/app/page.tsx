@@ -406,16 +406,13 @@ function destinationPoint(lat: number, lng: number, bearingDeg: number, distance
 
 const getSuggestion = async () => {
     setIsSuggesting(true);
-    setApiKeyMissing(false);
-
     try {
-      // Use selected start point, or center from existing routes, or default to Stockholm
       let centerLat: number;
       let centerLon: number;
 
       if (selectedStartPoint) {
-        centerLat = selectedStartPoint[1];
         centerLon = selectedStartPoint[0];
+        centerLat = selectedStartPoint[1];
       } else if (routes.length > 0) {
         const allCoords = routes.flatMap(r => r.coordinates || []);
         if (allCoords.length > 0 && Array.isArray(allCoords[0])) {
@@ -430,175 +427,33 @@ const getSuggestion = async () => {
         centerLon = 18.0686;
       }
 
-      const targetMeters = suggestDistance * 1000;
-      const toleranceMeters = 1000; // ±1km tolerance
-      
-      // Generate multiple candidates and pick the best one
-      // Based on route-generator-pro algorithm
-      const candidates: any[] = [];
-      const roughRadiusMeters = Math.max(250, targetMeters / 4.4);
-      
-      // Different shape patterns (waypoint angles)
-      const shapes = [
-        [0, 120, 240],       // Triangle
-        [0, 90, 180, 270],  // Square
-        [0, 72, 144, 216, 288], // Pentagon
-        [0, 110, 230],      // Triangle variant
-        [0, 100, 200, 300], // Diamond
-        [0, 60, 120, 180, 240, 300], // Hexagon
-        [0, 130, 230],      // Wide triangle
-        [0, 80, 180, 280],   // Narrow diamond
-        [0, 150, 270],      // Wide offset
-      ];
-      
-      // Radius multipliers
-      const radiusMults = [0.7, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3];
-      
-      // Bearing offsets
-      const bearingStep = 15;
-      
-      for (let bearing = 0; bearing < 360; bearing += bearingStep) {
-        for (const mult of radiusMults) {
-          for (const shape of shapes) {
-            const radius = roughRadiusMeters * mult;
-            const waypoints: [number, number][] = shape.map((offset) => {
-              const [lng, lat] = destinationPoint(centerLat, centerLon, (bearing + offset) % 360, radius);
-              return [lng, lat];
-            });
-            
-            candidates.push({
-              waypoints,
-              bearing,
-              mult,
-              shape: shape.join('-'),
-            });
-            
-            if (candidates.length >= 30) break; // Limit to 30 candidates
-          }
-          if (candidates.length >= 30) break;
-        }
-        if (candidates.length >= 30) break;
-      }
-      
-      // Shuffle candidates for variety
-      for (let i = candidates.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-      }
-      
-      // Try each candidate - now using OpenRouteService API via internal route
-      let bestRoute: any = null;
-      let bestDistanceDiff = Infinity;
-      
-      // Test candidates with OpenRouteService
-      for (const candidate of candidates.slice(0, 30)) {
-        const coordString = [
-          `${centerLon},${centerLat}`,
-          ...candidate.waypoints.map((w: [number, number]) => `${w[0]},${w[1]}`),
-          `${centerLon},${centerLat}`
-        ].join(';');
-        
-        try {
-          // Use OpenRouteService API
-          const orsResponse = await fetch(
-            `https://api.openrouteservice.org/v2/directions/foot-walking/geojson`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                coordinates: coordString.split(';').map(c => c.split(','))
-              }),
-              signal: AbortSignal.timeout(8000)
-            }
-          );
-          
-          if (!orsResponse.ok) continue;
-          
-          const data = await orsResponse.json();
-          if (data.features?.[0]?.properties?.summary?.distance) {
-            const route = data.features[0];
-            const distance = route.properties.summary.distance;
-            const coords = route.geometry.coordinates.map((c: number[]) => [c[0], c[1]] as [number, number]);
-            const distanceDiff = Math.abs(distance - targetMeters);
-            
-            if (distanceDiff < bestDistanceDiff) {
-              bestDistanceDiff = distanceDiff;
-              bestRoute = { coords, distance };
-              if (distanceDiff <= toleranceMeters) break;
-            }
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      if (!bestRoute) {
-        // Fallback - use first candidate without routing
-        const fallbackWaypoints = candidates[0]?.waypoints || [];
-        const fallbackCoords: [number, number][] = [
-          [centerLon, centerLat],
-          ...fallbackWaypoints,
-          [centerLon, centerLat]
-        ];
-        
-        setSuggestedRoute({
-          coordinates: fallbackCoords,
-          distance: targetMeters,
-          elevationGain: Math.round(suggestDistance * 10),
-          name: `Loop - ${suggestDistance}km`,
-          isRoundTrip: true,
-          startPoint: [centerLon, centerLat],
-          familiarityScore: avoidFamiliar ? 0 : 100,
-        });
-        setIsSelectingStartPoint(false);
-        return;
-      }
-
-      const coords = bestRoute.coords;
-
-      // Calculate familiarity - fixed bounds: new=0-20%, familiar=80-100%
-      let familiarityScore = avoidFamiliar ? 0 : 100;
-      
-      if (routes.length > 0) {
-        const allExistingCoords = routes.flatMap((r: any) => r.coordinates || []);
-        let overlapCount = 0;
-        const sampleSize = Math.min(coords.length, 20);
-        const step = Math.max(1, Math.floor(coords.length / sampleSize));
-        
-        for (let i = 0; i < coords.length; i += step) {
-          const [lon, lat] = coords[i];
-          for (const existingCoord of allExistingCoords) {
-            const existingLon = existingCoord[0];
-            const existingLat = existingCoord[1];
-            const dist = Math.sqrt(Math.pow(lon - existingLon, 2) + Math.pow(lat - existingLat, 2));
-            if (dist < 0.005) {
-              overlapCount++;
-              break;
-            }
-          }
-        }
-        const actualOverlap = Math.round((overlapCount / sampleSize) * 100);
-        if (avoidFamiliar) {
-          familiarityScore = Math.min(20, actualOverlap);
-        } else {
-          familiarityScore = Math.max(80, actualOverlap);
-        }
-      }
-      
-      const routeNames = ['Morning Loop', 'Evening Run', 'Park Circuit', 'Urban Loop', 'Nature Trail', 'City Route', 'Sunset Run', 'Quick Loop'];
-      const actualDistanceKm = (bestRoute.distance / 1000).toFixed(1);
-      
-      setSuggestedRoute({
-        coordinates: coords,
-        distance: bestRoute.distance,
-        elevationGain: Math.round(suggestDistance * 10),
-        name: `${routeNames[Math.floor(Math.random() * routeNames.length)]} - ${actualDistanceKm}km`,
-        isRoundTrip: true,
-        startPoint: [centerLon, centerLat],
-        familiarityScore,
+      const response = await fetch('/api/routes/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          distance: suggestDistance,
+          avoidFamiliar,
+          centerLat,
+          centerLon,
+          existingRoutes: routes.map((route) => ({ coordinates: route.coordinates || [] })),
+        }),
       });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to generate route');
+      }
+
+      setSuggestedRoute({
+        coordinates: data.coordinates,
+        distance: data.distance,
+        elevationGain: data.elevationGain,
+        name: data.name,
+        isRoundTrip: true,
+        startPoint: data.startPoint,
+        familiarityScore: data.familiarityScore,
+      });
+      setSelectedRoute(null);
       setIsSelectingStartPoint(false);
     } catch (error: any) {
       console.error('Suggestion error:', error);
