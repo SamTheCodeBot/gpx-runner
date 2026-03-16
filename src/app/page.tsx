@@ -50,8 +50,11 @@ export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load routes from localStorage on mount
+  // Load routes from localStorage on mount ONLY if no user logged in
   useEffect(() => {
+    // Skip localStorage if user is already logged in (Firebase will handle it)
+    if (user) return;
+    
     const saved = localStorage.getItem("gpx-routes");
     if (saved) {
       try {
@@ -62,7 +65,7 @@ export default function Home() {
         console.error("Failed to load saved routes:", e);
       }
     }
-  }, []);
+  }, [user]);
 
   // Load routes from Firebase when user logs in
   useEffect(() => {
