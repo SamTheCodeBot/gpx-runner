@@ -349,17 +349,32 @@ export default function Home() {
   };
 
   const deleteRoute = async (id: string) => {
-    const updated = routes.filter((r) => r.id !== id);
+    // Find the route being deleted
+    const routeToDelete = routes.find((r) => r.id === id);
+    if (!routeToDelete) return;
+    
+    // Find ALL routes with the same name AND date (duplicates)
+    const duplicatesToDelete = routes.filter((r) => 
+      r.name === routeToDelete.name && r.date === routeToDelete.date
+    );
+    
+    const duplicateIds = duplicatesToDelete.map((r) => r.id);
+    console.log("Deleting duplicates:", duplicateIds);
+    
+    // Update local state - remove all duplicates
+    const updated = routes.filter((r) => !duplicateIds.includes(r.id));
     saveRoutes(updated);
-    if (selectedRoute?.id === id) {
+    if (selectedRoute && duplicateIds.includes(selectedRoute.id)) {
       setSelectedRoute(null);
     }
-    // Also delete from Firebase
+    // Delete ALL duplicates from Firebase
     if (user && db) {
       try {
         const { deleteDoc } = await import("firebase/firestore");
-        await deleteDoc(doc(db, "routes", id));
-        console.log("Deleted route from Firebase:", id);
+        for (const dupId of duplicateIds) {
+          await deleteDoc(doc(db, "routes", dupId));
+        }
+        console.log("Deleted duplicate routes from Firebase:", duplicateIds);
       } catch (e) {
         console.error("Failed to delete from Firebase:", e);
       }
