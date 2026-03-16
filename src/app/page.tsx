@@ -50,11 +50,8 @@ export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load routes from localStorage on mount ONLY if no user logged in
+  // Load routes from localStorage on mount
   useEffect(() => {
-    // Skip localStorage if user is already logged in (Firebase will handle it)
-    if (user) return;
-    
     const saved = localStorage.getItem("gpx-routes");
     if (saved) {
       try {
@@ -65,7 +62,7 @@ export default function Home() {
         console.error("Failed to load saved routes:", e);
       }
     }
-  }, [user]);
+  }, []);
 
   // Load routes from Firebase when user logs in
   useEffect(() => {
@@ -99,23 +96,10 @@ export default function Home() {
         console.log("Loaded", firebaseRoutes.length, "routes from Firebase");
         
         if (firebaseRoutes.length > 0) {
-          // Sort by date (newest first)
+          // Sort by date (newest first) and don't merge with localStorage
           const sortedRoutes = firebaseRoutes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          
-          // Clear localStorage to avoid stale data
-          localStorage.removeItem("gpx-routes");
-          
-          // Deduplicate by route name + date (more robust than just ID)
-          const uniqueRoutes = sortedRoutes.filter((route, index, self) => 
-            index === self.findIndex((r) => r.name === route.name && r.date === route.date)
-          );
-          
-          if (uniqueRoutes.length < sortedRoutes.length) {
-            console.log("Removed", sortedRoutes.length - uniqueRoutes.length, "duplicate routes (by name+date)");
-          }
-          
-          setRoutes(uniqueRoutes);
-          console.log("Set routes to unique routes:", uniqueRoutes.length);
+          setRoutes(sortedRoutes);
+          console.log("Set routes to Firebase routes, sorted by date");
         }
       } catch (e) {
         console.error("Failed to load routes from Firebase:", e);
@@ -351,36 +335,11 @@ export default function Home() {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
-  const deleteRoute = async (id: string) => {
-    // Find the route being deleted
-    const routeToDelete = routes.find((r) => r.id === id);
-    if (!routeToDelete) return;
-    
-    // Find ALL routes with the same name AND date (duplicates)
-    const duplicatesToDelete = routes.filter((r) => 
-      r.name === routeToDelete.name && r.date === routeToDelete.date
-    );
-    
-    const duplicateIds = duplicatesToDelete.map((r) => r.id);
-    console.log("Deleting duplicates:", duplicateIds);
-    
-    // Update local state - remove all duplicates
-    const updated = routes.filter((r) => !duplicateIds.includes(r.id));
+  const deleteRoute = (id: string) => {
+    const updated = routes.filter((r) => r.id !== id);
     saveRoutes(updated);
-    if (selectedRoute && duplicateIds.includes(selectedRoute.id)) {
+    if (selectedRoute?.id === id) {
       setSelectedRoute(null);
-    }
-    // Delete ALL duplicates from Firebase
-    if (user && db) {
-      try {
-        const { deleteDoc } = await import("firebase/firestore");
-        for (const dupId of duplicateIds) {
-          await deleteDoc(doc(db, "routes", dupId));
-        }
-        console.log("Deleted duplicate routes from Firebase:", duplicateIds);
-      } catch (e) {
-        console.error("Failed to delete from Firebase:", e);
-      }
     }
   };
 
@@ -426,6 +385,24 @@ ${gpxPoints}
     URL.revokeObjectURL(url);
   };
 
+  // Helper: Calculate destination point given start, bearing, and distance
+function destinationPoint(lat: number, lng: number, bearingDeg: number, distanceMeters: number): [number, number] {
+  const R = 6371000; // Earth radius in meters
+  const brng = (bearingDeg * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const d = distanceMeters / R;
+
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
+  );
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+  );
+
+  return [(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+}
 
 const getSuggestion = async () => {
     setIsSuggesting(true);
@@ -460,35 +437,50 @@ const getSuggestion = async () => {
           targetDistanceKm: suggestDistance,
           toleranceKm: 1,
           familiarityMode: avoidFamiliar ? 'new' : 'familiar',
-          familiarityTracks: routes.map((route) => route.coordinates),
+          gpxFiles: routes.map((route) => {
+            const points = route.coordinates
+              .map(([lon, lat]) => `<trkpt lat="${lat}" lon="${lon}"></trkpt>`)
+              .join('');
+            return `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><trk><trkseg>${points}</trkseg></trk></gpx>`;
+          }),
         }),
       });
 
-      const data = await response.json();
+      const payload = await response.json();
+
       if (!response.ok) {
-        throw new Error(data?.error || 'Failed to generate route');
+        if (payload?.error?.includes?.('OPENROUTESERVICE_API_KEY')) {
+          setApiKeyMissing(true);
+        }
+        throw new Error(payload?.error || 'Failed to generate route');
       }
 
-      const bestRoute = data?.routes?.[0];
-      if (!bestRoute || !Array.isArray(bestRoute.coordinates) || bestRoute.coordinates.length < 8) {
-        throw new Error('No valid road/trail loop was returned.');
+      const bestRoute = payload?.routes?.[0];
+      if (!bestRoute || !Array.isArray(bestRoute.geometry) || bestRoute.geometry.length < 2) {
+        setSuggestedRoute(null);
+        alert('No valid route found for the selected distance and familiarity rules. Try another start point or distance.');
+        return;
       }
 
+      const coords: [number, number][] = bestRoute.geometry.map((p: { lat: number; lng: number }) => [p.lng, p.lat]);
       setSuggestedRoute({
-        coordinates: bestRoute.coordinates,
-        distance: bestRoute.distance,
-        elevationGain: bestRoute.elevationGain ?? 0,
-        name: bestRoute.name,
+        coordinates: coords,
+        distance: bestRoute.distanceMeters,
+        elevationGain: 0,
+        name: `${avoidFamiliar ? 'New' : 'Familiar'} Loop - ${(bestRoute.distanceMeters / 1000).toFixed(1)}km`,
         isRoundTrip: true,
-        startPoint: bestRoute.startPoint ?? [centerLon, centerLat],
-        familiarityScore: bestRoute.familiarityScore,
-        score: bestRoute.score,
-        debug: bestRoute.debug,
+        startPoint: [centerLon, centerLat],
+        familiarityScore: Math.round((bestRoute.familiarityRatio ?? 0) * 100),
       });
       setIsSelectingStartPoint(false);
-    } catch (error: any) {
-      console.error('Suggestion error:', error);
-      alert(error.message || 'Failed to get route suggestion');
+    } catch (error) {
+      console.error('Route generation failed:', error);
+      const message = error instanceof Error ? error.message : 'Failed to generate route';
+      if (message.includes('OPENROUTESERVICE_API_KEY')) {
+        setApiKeyMissing(true);
+      } else {
+        alert('Could not generate a valid loop on roads or trails for this request. Try another start point or distance.');
+      }
     } finally {
       setIsSuggesting(false);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
@@ -33,25 +33,31 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
   suggestedRoute: RouteSuggestion | null;
 }) {
   const map = useMap();
+  const lastFitKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let targetCoords: [number, number][] = [];
+    let fitKey: string | null = null;
 
     if (suggestedRoute && suggestedRoute.coordinates.length > 0) {
       targetCoords = suggestedRoute.coordinates;
+      fitKey = `suggested:${suggestedRoute.name}:${suggestedRoute.distance}:${suggestedRoute.coordinates.length}`;
     } else if (selectedRoute && selectedRoute.coordinates.length > 0) {
       targetCoords = selectedRoute.coordinates;
-    } else if (routes.length > 0) {
-      targetCoords = routes.flatMap((r) => r.coordinates);
+      fitKey = `selected:${selectedRoute.id}`;
+    } else {
+      return;
     }
 
-    if (targetCoords.length === 0) return;
+    if (!fitKey || targetCoords.length === 0) return;
+    if (lastFitKeyRef.current === fitKey) return;
 
     const bounds = L.latLngBounds(
       targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
     );
     map.fitBounds(bounds, { padding: [50, 50] });
-  }, [map, routes, selectedRoute, suggestedRoute]);
+    lastFitKeyRef.current = fitKey;
+  }, [map, selectedRoute, suggestedRoute]);
 
   return null;
 }

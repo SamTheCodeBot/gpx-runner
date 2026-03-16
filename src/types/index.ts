@@ -18,7 +18,7 @@ export type GeneratedRoute = {
   segments: RouteSegment[];
   familiarityRatio: number;
   score: number;
-  source?: "provider" | "familiar-provider";
+  source?: "familiar-graph" | "provider";
   debug: Record<string, number | string | boolean>;
 };
 
@@ -28,7 +28,7 @@ export type GenerateRouteInput = {
   toleranceKm?: number;
   familiarityMode?: FamiliarityMode;
   gpxFiles?: string[];
-  familiarityTracks?: LatLng[][];
+  routeCollections?: LatLng[][];
   maxCandidates?: number;
   alternatives?: number;
 };
