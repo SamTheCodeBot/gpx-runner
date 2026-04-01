@@ -260,6 +260,18 @@ export default function Home() {
         const nameEl = xml.querySelector("name");
         const name = nameEl?.textContent || file.name.replace(".gpx", "");
 
+        // Check for duplicate route name
+        if (routes.some(r => r.name === name)) {
+          const addAnyway = confirm(`A route named "${name}" already exists. Add anyway?`);
+          if (!addAnyway) {
+            setIsLoading(false);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = "";
+            }
+            return;
+          }
+        }
+
         const routeIdForDb2 = `route-${Date.now()}-${idx}`;
         newRoutes.push({
           id: routeIdForDb2,
@@ -874,12 +886,6 @@ const getSuggestion = async () => {
                 <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
                   <div className="text-2xl font-bold text-violet-500">{stats.totalElevation}</div>
                   <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>m elevation</div>
-                </div>
-                <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
-                  <div className="text-2xl font-bold text-amber-500">
-                    {stats.totalTime > 0 ? formatDuration(stats.totalTime) : '—'}
-                  </div>
-                  <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>time</div>
                 </div>
               </div>
             </div>
