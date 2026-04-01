@@ -11,8 +11,8 @@ import { auth } from './firebase';
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
-  // IMPORTANT: Start as false to prevent hanging on SSR/initial load
-  const [loading, setLoading] = useState(false);
+  // IMPORTANT: Start as true to prevent flash of login form while Firebase initializes
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
