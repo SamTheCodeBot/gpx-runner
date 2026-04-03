@@ -1048,8 +1048,7 @@ const getSuggestion = async () => {
                       </div>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() => {
                             setEditingRoute(route);
                             setEditName(route.name);
                             setEditType(route.type);
@@ -1149,7 +1148,7 @@ const getSuggestion = async () => {
             </div>
           )}
           
-          <div className={`flex-1 h-[50vh] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden`}>
+          <div className={`flex-1 min-h-0 h-[50vh] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden`}>
             {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
               <MapWithNoSSR
                 routes={suggestedRoute ? [] : getDisplayRoutes()}
