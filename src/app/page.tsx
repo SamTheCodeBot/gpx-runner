@@ -49,6 +49,11 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(true); // Dark mode by default
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Edit route state
+  const [editingRoute, setEditingRoute] = useState<GPXRoute | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState<'road' | 'trail' | undefined>(undefined);
 
   // Load routes from localStorage on mount
   useEffect(() => {
@@ -267,10 +272,22 @@ export default function Home() {
         }
 
         const routeIdForDb2 = `route-${Date.now()}-${idx}`;
+        
+        // Check for duplicate route (same name + date) and prompt user
+        const routeDateStr = date.toISOString();
+        const isDuplicate = routes.some(r => r.name === name && r.date === routeDateStr);
+        if (isDuplicate) {
+          const addAnyway = confirm(`A route named "${name}" already exists. Do you want to add it anyway?`);
+          if (!addAnyway) {
+            // Skip this file but continue with others
+            continue;
+          }
+        }
+        
         newRoutes.push({
           id: routeIdForDb2,
           name,
-          date: date.toISOString(),
+          date: routeDateStr,
           coordinates,
           distance,
           elevationGain,
@@ -347,6 +364,47 @@ export default function Home() {
     if (selectedRoute?.id === id) {
       setSelectedRoute(null);
     }
+  };
+
+  const updateRoute = async (id: string, newName: string, newType: 'road' | 'trail' | undefined) => {
+    const routeToUpdate = routes.find((r) => r.id === id);
+    if (!routeToUpdate) return;
+
+    // Find ALL routes with the same name AND date (duplicates - they share the same id)
+    const duplicatesToUpdate = routes.filter((r) => 
+      r.name === routeToUpdate.name && r.date === routeToUpdate.date
+    );
+    const duplicateIds = duplicatesToUpdate.map((r) => r.id);
+
+    // Update local state for all duplicates
+    const updated = routes.map((r) => {
+      if (duplicateIds.includes(r.id)) {
+        return { ...r, name: newName, type: newType };
+      }
+      return r;
+    });
+    saveRoutes(updated);
+    if (selectedRoute && duplicateIds.includes(selectedRoute.id)) {
+      setSelectedRoute({ ...selectedRoute, name: newName, type: newType });
+    }
+
+    // Update ALL duplicates in Firebase
+    if (user && db) {
+      try {
+        const { updateDoc } = await import("firebase/firestore");
+        for (const dupId of duplicateIds) {
+          await updateDoc(doc(db, "routes", dupId), {
+            name: newName,
+            type: newType,
+          });
+        }
+        console.log("Updated duplicate routes in Firebase:", duplicateIds);
+      } catch (e) {
+        console.error("Failed to update in Firebase:", e);
+      }
+    }
+
+    setEditingRoute(null);
   };
 
   const discardSuggestion = () => {
@@ -681,7 +739,7 @@ const getSuggestion = async () => {
 
             </button>
 
-            <button onClick={() => setShowSuggestPanel(!showSuggestPanel)} className={`px-3 md:px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center gap-2 ${
+            {false && <button onClick={() => setShowSuggestPanel(!showSuggestPanel)} className={`px-3 md:px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center gap-2 ${
         showSuggestPanel 
           ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/25' 
           : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700'
@@ -691,7 +749,7 @@ const getSuggestion = async () => {
 
               Suggest Route
 
-            </button>
+            </button>}
 
             <button onClick={() => setShowFilters(!showFilters)} className={`px-3 md:px-4 py-2 border rounded-lg transition-all duration-200 flex items-center gap-2 ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
 
@@ -733,7 +791,7 @@ const getSuggestion = async () => {
 
           <button onClick={() => setDarkMode(!darkMode)} className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-900' : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-100'}`}>{darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}</button>
 
-          <button onClick={() => { setShowSuggestPanel(!showSuggestPanel); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg">💡 Suggest Route</button>
+          {false && <button onClick={() => { setShowSuggestPanel(!showSuggestPanel); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg">💡 Suggest Route</button>}
 
           <button onClick={() => { setShowFilters(!showFilters); setMobileMenuOpen(false); }} className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>🔍 Filter</button>
 
@@ -988,21 +1046,43 @@ const getSuggestion = async () => {
                         <h3 className="font-medium truncate">{route.name}</h3>
                         <p className="text-xs text-zinc-500 mt-1">{formatDate(route.date)}</p>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteRoute(route.id);
-                        }}
-                        className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingRoute(route);
+                            setEditName(route.name);
+                            setEditType(route.type);
+                          }}
+                          className="p-1 text-zinc-600 hover:text-cyan-400 transition-colors"
+                          title="Edit route"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteRoute(route.id);
+                          }}
+                          className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
+                          title="Delete route"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     <div className="flex gap-3 mt-2 text-xs text-zinc-500">
                       <span>{(route.distance / 1000).toFixed(1)} km</span>
                       <span>↑{Math.round(route.elevationGain)}m</span>
+                      {route.type && (
+                        <span className={route.type === 'road' ? 'text-cyan-400' : 'text-amber-400'}>
+                          {route.type === 'road' ? '🛣️ Road' : '🏔️ Trail'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1104,6 +1184,102 @@ const getSuggestion = async () => {
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 flex items-center gap-4">
             <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
             <span>Processing GPX...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Route Modal */}
+      {editingRoute && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 ${darkMode ? 'bg-zinc-900 border border-zinc-700' : 'bg-white border border-gray-200'}`}>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">Edit Route</h2>
+              <button
+                onClick={() => setEditingRoute(null)}
+                className={`p-2 rounded-lg ${darkMode ? 'text-zinc-400 hover:text-white hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className={`w-full px-4 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                  placeholder="Route name"
+                />
+              </div>
+
+              <div>
+                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setEditType('road')}
+                    className={`px-4 py-3 rounded-lg border transition-all flex flex-col items-center gap-1 ${
+                      editType === 'road'
+                        ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
+                        : darkMode
+                        ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                        : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                    }`}
+                  >
+                    <span className="text-xl">🛣️</span>
+                    <span className="text-sm font-medium">Road</span>
+                  </button>
+                  <button
+                    onClick={() => setEditType('trail')}
+                    className={`px-4 py-3 rounded-lg border transition-all flex flex-col items-center gap-1 ${
+                      editType === 'trail'
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                        : darkMode
+                        ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                        : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                    }`}
+                  >
+                    <span className="text-xl">🏔️</span>
+                    <span className="text-sm font-medium">Trail</span>
+                  </button>
+                </div>
+                <button
+                  onClick={() => setEditType(undefined)}
+                  className={`w-full mt-2 px-4 py-2 text-sm rounded-lg border transition-all ${
+                    editType === undefined
+                      ? 'border-zinc-500 bg-zinc-800/50 text-zinc-400'
+                      : darkMode
+                      ? 'border-zinc-700 text-zinc-500 hover:border-zinc-600'
+                      : 'border-gray-300 text-gray-500 hover:border-gray-400'
+                  }`}
+                >
+                  No type
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setEditingRoute(null)}
+                className={`flex-1 px-4 py-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:bg-zinc-800' : 'border-gray-300 text-gray-600 hover:bg-gray-100'}`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (editingRoute && editName.trim()) {
+                    updateRoute(editingRoute.id, editName.trim(), editType);
+                  }
+                }}
+                disabled={!editName.trim()}
+                className="flex-1 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Changes
+              </button>
+            </div>
           </div>
         </div>
       )}

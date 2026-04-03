@@ -8,6 +8,7 @@ export interface GPXRoute {
   duration?: number; // minutes
   color: string;
   userId?: string; // Firebase user ID for cloud sync
+  type?: 'road' | 'trail'; // Route type tag
 }
 
 export interface RouteStats {
