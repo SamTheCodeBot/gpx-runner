@@ -4,13 +4,13 @@ import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAXfw2fx-P6DrB0yKZuQ6pBjfXrHYZRCRw",
-  authDomain: "gps-runner-d2b79.firebaseapp.com",
-  projectId: "gps-runner-d2b79",
-  storageBucket: "gps-runner-d2b79.firebasestorage.app",
-  messagingSenderId: "597838972889",
-  appId: "1:597838972889:web:99ddd1442278f939f0fbc8",
-  measurementId: "G-TY9Z9WB4ZW"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
 // Initialize Firebase
