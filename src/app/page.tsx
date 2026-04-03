@@ -1214,7 +1214,7 @@ const getSuggestion = async () => {
 
       {/* Edit Route Modal */}
       {editingRoute && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 ${darkMode ? 'bg-zinc-900 border border-zinc-700' : 'bg-white border border-gray-200'}`}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">Edit Route</h2>
