@@ -55,6 +55,10 @@ export default function Home() {
   const [editName, setEditName] = useState("");
   const [editType, setEditType] = useState<'road' | 'trail' | undefined>(undefined);
 
+  // Mobile sidebar collapse state
+  const [mobileStatsCollapsed, setMobileStatsCollapsed] = useState(false);
+  const [mobileRoutesCollapsed, setMobileRoutesCollapsed] = useState(true);
+
   // Load routes from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem("gpx-routes");
@@ -763,7 +767,7 @@ const getSuggestion = async () => {
 
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
 
-              Add GPX
+              Upload route
 
               <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" />
 
@@ -795,7 +799,7 @@ const getSuggestion = async () => {
 
           <button onClick={() => { setShowFilters(!showFilters); setMobileMenuOpen(false); }} className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>🔍 Filter</button>
 
-          <label className="w-full block px-3 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg cursor-pointer text-center">➕ Add GPX<input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" /></label>
+          <label className="w-full block px-3 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg cursor-pointer text-center">➕ Upload route<input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" /></label>
 
           {user && <><div className="px-3 py-2 text-sm text-zinc-400">{user.email}</div><button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors">🚪 Sign Out</button></> }
 
@@ -925,7 +929,15 @@ const getSuggestion = async () => {
           {/* Stats Card - hidden when suggesting routes */}
           {!showSuggestPanel && stats && (
             <div className={`rounded-2xl p-5 animate-fade-in ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
-              <h2 className={`text-sm font-medium uppercase tracking-wider mb-4 ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Your Running</h2>
+              {/* Mobile collapse toggle */}
+              <button
+                onClick={() => setMobileStatsCollapsed(!mobileStatsCollapsed)}
+                className={`w-full flex items-center justify-between mb-4 md:mb-0 ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}
+              >
+                <h2 className={`text-sm font-medium uppercase tracking-wider ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>My Running</h2>
+                <span className="md:hidden text-xs">{mobileStatsCollapsed ? '▼' : '▲'}</span>
+              </button>
+              <div className={`${mobileStatsCollapsed ? 'hidden md:block' : 'block'}`}>
               <div className="grid grid-cols-2 gap-4">
                 <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
                   <div className="text-2xl font-bold text-cyan-500">{stats.totalRuns}</div>
@@ -940,6 +952,8 @@ const getSuggestion = async () => {
                   <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>m elevation</div>
                 </div>
               </div>
+              </div>
+              <div className="hidden md:block h-0" />{/* spacer on desktop */}
             </div>
           )}
 
@@ -1011,15 +1025,23 @@ const getSuggestion = async () => {
           {/* Routes List - hidden when suggesting routes */}
           {!showSuggestPanel && (
           <div className={`rounded-2xl overflow-hidden ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
-            <div className={`p-4 flex items-center justify-between ${darkMode ? 'border-zinc-800' : 'border-gray-200'}`} style={{ borderBottomWidth: 1 }}>
+            <button
+              onClick={() => setMobileRoutesCollapsed(!mobileRoutesCollapsed)}
+              className={`w-full p-4 flex items-center justify-between ${darkMode ? 'border-zinc-800' : 'border-gray-200'}`} style={{ borderBottomWidth: mobileRoutesCollapsed ? 0 : 1 }}
+            >
               <h2 className="font-medium">Your Routes</h2>
-              <span className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>
-                {filteredRoutes.length !== routes.length 
-                  ? `${filteredRoutes.length} / ${routes.length} routes` 
-                  : `${routes.length} routes`}
-              </span>
-            </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>
+                  {filteredRoutes.length !== routes.length 
+                    ? `${filteredRoutes.length} / ${routes.length} routes` 
+                    : `${routes.length} routes`}
+                </span>
+                <span className="md:hidden text-xs">{mobileRoutesCollapsed ? '▼' : '▲'}</span>
+              </div>
+            </button>
             
+            {mobileRoutesCollapsed ? null : (
+            <>
             {routes.length === 0 ? (
               <div className="p-8 text-center">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-800 flex items-center justify-center">
@@ -1048,7 +1070,8 @@ const getSuggestion = async () => {
                       </div>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingRoute(route);
                             setEditName(route.name);
                             setEditType(route.type);
@@ -1087,6 +1110,8 @@ const getSuggestion = async () => {
                 ))}
               </div>
             )}
+            </>
+          )}
           </div>
 
           )}
@@ -1189,7 +1214,7 @@ const getSuggestion = async () => {
 
       {/* Edit Route Modal */}
       {editingRoute && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 ${darkMode ? 'bg-zinc-900 border border-zinc-700' : 'bg-white border border-gray-200'}`}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">Edit Route</h2>
