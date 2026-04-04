@@ -700,7 +700,7 @@ const getSuggestion = async () => {
   }
 
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+    <div className={`min-h-screen flex flex-col ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
       {/* Header */}
 
       <header className={`border-b ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]/80' : 'border-gray-200 bg-white/80'} backdrop-blur-md sticky top-0 z-50`}>
@@ -935,7 +935,7 @@ const getSuggestion = async () => {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-col md:flex-row gap-4 md:gap-6">
+      <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-1 flex-col md:flex-row gap-4 md:gap-6">
         {/* Sidebar */}
         <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 max-h-[calc(100vh_-_92px)] overflow-y-auto ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
           {/* Stats Card - hidden when suggesting routes */}
@@ -1147,7 +1147,7 @@ const getSuggestion = async () => {
         </aside>
 
         {/* Map - fixed height, doesn't shrink */}
-        <div className="flex-1 flex flex-col h-[300px] md:h-auto md:min-h-[600px] flex-shrink-0">
+        <div className="flex-1 flex flex-col md:h-auto md:min-h-[600px] flex-shrink-0">
           {/* Suggested Route Info Panel */}
           {suggestedRoute && (
             <div className="mb-4 p-4 bg-gradient-to-r from-pink-500/10 to-violet-500/10 border border-pink-500/30 rounded-xl">
@@ -1185,7 +1185,7 @@ const getSuggestion = async () => {
             </div>
           )}
           
-          <div className={`flex-1 min-h-[0px] h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
+          <div className={`flex-1 min-h-[0px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
             {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
               <MapWithNoSSR
                 routes={suggestedRoute ? [] : getDisplayRoutes()}
