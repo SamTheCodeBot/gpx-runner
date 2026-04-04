@@ -1310,3 +1310,4 @@ const getSuggestion = async () => {
     </div>
   );
 }
+// Force Vercel redeploy to pick up Firebase env var changes
