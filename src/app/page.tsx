@@ -149,10 +149,9 @@ export default function Home() {
     }
 
     // Filter by type
-    // Filter by type - removed since we can't detect road vs trail
-    // if (currentFilter.type && currentFilter.type !== 'all') {
-    //   filtered = filtered.filter(r => r.type === currentFilter.type);
-    // }
+    if (currentFilter.type && currentFilter.type !== 'all') {
+      filtered = filtered.filter(r => r.type === currentFilter.type);
+    }
 
     setFilteredRoutes(filtered);
     calculateStats(filtered);
@@ -896,6 +895,19 @@ const getSuggestion = async () => {
             </div>
 
             <div className="flex items-center gap-2">
+              <label className="text-sm text-zinc-400">Type:</label>
+              <select
+                value={filter.type || 'all'}
+                onChange={(e) => setFilter({ ...filter, type: e.target.value === 'all' ? undefined : (e.target.value as 'road' | 'trail') })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
+              >
+                <option value="all">All types</option>
+                <option value="road">🛣️ Road</option>
+                <option value="trail">🏔️ Trail</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
               <span className={`text-sm ${darkMode ? 'text-zinc-400' : 'text-gray-600'}`}>Distance (km):</span>
               <input
                 type="number"
@@ -1135,7 +1147,7 @@ const getSuggestion = async () => {
         </aside>
 
         {/* Map - fixed height, doesn't shrink */}
-        <div className="flex-1 flex flex-col h-[500px] md:h-auto md:min-h-[600px] flex-shrink-0">
+        <div className="flex-1 flex flex-col h-[300px] md:h-auto md:min-h-[600px] flex-shrink-0">
           {/* Suggested Route Info Panel */}
           {suggestedRoute && (
             <div className="mb-4 p-4 bg-gradient-to-r from-pink-500/10 to-violet-500/10 border border-pink-500/30 rounded-xl">
@@ -1173,7 +1185,7 @@ const getSuggestion = async () => {
             </div>
           )}
           
-          <div className={`flex-1 min-h-0 h-[50vh] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
+          <div className={`flex-1 min-h-0 h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
             {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
               <MapWithNoSSR
                 routes={suggestedRoute ? [] : getDisplayRoutes()}
