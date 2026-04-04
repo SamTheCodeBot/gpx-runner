@@ -937,7 +937,7 @@ const getSuggestion = async () => {
 
       <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-col md:flex-row gap-4 md:gap-6">
         {/* Sidebar */}
-        <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
+        <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 max-h-[calc(100vh_-_92px)] overflow-y-auto ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
           {/* Stats Card - hidden when suggesting routes */}
           {!showSuggestPanel && stats && (
             <div className={`rounded-2xl p-5 animate-fade-in ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
@@ -1185,7 +1185,7 @@ const getSuggestion = async () => {
             </div>
           )}
           
-          <div className={`flex-1 min-h-0 h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
+          <div className={`flex-1 min-h-[0px] h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
             {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
               <MapWithNoSSR
                 routes={suggestedRoute ? [] : getDisplayRoutes()}
