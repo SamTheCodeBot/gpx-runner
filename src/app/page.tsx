@@ -1040,7 +1040,7 @@ const getSuggestion = async () => {
               </div>
             </button>
             
-            {(mobileRoutesCollapsed && false) ? null : (
+            {mobileRoutesCollapsed ? null : (
             <>
             {routes.length === 0 ? (
               <div className="p-8 text-center">
