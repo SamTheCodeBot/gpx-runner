@@ -22,6 +22,7 @@ export interface RouteFilter {
   month?: string; // YYYY-MM
   minDistance?: number; // km
   maxDistance?: number; // km
+  type?: 'road' | 'trail' | 'all'; // Filter by route type
 }
 
 export interface RouteSuggestionRequest {
