@@ -56,7 +56,7 @@ export default function Home() {
   const [editType, setEditType] = useState<'road' | 'trail' | undefined>(undefined);
 
   // Mobile sidebar collapse state
-  const [mobileStatsCollapsed, setMobileStatsCollapsed] = useState(false);
+  const [mobileStatsCollapsed, setMobileStatsCollapsed] = useState(true);
   const [mobileRoutesCollapsed, setMobileRoutesCollapsed] = useState(true);
 
   // Load routes from localStorage on mount
