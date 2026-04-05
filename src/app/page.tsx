@@ -935,7 +935,7 @@ const getSuggestion = async () => {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 py-4 md:py-6 flex flex-1 flex-col md:flex-row gap-4 md:gap-6">
+      <main className="max-w-7xl mx-auto px-1 py-2 md:py-6 flex flex-1 flex-col md:flex-row gap-4 md:gap-6">
         {/* Sidebar */}
         <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 order-3 md:order-1 max-h-[calc(100vh_-_92px)] overflow-y-auto ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
           {/* Routes List - hidden when suggesting routes */}
@@ -1189,7 +1189,7 @@ const getSuggestion = async () => {
             </div>
           )}
           
-          <div className={`flex-1 min-h-[0px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
+          <div className={`flex-1 min-h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
             {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
               <MapWithNoSSR
                 routes={suggestedRoute ? [] : getDisplayRoutes()}
