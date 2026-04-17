@@ -1,1329 +1,287 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import dynamic from "next/dynamic";
-import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage";
-import type { FirebaseStorage } from "firebase/storage";
-import { db } from "@/lib/firebase";
-import { GPXRoute, RouteStats, RouteFilter, RouteSuggestion } from "./types";
-import { collection, query, where, getDocs, doc, setDoc } from "firebase/firestore";
-import { storage as firebaseStorage } from "@/lib/firebase";
-import { useAuth, login, register, logout, resetPassword } from "@/lib/auth";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+import {
+  doc,
+  setDoc,
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '@/lib/firebase';
+import { useAuth } from '@/lib/auth';
+import { GPXRoute, RouteFilter } from './types';
+import { parseGpxToTrackPoints } from '@/engine/gpx';
 
-// Dynamically import Map to avoid SSR issues
-const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
+const Map = dynamic(() => import('@/components/Map'), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
-      <div className="text-zinc-500">Loading map...</div>
+    <div className="w-full h-full bg-surface-dim flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-on-surface-variant font-label">Loading map…</p>
+      </div>
     </div>
   ),
 });
 
-export default function Home() {
-  // Firebase Auth
-  const { user, loading: authLoading } = useAuth();
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [authSuccess, setAuthSuccess] = useState("");
-
-  const [routes, setRoutes] = useState<GPXRoute[]>([]);
-  const [filteredRoutes, setFilteredRoutes] = useState<GPXRoute[]>([]);
-  const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
-  const [suggestedRoute, setSuggestedRoute] = useState<RouteSuggestion | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSuggesting, setIsSuggesting] = useState(false);
-  const [showHeatmap, setShowHeatmap] = useState(true);
-  const [stats, setStats] = useState<RouteStats | null>(null);
-  const [filter, setFilter] = useState<RouteFilter>({});
-  const [showFilters, setShowFilters] = useState(false);
-  const [showSuggestPanel, setShowSuggestPanel] = useState(false);
-  const [suggestDistance, setSuggestDistance] = useState(5);
-  const [avoidFamiliar, setAvoidFamiliar] = useState(true);
-  const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
-  const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
-  const [darkMode, setDarkMode] = useState(true); // Dark mode by default
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Edit route state
-  const [editingRoute, setEditingRoute] = useState<GPXRoute | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editType, setEditType] = useState<'road' | 'trail' | undefined>(undefined);
-
-  // Mobile sidebar collapse state
-  const [mobileStatsCollapsed, setMobileStatsCollapsed] = useState(true);
-  const [mobileRoutesCollapsed, setMobileRoutesCollapsed] = useState(true);
-
-  // Load routes from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem("gpx-routes");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setRoutes(parsed);
-        applyFilter(parsed, filter);
-      } catch (e) {
-        console.error("Failed to load saved routes:", e);
-      }
-    }
-  }, []);
-
-  // Load routes from Firebase when user logs in
-  useEffect(() => {
-    if (!user) return;
-    
-    const loadRoutesFromFirebase = async () => {
-      try {
-        // Use db from firebase.ts - will be undefined if Firestore not initialized
-        if (!db) {
-          console.log("Firestore not available, skipping cloud sync");
-          return;
-        }
-        
-        console.log("Loading routes from Firebase for user:", user?.uid);
-        const routesQuery = query(collection(db, "routes"), where("userId", "==", user!.uid));
-        const snapshot = await getDocs(routesQuery);
-        
-        console.log("Firebase query returned", snapshot.docs.length, "routes");
-        
-        const firebaseRoutes: GPXRoute[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          console.log("Processing route:", data.name, "with", data.coordinates?.length || 0, "coordinate objects");
-          // Convert back from Firestore format to [number, number][]
-          if (data.coordinates && Array.isArray(data.coordinates)) {
-            const coords = data.coordinates.map((c: {lon: number; lat: number}) => [c.lon, c.lat] as [number, number]);
-            firebaseRoutes.push({ ...data, coordinates: coords } as GPXRoute);
-          }
-        });
-        
-        console.log("Loaded", firebaseRoutes.length, "routes from Firebase");
-        
-        if (firebaseRoutes.length > 0) {
-          // Sort by date (newest first) and don't merge with localStorage
-          const sortedRoutes = firebaseRoutes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setRoutes(sortedRoutes);
-          console.log("Set routes to Firebase routes, sorted by date");
-        }
-      } catch (e) {
-        console.error("Failed to load routes from Firebase:", e);
-      }
-    };
-    
-    loadRoutesFromFirebase();
-  }, [user]);
-
-  // Apply filter whenever filter or routes change
-  useEffect(() => {
-    applyFilter(routes, filter);
-  }, [filter, routes]);
-
-  // Handle dark mode class on body
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.remove('light-mode');
-    } else {
-      document.documentElement.classList.add('light-mode');
-    }
-  }, [darkMode]);
-
-  const applyFilter = (routeList: GPXRoute[], currentFilter: RouteFilter) => {
-    let filtered = [...routeList];
-
-    // Filter by month
-    if (currentFilter.month) {
-      filtered = filtered.filter(r => r.date.startsWith(currentFilter.month!));
-    }
-
-    // Filter by distance
-    if (currentFilter.minDistance !== undefined) {
-      filtered = filtered.filter(r => r.distance / 1000 >= currentFilter.minDistance!);
-    }
-    if (currentFilter.maxDistance !== undefined) {
-      filtered = filtered.filter(r => r.distance / 1000 <= currentFilter.maxDistance!);
-    }
-
-    // Filter by type
-    if (currentFilter.type && currentFilter.type !== 'all') {
-      filtered = filtered.filter(r => r.type === currentFilter.type);
-    }
-
-    setFilteredRoutes(filtered);
-    calculateStats(filtered);
-  };
-
-  // Save routes to localStorage
-  const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
-    localStorage.setItem("gpx-routes", JSON.stringify(newRoutes));
-    setRoutes(newRoutes);
-    applyFilter(newRoutes, filter);
-  }, [filter]);
-
-  const calculateStats = (routeList: GPXRoute[]) => {
-    if (routeList.length === 0) {
-      setStats(null);
-      return;
-    }
-
-    let totalDistance = 0;
-    let totalElevation = 0;
-    let totalTime = 0;
-    const totalRuns = routeList.length;
-
-    routeList.forEach((route) => {
-      totalDistance += route.distance || 0;
-      totalElevation += route.elevationGain || 0;
-      if (route.duration) totalTime += route.duration;
-    });
-
-    setStats({
-      totalRuns,
-      totalDistance: Math.round(totalDistance / 1000 * 10) / 10,
-      totalElevation: Math.round(totalElevation),
-      totalTime,
-    });
-  };
-
-  // Upload GPX file to Firebase Storage (per user folder)
-  const uploadToFirebase = async (file: File, routeId: string) => {
-    if (!firebaseStorage) {
-      console.log("Firebase storage not available, using local only");
-      return null;
-    }
-    if (!user) {
-      console.log("No user logged in, using local only");
-      return null;
-    }
-    try {
-      // Store in user-specific folder: gpx-files/{userId}/{routeId}.gpx
-      const userId = user.uid;
-      const storageRef = ref(firebaseStorage as FirebaseStorage, `gpx-files/${userId}/${routeId}.gpx`);
-      await uploadBytes(storageRef, file);
-      const downloadUrl = await getDownloadURL(storageRef);
-      return downloadUrl;
-    } catch (error) {
-      console.error("Firebase upload error:", error);
-      return null;
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    setIsLoading(true);
-
-    try {
-      const newRoutes: GPXRoute[] = [];
-
-      for (let idx = 0; idx < files.length; idx++) {
-        const file = files[idx];
-        const routeIdForDb = `route-${Date.now()}-${idx}`;
-        
-        // Upload to Firebase Storage
-        const firebaseUrl = await uploadToFirebase(file, routeIdForDb);
-        console.log("Uploaded to Firebase:", firebaseUrl);
-        
-        const text = await file.text();
-        
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, "application/xml");
-        
-        const trkpts = xml.querySelectorAll("trkpt");
-        const coordinates: [number, number][] = [];
-        let elevationGain = 0;
-        let lastElevation: number | null = null;
-
-        trkpts.forEach((pt) => {
-          const lat = parseFloat(pt.getAttribute("lat") || "0");
-          const lon = parseFloat(pt.getAttribute("lon") || "0");
-          const ele = parseFloat(pt.querySelector("ele")?.textContent || "0");
-
-          coordinates.push([lon, lat]);
-
-          if (lastElevation !== null && ele > lastElevation) {
-            elevationGain += ele - lastElevation;
-          }
-          lastElevation = ele;
-        });
-
-        let distance = 0;
-        for (let i = 1; i < coordinates.length; i++) {
-          distance += haversine(
-            coordinates[i - 1][1],
-            coordinates[i - 1][0],
-            coordinates[i][1],
-            coordinates[i][0]
-          );
-        }
-
-        const timeEl = xml.querySelector("time");
-        const date = timeEl?.textContent ? new Date(timeEl.textContent) : new Date();
-
-        const nameEl = xml.querySelector("name");
-        const name = nameEl?.textContent || file.name.replace(".gpx", "");
-
-        // Check for duplicate route name
-        if (routes.some(r => r.name === name)) {
-          const addAnyway = confirm(`A route named "${name}" already exists. Add anyway?`);
-          if (!addAnyway) continue;
-        }
-
-        const routeIdForDb2 = `route-${Date.now()}-${idx}`;
-        
-        // Check for duplicate route (same name + date) and prompt user
-        const routeDateStr = date.toISOString();
-        const isDuplicate = routes.some(r => r.name === name && r.date === routeDateStr);
-        if (isDuplicate) {
-          const addAnyway = confirm(`A route named "${name}" already exists. Do you want to add it anyway?`);
-          if (!addAnyway) {
-            // Skip this file but continue with others
-            continue;
-          }
-        }
-        
-        newRoutes.push({
-          id: routeIdForDb2,
-          name,
-          date: routeDateStr,
-          coordinates,
-          distance,
-          elevationGain,
-          color: getRandomColor(),
-          userId: user?.uid,
-        });
-        
-        // Save to Firebase Firestore
-        if (user && db) {
-          try {
-            // Use db from firebase.ts
-            // Convert coordinates to Firestore-compatible format (array of objects instead of nested arrays)
-            const coordsForFirestore = coordinates.map(c => ({ lat: c[1], lon: c[0] }));
-            
-            await setDoc(doc(db, "routes", routeIdForDb2), {
-              id: routeIdForDb2,
-              name,
-              date: date.toISOString(),
-              coordinates: coordsForFirestore,
-              distance,
-              elevationGain,
-              color: getRandomColor(),
-              userId: user.uid,
-            });
-            console.log("Saved route to Firebase:", routeIdForDb2);
-          } catch (e) {
-            console.error("Failed to save to Firebase:", e);
-          }
-        }
-      }
-
-      // Sort by date (newest first)
-      const allRoutes = [...routes, ...newRoutes].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      saveRoutes(allRoutes);
-      
-      if (newRoutes.length > 0) {
-        setSelectedRoute(newRoutes[0]);
-      }
-    } catch (error) {
-      console.error("Error parsing GPX:", error);
-      alert("Failed to parse GPX file. Please ensure it's a valid GPX file.");
-    } finally {
-      setIsLoading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  };
-
-  const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371000;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-
-  const getRandomColor = () => {
-    const colors = [
-      "#22d3ee", "#f472b6", "#a78bfa", "#34d399",
-      "#fbbf24", "#fb923c", "#ef4444", "#3b82f6",
-    ];
-    return colors[Math.floor(Math.random() * colors.length)];
-  };
-
-  const deleteRoute = (id: string) => {
-    const updated = routes.filter((r) => r.id !== id);
-    saveRoutes(updated);
-    if (selectedRoute?.id === id) {
-      setSelectedRoute(null);
-    }
-  };
-
-  const updateRoute = async (id: string, newName: string, newType: 'road' | 'trail' | undefined) => {
-    const routeToUpdate = routes.find((r) => r.id === id);
-    if (!routeToUpdate) return;
-
-    // Find ALL routes with the same name AND date (duplicates - they share the same id)
-    const duplicatesToUpdate = routes.filter((r) => 
-      r.name === routeToUpdate.name && r.date === routeToUpdate.date
-    );
-    const duplicateIds = duplicatesToUpdate.map((r) => r.id);
-
-    // Update local state for all duplicates
-    const updated = routes.map((r) => {
-      if (duplicateIds.includes(r.id)) {
-        return { ...r, name: newName, type: newType };
-      }
-      return r;
-    });
-    saveRoutes(updated);
-    if (selectedRoute && duplicateIds.includes(selectedRoute.id)) {
-      setSelectedRoute({ ...selectedRoute, name: newName, type: newType });
-    }
-
-    // Update ALL duplicates in Firebase
-    if (user && db) {
-      try {
-        const { updateDoc } = await import("firebase/firestore");
-        for (const dupId of duplicateIds) {
-          await updateDoc(doc(db, "routes", dupId), {
-            name: newName,
-            type: newType,
-          });
-        }
-        console.log("Updated duplicate routes in Firebase:", duplicateIds);
-      } catch (e) {
-        console.error("Failed to update in Firebase:", e);
-      }
-    }
-
-    setEditingRoute(null);
-  };
-
-  const discardSuggestion = () => {
-    setSuggestedRoute(null);
-  };
-
-  const downloadGPX = (route: { coordinates: [number, number][]; name: string; distance: number; elevationGain: number }) => {
-    // Convert coordinates to GPX format with Garmin-compatible structure
-    const gpxPoints = route.coordinates
-      .map(([lon, lat]) => `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">
-        <ele>0</ele>
-        <time>${new Date().toISOString()}</time>
-      </trkpt>`)
-      .join('\n');
-    
-    const gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="GPX Runner" 
-  xmlns="http://www.topografix.com/GPX/1/1" 
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
-  <metadata>
-    <name>${route.name}</name>
-    <time>${new Date().toISOString()}</time>
-  </metadata>
-  <trk>
-    <name>${route.name}</name>
-    <trkseg>
-${gpxPoints}
-    </trkseg>
-  </trk>
-</gpx>`;
-
-    // Download the file
-    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${route.name.replace(/\s+/g, '_')}.gpx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // Helper: Calculate destination point given start, bearing, and distance
-function destinationPoint(lat: number, lng: number, bearingDeg: number, distanceMeters: number): [number, number] {
-  const R = 6371000; // Earth radius in meters
-  const brng = (bearingDeg * Math.PI) / 180;
-  const lat1 = (lat * Math.PI) / 180;
-  const lng1 = (lng * Math.PI) / 180;
-  const d = distanceMeters / R;
-
-  const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
-  );
-  const lng2 = lng1 + Math.atan2(
-    Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
-    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
-  );
-
-  return [(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+function haversineDistance(coord1: [number, number], coord2: [number, number]): number {
+  const R = 6371;
+  const dLat = ((coord2[1] - coord1[1]) * Math.PI) / 180;
+  const dLon = ((coord2[0] - coord1[0]) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((coord1[1] * Math.PI) / 180) *
+      Math.cos((coord2[1] * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
-const getSuggestion = async () => {
-    setIsSuggesting(true);
-    setApiKeyMissing(false);
+const ROUTE_COLORS: Record<string, string> = {
+  road: '#001b44',
+  trail: '#006d43',
+};
 
-    try {
-      let centerLat: number;
-      let centerLon: number;
+function getRouteColor(type?: string): string {
+  return ROUTE_COLORS[type ?? 'road'] ?? '#001b44';
+}
 
-      if (selectedStartPoint) {
-        centerLat = selectedStartPoint[1];
-        centerLon = selectedStartPoint[0];
-      } else if (routes.length > 0) {
-        const allCoords = routes.flatMap((r) => r.coordinates || []);
-        if (allCoords.length > 0) {
-          centerLat = allCoords.reduce((sum, c) => sum + c[1], 0) / allCoords.length;
-          centerLon = allCoords.reduce((sum, c) => sum + c[0], 0) / allCoords.length;
-        } else {
-          centerLat = 59.3293;
-          centerLon = 18.0686;
-        }
-      } else {
-        centerLat = 59.3293;
-        centerLon = 18.0686;
-      }
+function parseGpxToRouteData(xml: string): {
+  coordinates: [number, number][];
+  distanceKm: number;
+  elevationGainM: number;
+} {
+  const parser = new DOMParser();
+  const doc2 = parser.parseFromString(xml, 'text/xml');
+  const pts = Array.from(doc2.querySelectorAll('trkpt')) as Element[];
 
-      const response = await fetch('/api/generate-route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start: { lat: centerLat, lng: centerLon },
-          targetDistanceKm: suggestDistance,
-          toleranceKm: 1,
-          familiarityMode: avoidFamiliar ? 'new' : 'familiar',
-          gpxFiles: routes.map((route) => {
-            const points = route.coordinates
-              .map(([lon, lat]) => `<trkpt lat="${lat}" lon="${lon}"></trkpt>`)
-              .join('');
-            return `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><trk><trkseg>${points}</trkseg></trk></gpx>`;
-          }),
-        }),
-      });
+  const coordinates: [number, number][] = pts.map((p) => [
+    parseFloat(p.getAttribute('lon') ?? '0'),
+    parseFloat(p.getAttribute('lat') ?? '0'),
+  ]);
 
-      const payload = await response.json();
+  const elevations: number[] = pts
+    .map((p) => {
+      const el = p.querySelector('ele');
+      return el ? parseFloat(el.textContent ?? '0') : NaN;
+    })
+    .filter((e) => !isNaN(e));
 
-      if (!response.ok) {
-        if (payload?.error?.includes?.('OPENROUTESERVICE_API_KEY')) {
-          setApiKeyMissing(true);
-        }
-        throw new Error(payload?.error || 'Failed to generate route');
-      }
+  let distanceKm = 0;
+  for (let i = 1; i < coordinates.length; i++) {
+    distanceKm += haversineDistance(coordinates[i - 1], coordinates[i]);
+  }
 
-      const bestRoute = payload?.routes?.[0];
-      if (!bestRoute || !Array.isArray(bestRoute.geometry) || bestRoute.geometry.length < 2) {
-        setSuggestedRoute(null);
-        alert('No valid route found for the selected distance and familiarity rules. Try another start point or distance.');
-        return;
-      }
+  let elevationGainM = 0;
+  for (let i = 1; i < elevations.length; i++) {
+    const diff = elevations[i] - elevations[i - 1];
+    if (diff > 0) elevationGainM += diff;
+  }
 
-      const coords: [number, number][] = bestRoute.geometry.map((p: { lat: number; lng: number }) => [p.lng, p.lat]);
-      setSuggestedRoute({
-        coordinates: coords,
-        distance: bestRoute.distanceMeters,
-        elevationGain: 0,
-        name: `${avoidFamiliar ? 'New' : 'Familiar'} Loop - ${(bestRoute.distanceMeters / 1000).toFixed(1)}km`,
-        isRoundTrip: true,
-        startPoint: [centerLon, centerLat],
-        familiarityScore: Math.round((bestRoute.familiarityRatio ?? 0) * 100),
-      });
-      setIsSelectingStartPoint(false);
-    } catch (error) {
-      console.error('Route generation failed:', error);
-      const message = error instanceof Error ? error.message : 'Failed to generate route';
-      if (message.includes('OPENROUTESERVICE_API_KEY')) {
-        setApiKeyMissing(true);
-      } else {
-        alert('Could not generate a valid loop on roads or trails for this request. Try another start point or distance.');
-      }
-    } finally {
-      setIsSuggesting(false);
-    }
-  };
+  return { coordinates, distanceKm, elevationGainM };
+}
 
-  const handleMapClick = (lat: number, lon: number) => {
-    if (isSelectingStartPoint) {
-      setSelectedStartPoint([lon, lat]);
-      setIsSelectingStartPoint(false);
-    }
-  };
+function generateGpx(name: string, coordinates: [number, number][]): string {
+  const trkpts = coordinates
+    .map(([lon, lat]) => `      <trkpt lat="${lat}" lon="${lon}"></trkpt>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="ApexRun">
+  <trk><name>${name}</name><trkseg>
+${trkpts}
+  </trkseg></trk>
+</gpx>`;
+}
 
-  const formatDuration = (minutes: number) => {
-    const hrs = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-  };
+// ─── Auth Screen ─────────────────────────────────────────────────────────────
+function AuthScreen({ darkMode }: { darkMode: boolean }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const formatDate = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
+  const bg = darkMode ? 'bg-[#1b1c1c]' : 'bg-background';
+  const cardBg = darkMode ? 'bg-[#262729]' : 'bg-surface-container-lowest';
 
-  const getMonthOptions = () => {
-    const months = new Set(routes.map(r => r.date.substring(0, 7)));
-    return Array.from(months).sort().reverse();
-  };
-
-  const getDisplayRoutes = () => {
-    if (suggestedRoute) return [];
-    // Filter out routes with invalid/empty coordinates to prevent map rendering crash
-    return filteredRoutes.filter(r => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0]));
-  };
-
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthError("");
-    setAuthSuccess("");
-    
-    if (showForgotPassword) {
-      try {
-        await resetPassword(email);
-        setAuthSuccess("Check your email for password reset instructions");
-        setShowForgotPassword(false);
-      } catch (error: any) {
-        setAuthError(error.message || "Failed to send reset email");
-      }
-      return;
-    }
-    
+    setError('');
+    setLoading(true);
     try {
-      if (isRegistering) {
-        await register(email, password);
-      } else {
-        await login(email, password);
-      }
-      setEmail("");
-      setPassword("");
-    } catch (error: any) {
-      setAuthError(error.message || "Authentication failed");
+      const { login, register } = await import('@/lib/auth');
+      if (mode === 'login') await login(email, password);
+      else await register(email, password);
+    } catch (err: any) {
+      setError(err.message ?? 'Authentication failed');
+    } finally {
+      setLoading(false);
     }
   };
-
-  const handleLogout = async () => {
-    await logout();
-    setRoutes([]);
-    localStorage.removeItem("gpx-routes");
-  };
-
-  // Show loading while checking auth (only if auth is actually loading)
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center">
-        <div className="text-zinc-500">Loading...</div>
-      </div>
-    );
-  }
-
-  // Show login if not authenticated
-  if (!user && !authLoading) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center">
-              <svg className="w-8 h-8 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-white">GPX Runner</h1>
-            <p className="text-zinc-500 mt-2">Sign in to save your routes</p>
-          </div>
-          
-          <form onSubmit={handleAuth} className="space-y-4">
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
-                required
-                minLength={6}
-              />
-            </div>
-            {authError && <p className="text-red-400 text-sm">{authError}</p>}
-            <button
-              type="submit"
-              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-black font-medium rounded-lg hover:from-cyan-400 hover:to-cyan-500 transition-all"
-            >
-              {isRegistering ? "Create Account" : "Sign In"}
-            </button>
-          </form>
-          
-          <p className="text-center text-zinc-500 text-sm mt-6">
-            {isRegistering ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              onClick={() => { setIsRegistering(!isRegistering); setAuthError(""); }}
-              className="text-cyan-400 hover:underline"
-            >
-              {isRegistering ? "Sign In" : "Create Account"}
-            </button>
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show loading while checking auth
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center">
-        <div className="text-zinc-500">Loading...</div>
-      </div>
-    );
-  }
 
   return (
-    <div className={`min-h-screen flex flex-col ${darkMode ? 'bg-[#0a0a0b]' : 'bg-gray-100'} ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-      {/* Header */}
-
-      <header className={`border-b ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]/80' : 'border-gray-200 bg-white/80'} backdrop-blur-md sticky top-0 z-50`}>
-
-        <div className="max-w-7xl mx-auto px-2 md:px-4 py-2 md:py-4 flex items-center justify-between">
-
-          {/* Logo */}
-
-          <div className="flex items-center gap-1 md:gap-3 flex-shrink-0">
-
-            <button onClick={() => window.location.reload()} className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center hover:scale-105 transition-transform">
-
-              <svg className="w-6 h-6 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-
-              </svg>
-
-            </button>
-
-            <div className="hidden sm:block">
-
-              <button onClick={() => window.location.reload()} className="text-lg md:text-xl font-bold bg-gradient-to-r from-cyan-400 to-cyan-200 bg-clip-text text-transparent hover:opacity-80 transition-opacity">GPX Runner</button>
-
-              <p className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>Your runs</p>
-
-            </div>
-
+    <div className={`min-h-screen ${bg} flex items-center justify-center p-4`}>
+      <div className={`${cardBg} rounded-3xl shadow-ambient p-8 w-full max-w-sm`}>
+        <div className="flex items-center gap-3 mb-8 justify-center">
+          <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center">
+            <span className="material-symbols-outlined text-white" style={{ fontVariationSettings: "'FILL' 1" }}>sprint</span>
           </div>
-
-
-          {/* Desktop menu */}
-
-          <div className="hidden md:flex items-center gap-2 md:gap-3">
-
-            <button onClick={() => setDarkMode(!darkMode)} className={`p-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`} title={darkMode ? "Switch to light mode" : "Switch to dark mode"}>
-
-              {darkMode ? <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg> : <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>}
-
-            </button>
-
-            {false && <button onClick={() => setShowSuggestPanel(!showSuggestPanel)} className={`px-3 md:px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center gap-2 ${
-        showSuggestPanel 
-          ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/25' 
-          : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700'
-      }`}>
-
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-
-              Suggest Route
-
-            </button>}
-
-            <button onClick={() => setShowFilters(!showFilters)} className={`px-3 md:px-4 py-2 border rounded-lg transition-all duration-200 flex items-center gap-2 ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
-
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
-
-              Filter
-
-            </button>
-
-            <label className="cursor-pointer px-3 md:px-4 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg transition-all duration-200 flex items-center gap-2">
-
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-
-              Upload route
-
-              <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" />
-
-            </label>
-
-            {user && <div className="flex items-center gap-2"><span className="text-sm text-zinc-400 hidden xl:inline">{user.email}</span><button onClick={handleLogout} className="px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors text-sm">Sign Out</button></div>}
-
-          </div>
-
-
-          {/* Mobile hamburger */}
-
-          <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className={`md:hidden p-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>
-
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-
+          <h1 className="text-2xl font-headline font-extrabold text-primary">Apex Run</h1>
+        </div>
+        <h2 className="text-lg font-headline font-bold text-on-surface mb-6 text-center">
+          {mode === 'login' ? 'Welcome back' : 'Create account'}
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} required
+            className={`w-full px-4 py-3 rounded-xl text-sm font-body outline-none focus:ring-2 focus:ring-primary/30 transition-all ${darkMode ? 'bg-[#303030] text-white placeholder:text-[#888] border border-[#444]' : 'bg-surface-container-low text-on-surface'}`} />
+          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required
+            className={`w-full px-4 py-3 rounded-xl text-sm font-body outline-none focus:ring-2 focus:ring-primary/30 transition-all ${darkMode ? 'bg-[#303030] text-white placeholder:text-[#888] border border-[#444]' : 'bg-surface-container-low text-on-surface'}`} />
+          {error && <p className="text-error text-xs font-label">{error}</p>}
+          <button type="submit" disabled={loading}
+            className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50">
+            {loading ? (
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <><span className="material-symbols-outlined text-sm">{mode === 'login' ? 'login' : 'person_add'}</span>{mode === 'login' ? 'Sign In' : 'Create Account'}</>
+            )}
           </button>
-
-        </div>
-
-
-        {/* Mobile menu dropdown */}
-
-        {mobileMenuOpen && <div className={`md:hidden border-t ${darkMode ? 'border-zinc-800 bg-[#0a0a0b]' : 'border-gray-200 bg-gray-50'} px-2 py-3 space-y-2`}>
-
-          <button onClick={() => setDarkMode(!darkMode)} className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-900' : 'border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-100'}`}>{darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}</button>
-
-          {false && <button onClick={() => { setShowSuggestPanel(!showSuggestPanel); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-400 hover:to-pink-500 text-white font-medium rounded-lg">💡 Suggest Route</button>}
-
-          <button onClick={() => { setShowFilters(!showFilters); setMobileMenuOpen(false); }} className={`w-full text-left px-3 py-2 border rounded-lg transition-all ${showFilters || filter.month ? "border-cyan-500 bg-cyan-500/10 text-cyan-400" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>🔍 Filter</button>
-
-          <label className="w-full block px-3 py-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-black font-medium rounded-lg cursor-pointer text-center">➕ Upload route<input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={handleFileUpload} className="hidden" /></label>
-
-          {user && <><div className="px-3 py-2 text-sm text-zinc-400">{user.email}</div><button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600 rounded-lg transition-colors">🚪 Sign Out</button></> }
-
-        </div>}
-
-      </header>
-
-      {/* Suggest Route Panel - hidden when using left panel controls */}
-      {false && showSuggestPanel && (
-        <div className="border-b border-zinc-800 bg-zinc-900/95 p-4">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Distance:</label>
-              <select
-                value={suggestDistance}
-                onChange={(e) => setSuggestDistance(Number(e.target.value))}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value={3}>3 km</option>
-                <option value={5}>5 km</option>
-                <option value={10}>10 km</option>
-                <option value={15}>15 km</option>
-                <option value={21}>21 km (half marathon)</option>
-                <option value={42}>42 km (marathon)</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Route type:</label>
-              <select
-                value={avoidFamiliar ? 'unfamiliar' : 'familiar'}
-                onChange={(e) => setAvoidFamiliar(e.target.value === 'unfamiliar')}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="unfamiliar">🆕 New paths (unfamiliar)</option>
-                <option value="familiar">🔄 Familiar paths</option>
-              </select>
-            </div>
-            <button
-              onClick={() => setIsSelectingStartPoint(true)}
-              className={`px-4 py-2 border rounded-lg transition-colors flex items-center gap-2 ${
-                selectedStartPoint 
-                  ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
-                  : isSelectingStartPoint
-                  ? "border-amber-500 bg-amber-500/10 text-amber-400"
-                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              {selectedStartPoint ? "Start point set ✓" : "Pick start point"}
-            </button>
-            <button
-              onClick={getSuggestion}
-              disabled={isSuggesting}
-              className="px-4 py-2 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              {isSuggesting ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Generating route...
-                </>
-              ) : (
-                'Get Suggestion'
-              )}
-            </button>
-            {isSelectingStartPoint && (
-              <span className="text-amber-400 text-sm">👆 Click on the map to set start point</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Filters Panel */}
-      {showFilters && (
-        <div className="border-b border-zinc-800 bg-zinc-900/95 p-4">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Month:</label>
-              <select
-                value={filter.month || ''}
-                onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="">All months</option>
-                {getMonthOptions().map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-zinc-400">Type:</label>
-              <select
-                value={filter.type || 'all'}
-                onChange={(e) => setFilter({ ...filter, type: e.target.value === 'all' ? undefined : (e.target.value as 'road' | 'trail') })}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white"
-              >
-                <option value="all">All types</option>
-                <option value="road">🛣️ Road</option>
-                <option value="trail">🏔️ Trail</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className={`text-sm ${darkMode ? 'text-zinc-400' : 'text-gray-600'}`}>Distance (km):</span>
-              <input
-                type="number"
-                placeholder="Min"
-                value={filter.minDistance || ''}
-                onChange={(e) => setFilter({ ...filter, minDistance: e.target.value ? Number(e.target.value) : undefined })}
-                className={`w-16 px-2 py-1 text-sm rounded ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'}`}
-              />
-              <span className={darkMode ? 'text-zinc-500' : 'text-gray-400'}>-</span>
-              <input
-                type="number"
-                placeholder="Max"
-                value={filter.maxDistance || ''}
-                onChange={(e) => setFilter({ ...filter, maxDistance: e.target.value ? Number(e.target.value) : undefined })}
-                className={`w-16 px-2 py-1 text-sm rounded ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'}`}
-              />
-            </div>
-            <button
-              onClick={() => setFilter({})}
-              className="px-3 py-2 text-sm text-zinc-400 hover:text-white transition-colors"
-            >
-              Clear filters
-            </button>
-          </div>
-        </div>
-      )}
-
-      <main className="max-w-7xl mx-auto px-1 py-2 md:py-6 flex flex-1 flex-col md:flex-row gap-4 md:gap-6">
-        {/* Sidebar */}
-        <aside className={`w-full md:w-80 flex-shrink-0 space-y-4 order-3 md:order-1 max-h-[calc(100vh_-_92px)] overflow-y-auto ${darkMode ? '' : 'bg-white rounded-2xl p-4'}`}>
-          {/* Routes List - hidden when suggesting routes */}
-          {!showSuggestPanel && (
-          <div className={`rounded-2xl overflow-hidden ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
-            <button
-              onClick={() => setMobileRoutesCollapsed(!mobileRoutesCollapsed)}
-              className={`w-full p-4 flex items-center justify-between ${darkMode ? 'border-zinc-800' : 'border-gray-200'}`} style={{ borderBottomWidth: mobileRoutesCollapsed ? 0 : 1 }}
-            >
-              <h2 className="font-medium">Your Routes</h2>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>
-                  {filteredRoutes.length !== routes.length 
-                    ? `${filteredRoutes.length} / ${routes.length} routes` 
-                    : `${routes.length} routes`}
-                </span>
-                <span className="md:hidden text-xs">{mobileRoutesCollapsed ? '▼' : '▲'}</span>
-              </div>
-            </button>
-            
-            {mobileRoutesCollapsed ? null : (
-            <>
-            {routes.length === 0 ? (
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-800 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                </div>
-                <p className="text-zinc-400 mb-2">No routes yet</p>
-                <p className="text-xs text-zinc-600">Upload GPX files to get started</p>
-              </div>
-            ) : (
-              <div className="max-h-96 overflow-y-auto">
-                {getDisplayRoutes().map((route, index) => (
-                  <div
-                    key={route.id}
-                    onClick={() => { if (selectedRoute?.id === route.id) { setSelectedRoute(null); } else { setSelectedRoute(route); } setSuggestedRoute(null); }}
-                    className={`p-4 border-b border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-800/30 ${
-                      selectedRoute?.id === route.id ? "bg-zinc-800/50 border-l-2 border-l-cyan-400" : ""
-                    }`}
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium truncate">{route.name}</h3>
-                        <p className="text-xs text-zinc-500 mt-1">{formatDate(route.date)}</p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingRoute(route);
-                            setEditName(route.name);
-                            setEditType(route.type);
-                          }}
-                          className="p-1 text-zinc-600 hover:text-cyan-400 transition-colors"
-                          title="Edit route"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteRoute(route.id);
-                          }}
-                          className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
-                          title="Delete route"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 mt-2 text-xs text-zinc-500">
-                      <span>{(route.distance / 1000).toFixed(1)} km</span>
-                      <span>↑{Math.round(route.elevationGain)}m</span>
-                      {route.type && (
-                        <span className={route.type === 'road' ? 'text-cyan-400' : 'text-amber-400'}>
-                          {route.type === 'road' ? '🛣️ Road' : '🏔️ Trail'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            </>
-          )}
-          </div>
-
-          )}
-          {/* Toggle Heatmap */}
-          {false && routes.length > 0 && (
-            <button
-              onClick={() => setShowHeatmap(!showHeatmap)}
-              className={`w-full py-3 px-4 rounded-xl border transition-all duration-200 flex items-center justify-center gap-2 ${
-                showHeatmap
-                  ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-400"
-                  : "bg-zinc-800/30 border-zinc-700 text-zinc-400 hover:border-zinc-600"
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              {showHeatmap ? "Heatmap ON" : "Heatmap OFF"}
-            </button>
-          )}
-        </aside>
-          {/* Stats Card - Mobile only, shown at top on mobile */}
-          <div className="order-1 md:hidden">
-            {!showSuggestPanel && stats && (
-            <div className={`rounded-2xl p-5 animate-fade-in ${darkMode ? 'bg-zinc-900/50 border border-zinc-800' : 'bg-white border border-gray-200'}`}>
-              {/* Mobile collapse toggle */}
-              <button
-                onClick={() => setMobileStatsCollapsed(!mobileStatsCollapsed)}
-                className={`w-full flex items-center justify-between mb-4 md:mb-0 ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}
-              >
-                <h2 className={`text-sm font-medium uppercase tracking-wider ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>My Running</h2>
-                <span className="md:hidden text-xs">{mobileStatsCollapsed ? '▼' : '▲'}</span>
-              </button>
-              <div className={`${mobileStatsCollapsed ? 'hidden md:block' : 'block'}`}>
-              <div className="grid grid-cols-2 gap-4">
-                <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
-                  <div className="text-2xl font-bold text-cyan-500">{stats.totalRuns}</div>
-                  <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>Runs</div>
-                </div>
-                <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
-                  <div className="text-2xl font-bold text-pink-500">{stats.totalDistance}</div>
-                  <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>km total</div>
-                </div>
-                <div className={`rounded-xl p-3 ${darkMode ? 'bg-zinc-800/50' : 'bg-gray-100'}`}>
-                  <div className="text-2xl font-bold text-violet-500">{stats.totalElevation}</div>
-                  <div className={`text-xs ${darkMode ? 'text-zinc-500' : 'text-gray-500'}`}>m elevation</div>
-                </div>
-              </div>
-              </div>
-              <div className="hidden md:block h-0" />{/* spacer on desktop */}
-            </div>
-          )}
-
-          {/* Suggest Route Controls - shown in left panel when active */}
-          {showSuggestPanel && (
-            <div className={`rounded-2xl overflow-hidden ${darkMode ? 'bg-zinc-900/50 border border-pink-800' : 'bg-white border border-pink-200'}`}>
-              <div className={`p-4 flex items-center justify-between ${darkMode ? 'border-pink-800' : 'border-pink-200'}`} style={{ borderBottomWidth: 1 }}>
-                <h2 className="font-medium text-pink-400">Generate Route</h2>
-                <button onClick={() => setShowSuggestPanel(false)} className={`text-xs ${darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}`}>✕ Close</button>
-              </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <label className={`text-sm font-medium block mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Distance (km)</label>
-                  <select
-                    value={suggestDistance}
-                    onChange={(e) => setSuggestDistance(Number(e.target.value))}
-                    className={`w-full px-3 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300'}`}
-                  >
-                    <option value={3}>3 km</option>
-                    <option value={5}>5 km</option>
-                    <option value={10}>10 km</option>
-                    <option value={15}>15 km</option>
-                    <option value={21}>21 km (half marathon)</option>
-                    <option value={42}>42 km (marathon)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={`text-sm font-medium block mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route type</label>
-                  <select
-                    value={avoidFamiliar ? 'unfamiliar' : 'familiar'}
-                    onChange={(e) => setAvoidFamiliar(e.target.value === 'unfamiliar')}
-                    className={`w-full px-3 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300'}`}
-                  >
-                    <option value="unfamiliar">🆕 New paths</option>
-                    <option value="familiar">🔄 Familiar paths</option>
-                  </select>
-                </div>
-                <button
-                  onClick={getSuggestion}
-                  disabled={isSuggesting}
-                  className="w-full py-3 px-4 bg-pink-500 hover:bg-pink-400 text-white rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {isSuggesting ? 'Generating...' : 'Generate Route'}
-                </button>
-                <button
-                  onClick={() => setIsSelectingStartPoint(true)}
-                  className={`w-full py-2 px-4 border rounded-lg transition-colors flex items-center justify-center gap-2 ${
-                    selectedStartPoint 
-                      ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
-                      : isSelectingStartPoint
-                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
-                      : "border-zinc-700 text-zinc-400 hover:border-zinc-600"
-                  }`}
-                >
-                  {selectedStartPoint ? "📍 Start point set" : "📍 Pick start point"}
-                </button>
-                {selectedStartPoint && (
-                  <button
-                    onClick={() => setSelectedStartPoint(null)}
-                    className={`w-full py-2 px-4 rounded-lg border ${darkMode ? 'border-zinc-700 text-zinc-400' : 'border-gray-300 text-gray-600'}`}
-                  >
-                    ✕ Clear start point
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          
-          </div>
-
-
-        {/* Map - fixed height, doesn't shrink */}
-        <div className="flex-1 flex flex-col md:h-auto md:min-h-[600px] flex-shrink-0 order-2 md:order-none">
-          {/* Suggested Route Info Panel */}
-          {suggestedRoute && (
-            <div className="mb-4 p-4 bg-gradient-to-r from-pink-500/10 to-violet-500/10 border border-pink-500/30 rounded-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <h3 className="font-bold text-pink-400">{suggestedRoute.name}</h3>
-                  <div className="flex gap-4 mt-1 text-sm text-zinc-400">
-                    <span>📏 {(suggestedRoute.distance / 1000).toFixed(1)} km</span>
-                    <span>⬆️ {suggestedRoute.elevationGain}m elevation</span>
-                    <span title="How much of this route overlaps with your previous runs">
-                      {suggestedRoute.familiarityScore !== undefined 
-                        ? `🔄 ${suggestedRoute.familiarityScore}% familiar`
-                        : (avoidFamiliar ? "🆕 New paths" : "🔄 Familiar paths")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => downloadGPX(suggestedRoute)}
-                    className="px-3 py-2 bg-pink-500 hover:bg-pink-400 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Download GPX
-                  </button>
-                  <button
-                    onClick={discardSuggestion}
-                    className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm rounded-lg transition-colors"
-                  >
-                    Discard
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          <div className={`flex-1 min-h-[300px] md:h-auto ${darkMode ? 'bg-zinc-900' : 'bg-gray-200'} border ${darkMode ? 'border-zinc-800' : 'border-gray-300'} rounded-2xl overflow-hidden${editingRoute ? ' pointer-events-none select-none' : ''}`}>
-            {routes.length > 0 || (suggestedRoute && suggestedRoute.coordinates?.length > 0) ? (
-              <MapWithNoSSR
-                routes={suggestedRoute ? [] : getDisplayRoutes()}
-                selectedRoute={selectedRoute}
-                showHeatmap={showHeatmap}
-                suggestedRoute={suggestedRoute}
-                selectedStartPoint={selectedStartPoint}
-                onMapClick={handleMapClick}
-                isSelectingStartPoint={isSelectingStartPoint}
-                darkMode={darkMode}
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
-                <div className="w-24 h-24 mb-6 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center animate-pulse-glow">
-                  <svg className="w-12 h-12 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                </div>
-                <h3 className="text-xl font-medium text-zinc-400 mb-2">Ready to map your runs</h3>
-                <p className="text-zinc-600 text-center max-w-md">
-                  Upload GPX files from your watch or running app to visualize your routes on the map
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
-
-      {/* Loading overlay */}
-      {isLoading && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 flex items-center gap-4">
-            <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            <span>Processing GPX...</span>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Route Modal */}
-      {editingRoute && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
-          <div className={`w-full max-w-md rounded-2xl p-6 ${darkMode ? 'bg-zinc-900 border border-zinc-700' : 'bg-white border border-gray-200'}`}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Edit Route</h2>
-              <button
-                onClick={() => setEditingRoute(null)}
-                className={`p-2 rounded-lg ${darkMode ? 'text-zinc-400 hover:text-white hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route Name</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className={`w-full px-4 py-2 rounded-lg border ${darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
-                  placeholder="Route name"
-                />
-              </div>
-
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-zinc-300' : 'text-gray-700'}`}>Route Type</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setEditType('road')}
-                    className={`px-4 py-3 rounded-lg border transition-all flex flex-col items-center gap-1 ${
-                      editType === 'road'
-                        ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
-                        : darkMode
-                        ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                        : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                    }`}
-                  >
-                    <span className="text-xl">🛣️</span>
-                    <span className="text-sm font-medium">Road</span>
-                  </button>
-                  <button
-                    onClick={() => setEditType('trail')}
-                    className={`px-4 py-3 rounded-lg border transition-all flex flex-col items-center gap-1 ${
-                      editType === 'trail'
-                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                        : darkMode
-                        ? 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                        : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                    }`}
-                  >
-                    <span className="text-xl">🏔️</span>
-                    <span className="text-sm font-medium">Trail</span>
-                  </button>
-                </div>
-                <button
-                  onClick={() => setEditType(undefined)}
-                  className={`w-full mt-2 px-4 py-2 text-sm rounded-lg border transition-all ${
-                    editType === undefined
-                      ? 'border-zinc-500 bg-zinc-800/50 text-zinc-400'
-                      : darkMode
-                      ? 'border-zinc-700 text-zinc-500 hover:border-zinc-600'
-                      : 'border-gray-300 text-gray-500 hover:border-gray-400'
-                  }`}
-                >
-                  No type
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setEditingRoute(null)}
-                className={`flex-1 px-4 py-2 rounded-lg border transition-colors ${darkMode ? 'border-zinc-700 text-zinc-400 hover:bg-zinc-800' : 'border-gray-300 text-gray-600 hover:bg-gray-100'}`}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (editingRoute && editName.trim()) {
-                    updateRoute(editingRoute.id, editName.trim(), editType);
-                  }
-                }}
-                disabled={!editName.trim()}
-                className="flex-1 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        </form>
+        <p className="text-xs text-on-surface-variant font-label text-center mt-4">
+          {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+          <button onClick={() => setMode(mode === 'login' ? 'register' : 'login')} className="text-primary font-semibold hover:underline ml-1">
+            {mode === 'login' ? 'Sign up' : 'Sign in'}
+          </button>
+        </p>
+      </div>
     </div>
   );
 }
-// Force Vercel redeploy to pick up Firebase env var changes
+
+// ─── Route Edit Modal ─────────────────────────────────────────────────────────
+function RouteEditModal({ route, darkMode, onSave, onClose, onDelete }: {
+  route: GPXRoute; darkMode: boolean;
+  onSave: (updates: Partial<GPXRoute>) => void; onClose: () => void; onDelete: () => void;
+}) {
+  const [name, setName] = useState(route.name);
+  const [type, setType] = useState<'road' | 'trail'>(route.type ?? 'road');
+  const bg = darkMode ? 'bg-[#262729]' : 'bg-surface-container-lowest';
+  const inputBg = darkMode ? 'bg-[#303030] text-white border border-[#444]' : 'bg-surface-container-low text-on-surface';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className={`${bg} rounded-3xl shadow-ambient p-6 w-full max-w-sm`}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-headline font-extrabold text-primary">Edit Route</h2>
+          <button onClick={onClose} className="p-2 hover:bg-surface-container rounded-xl transition-colors">
+            <span className="material-symbols-outlined text-on-surface-variant text-xl">close</span>
+          </button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-label font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wider">Route Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+              className={`w-full px-4 py-3 rounded-xl text-sm font-body outline-none focus:ring-2 focus:ring-primary/30 transition-all ${inputBg}`} />
+          </div>
+          <div>
+            <label className="block text-xs font-label font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wider">Route Type</label>
+            <div className="flex gap-2">
+              {(['road', 'trail'] as const).map((t) => (
+                <button key={t} onClick={() => setType(t)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-label font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${type === t ? (t === 'road' ? 'bg-primary text-on-primary' : 'bg-secondary text-on-secondary') : darkMode ? 'bg-[#303030] text-[#aaa]' : 'bg-surface-container-low text-on-surface-variant'}`}>
+                  <span className="material-symbols-outlined text-sm">{t === 'road' ? 'route' : 'terrain'}</span>{t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button onClick={onDelete}
+            className="flex-1 py-3 rounded-xl text-sm font-label font-semibold bg-error-container text-on-error-container hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+            <span className="material-symbols-outlined text-sm">delete</span>Delete
+          </button>
+          <button onClick={() => onSave({ name: name || 'Untitled', type })}
+            className="flex-1 py-3 rounded-xl text-sm font-label font-bold bg-primary text-on-primary hover:opacity-90 transition-opacity">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Upload Modal ─────────────────────────────────────────────────────────────
+function UploadModal({ darkMode, onClose, onUpload }: {
+  darkMode: boolean;
+  onClose: () => void;
+  onUpload: (name: string, type: 'road' | 'trail', file: File) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState('');
+  const [type, setType] = useState<'road' | 'trail'>('road');
+  const [parsed, setParsed] = useState<{ distanceKm: number; elevationGainM: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const bg = darkMode ? 'bg-[#262729]' : 'bg-surface-container-lowest';
+  const inputBg = darkMode ? 'bg-[#303030] text-white border border-[#444]' : 'bg-surface-container-low text-on-surface';
+
+  const handleFileChange = async (f: File) => {
+    if (!f.name.endsWith('.gpx')) return;
+    setFile(f);
+    if (!name) setName(f.name.replace(/\.gpx$/i, ''));
+    const text = await f.text();
+    try { setParsed(parseGpxToRouteData(text)); } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className={`${bg} rounded-3xl shadow-ambient p-6 w-full max-w-md`}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-headline font-extrabold text-primary">Upload GPX</h2>
+          <button onClick={onClose} className="p-2 hover:bg-surface-container rounded-xl transition-colors">
+            <span className="material-symbols-outlined text-on-surface-variant text-xl">close</span>
+          </button>
+        </div>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFileChange(f); }}
+          onClick={() => fileInputRef.current?.click()}
+          className={`border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all ${dragging ? 'border-primary bg-primary-fixed/10' : darkMode ? 'border-[#444] hover:border-primary/50' : 'border-outline-variant hover:border-primary'}`}>
+          <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-3 block">{file ? 'check_circle' : 'upload_file'}</span>
+          <p className="text-sm font-label font-semibold text-on-surface">{file ? file.name : 'Drop your .GPX file here'}</p>
+          <p className="text-xs text-on-surface-variant mt-1 font-label">or click to browse</p>
+          <input ref={fileInputRef} type="file" accept=".gpx" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileChange(e.target.files[0])} />
+        </div>
+        {parsed && (
+          <div className="mt-3 flex gap-3">
+            <div className="flex-1 bg-surface-container-low rounded-xl p-3 text-center">
+              <p className="text-[10px] font-label uppercase tracking-wider text-on-surface-variant">Distance</p>
+              <p className="text-sm font-headline font-extrabold text-primary">{parsed.distanceKm.toFixed(1)} km</p>
+            </div>
+            <div className="flex-1 bg-surface-container-low rounded-xl p-3 text-center">
+              <p className="text-[10px] font-label uppercase tracking-wider text-on-surface-variant">Elevation</p>
+              <p className="text-sm font-headline font-extrabold text-primary">{Math.round(parsed.elevationGainM)} m</p>
+            </div>
+          </div>
+        )}
+        {file && (
+          <div className="mt-4 space-y-3">
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Route name"
+              className={`w-full px-4 py-3 rounded-xl text-sm font-body outline-none focus:ring-2 focus:ring-primary/30 transition-all ${inputBg}`} />
+            <div className="flex gap-2">
+              {(['road', 'trail'] as const).map((t) => (
+                <button key={t} onClick={() => setType(t)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-label font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${type === t ? (t === 'road' ? 'bg-primary text-on-primary' : 'bg-secondary text-on-secondary') : darkMode ? 'bg-[#303030] text-[#aaa]' : 'bg-surface-container-low text-on-surface-variant'}`}>
+                  <span className="material-symbols-outlined text-sm">{t === 'road' ? 'route' : 'terrain'}</span>{t}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => onUpload(name || file.name.replace(/\.gpx$/i, ''), type, file)}
+              className="w-full bg-primary text-on-primary py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all">
+              <span className="material-symbols-outlined text-sm">cloud

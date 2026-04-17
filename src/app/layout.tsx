@@ -1,10 +1,20 @@
 import "leaflet/dist/leaflet.css";
 
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Manrope, Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+  weight: ["400", "600", "700", "800"],
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
   title: "GPX Runner - Visualize Your Runs",
@@ -19,26 +29,92 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+          rel="stylesheet"
+        />
         <script src="https://cdn.tailwindcss.com"></script>
         <script dangerouslySetInnerHTML={{
           __html: `
             tailwind.config = {
+              darkMode: "class",
               theme: {
                 extend: {
                   colors: {
-                    cyan: { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' },
-                    pink: { 400: '#f472b6', 500: '#ec4899', 600: '#db2777' },
-                    violet: { 400: '#a78bfa', 500: '#8b5cf6' },
-                    amber: { 400: '#fbbf24', 500: '#f59e0b' },
-                    zinc: { 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b' },
-                  }
-                }
-              }
-            }
+                    "on-surface-variant": "#434750",
+                    "on-secondary-fixed": "#002111",
+                    "secondary-fixed-dim": "#59de9b",
+                    "secondary-fixed": "#78fbb6",
+                    "background": "#fbf9f8",
+                    "on-tertiary-container": "#c39100",
+                    "primary-container": "#002f6c",
+                    "on-tertiary-fixed": "#261a00",
+                    secondary: "#006d43",
+                    "on-secondary-fixed-variant": "#005232",
+                    "surface-container-high": "#eae8e7",
+                    "outline-variant": "#c4c6d2",
+                    "on-primary-container": "#7999dc",
+                    error: "#ba1a1a",
+                    "on-tertiary-fixed-variant": "#5c4300",
+                    primary: "#001b44",
+                    "primary-fixed": "#d8e2ff",
+                    "tertiary-fixed-dim": "#fbbc00",
+                    surface: "#fbf9f8",
+                    outline: "#747781",
+                    "on-primary-fixed-variant": "#224583",
+                    "surface-tint": "#3c5d9c",
+                    "inverse-surface": "#303030",
+                    "on-surface": "#1b1c1c",
+                    "primary-fixed-dim": "#aec6ff",
+                    "on-primary": "#ffffff",
+                    "inverse-primary": "#aec6ff",
+                    "surface-container-highest": "#e4e2e2",
+                    "on-background": "#1b1c1c",
+                    "inverse-on-surface": "#f2f0f0",
+                    "surface-variant": "#e4e2e2",
+                    "surface-container": "#efeded",
+                    "on-primary-fixed": "#001a42",
+                    "secondary-container": "#75f8b3",
+                    "on-tertiary": "#ffffff",
+                    "on-secondary-container": "#007147",
+                    "surface-bright": "#fbf9f8",
+                    "surface-container-lowest": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "tertiary-container": "#412e00",
+                    "tertiary-fixed": "#ffdfa0",
+                    "surface-container-low": "#f5f3f3",
+                    "error-container": "#ffdad6",
+                    "on-error": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    tertiary: "#271a00",
+                    "surface-dim": "#dbd9d9",
+                  },
+                  borderRadius: {
+                    DEFAULT: "0.125rem",
+                    lg: "0.25rem",
+                    xl: "0.5rem",
+                    full: "0.75rem",
+                  },
+                  fontFamily: {
+                    headline: ["Manrope", "sans-serif"],
+                    body: ["Inter", "sans-serif"],
+                    label: ["Inter", "sans-serif"],
+                  },
+                  boxShadow: {
+                    ambient: "0 20px 40px rgba(0, 27, 68, 0.06)",
+                    card: "0 4px 12px rgba(0, 27, 68, 0.03)",
+                  },
+                },
+              },
+            };
           `
         }} />
       </head>
-      <body className={inter.className}>{children}</body>
+      <body className={`${manrope.variable} ${inter.variable}`}>
+        {children}
+      </body>
     </html>
   );
 }
