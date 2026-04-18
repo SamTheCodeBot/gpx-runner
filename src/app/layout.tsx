@@ -1,44 +1,26 @@
 import "leaflet/dist/leaflet.css";
-
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Manrope } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "GPX Runner - Visualize Your Runs",
-  description: "Upload GPX files and visualize your running routes with heatmaps",
+  title: "Apex Run — Personal Performance Hub",
+  description: "Track your runs, visualize routes, discover new paths",
+  icons: {
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>",
+  },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${manrope.variable}`}>
       <head>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script dangerouslySetInnerHTML={{
-          __html: `
-            tailwind.config = {
-              theme: {
-                extend: {
-                  colors: {
-                    cyan: { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' },
-                    pink: { 400: '#f472b6', 500: '#ec4899', 600: '#db2777' },
-                    violet: { 400: '#a78bfa', 500: '#8b5cf6' },
-                    amber: { 400: '#fbbf24', 500: '#f59e0b' },
-                    zinc: { 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b' },
-                  }
-                }
-              }
-            }
-          `
-        }} />
+        <link rel="material-icons" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-0..200&display=swap" />
       </head>
-      <body className={inter.className}>{children}</body>
+      <body className="font-body antialiased">{children}</body>
     </html>
   );
 }
