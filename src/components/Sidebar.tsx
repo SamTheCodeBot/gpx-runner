@@ -6,7 +6,7 @@ import type { User } from "firebase/auth";
 interface SidebarProps {
   user: User | null;
   onLogout: () => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
@@ -69,13 +69,14 @@ export function Sidebar({ user, onLogout, fileInputRef, onFileUpload }: SidebarP
 interface MobileBottomNavProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export function MobileBottomNav({ activeTab, onTabChange, fileInputRef, onFileUpload }: MobileBottomNavProps) {
   return (
-    <nav className="md:hidden bg-surface-container-lowest border-t border-outline-variant/20 flex shrink-0 pb-safe">
+    <nav className="md:hidden bg-surface-container-lowest border-t border-outline-variant/20 flex shrink-0 pb-safe z-30">
+      {/* Routes tab */}
       <button
         onClick={() => onTabChange("routes")}
         className={`flex-1 flex flex-col items-center gap-0.5 py-3 transition-colors ${activeTab === "routes" ? "text-primary" : "text-on-surface-variant"}`}
@@ -84,6 +85,7 @@ export function MobileBottomNav({ activeTab, onTabChange, fileInputRef, onFileUp
         <span className="text-[10px] font-bold">Routes</span>
       </button>
 
+      {/* Upload tab */}
       <label className={`flex-1 flex flex-col items-center gap-0.5 py-3 cursor-pointer transition-colors ${activeTab === "add" ? "text-primary" : "text-on-surface-variant"}`}>
         <Icon name="add" className="text-xl" />
         <span className="text-[10px] font-bold">Add GPX</span>
@@ -96,12 +98,22 @@ export function MobileBottomNav({ activeTab, onTabChange, fileInputRef, onFileUp
         />
       </label>
 
+      {/* Map tab */}
       <button
-        onClick={() => onTabChange("suggest")}
-        className={`flex-1 flex flex-col items-center gap-0.5 py-3 transition-colors ${activeTab === "suggest" ? "text-primary" : "text-on-surface-variant"}`}
+        onClick={() => onTabChange("map")}
+        className={`flex-1 flex flex-col items-center gap-0.5 py-3 transition-colors ${activeTab === "map" ? "text-primary" : "text-on-surface-variant"}`}
       >
-        <Icon name="auto_awesome" className="text-xl" />
-        <span className="text-[10px] font-bold">Suggest</span>
+        <Icon name="map" filled={activeTab === "map"} className="text-xl" />
+        <span className="text-[10px] font-bold">Map</span>
+      </button>
+
+      {/* Profile tab */}
+      <button
+        onClick={() => onTabChange("profile")}
+        className={`flex-1 flex flex-col items-center gap-0.5 py-3 transition-colors ${activeTab === "profile" ? "text-primary" : "text-on-surface-variant"}`}
+      >
+        <Icon name="account_circle" filled={activeTab === "profile"} className="text-xl" />
+        <span className="text-[10px] font-bold">Profile</span>
       </button>
     </nav>
   );

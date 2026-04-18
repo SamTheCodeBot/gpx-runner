@@ -17,7 +17,7 @@ interface RouteListProps {
   onDeleteRoute: (id: string) => void;
   onDownloadRoute: (r: GPXRoute) => void;
   onEditRoute: (r: GPXRoute) => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 

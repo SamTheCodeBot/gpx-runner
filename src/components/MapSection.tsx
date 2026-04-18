@@ -25,6 +25,65 @@ interface MapSectionProps {
   onMapClick: (lat: number, lon: number) => void;
 }
 
+function MapLegend() {
+  return (
+    <div className="absolute bottom-4 left-4 z-20">
+      <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#006d43" }} />
+          <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Road</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#B22222" }} />
+          <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Trail</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeatmapToggle({ showHeatmap, onToggleHeatmap }: { showHeatmap: boolean; onToggleHeatmap: () => void }) {
+  return (
+    <div className="absolute top-4 right-4 z-20">
+      <button
+        onClick={onToggleHeatmap}
+        className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
+          showHeatmap
+            ? "bg-primary text-on-primary"
+            : "bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container"
+        }`}
+      >
+        <Icon name="layers" className="text-xs inline mr-1" />
+        {showHeatmap ? "Heatmap ON" : "Heatmap OFF"}
+      </button>
+    </div>
+  );
+}
+
+function LoadingOverlay({ isLoading }: { isLoading: boolean }) {
+  if (!isLoading) return null;
+  return (
+    <div className="absolute inset-0 bg-[#fbf9f8]/70 flex items-center justify-center z-30">
+      <div className="bg-surface-container-lowest px-6 py-4 rounded-2xl shadow-lg flex items-center gap-3">
+        <Icon name="progress_activity" className="text-primary animate-spin text-xl" />
+        <span className="text-sm font-medium text-on-surface">Processing GPX&hellip;</span>
+      </div>
+    </div>
+  );
+}
+
+function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: boolean }) {
+  if (!isSelectingStartPoint) return null;
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center pt-4 pointer-events-none">
+      <div className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs font-bold shadow-lg pointer-events-auto">
+        <Icon name="place" className="text-xs inline mr-1" />
+        Click the map to set start point
+      </div>
+    </div>
+  );
+}
+
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap,
   onToggleHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
@@ -35,7 +94,7 @@ export function MapSection({
   );
 
   return (
-    <div className="w-full bg-surface-container-lowest rounded-2xl overflow-hidden relative shadow-sm" style={{ height: "320px" }}>
+    <div className="w-full bg-surface-container-lowest rounded-2xl overflow-hidden relative shadow-sm md:shadow-card" style={{ minHeight: "280px", height: "min(60vh, 400px)" }}>
       <MapWithNoSSR
         routes={displayRoutes}
         selectedRoute={selectedRoute}
@@ -47,54 +106,10 @@ export function MapSection({
         darkMode={false}
       />
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-20">
-        <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#2E8B57" }} />
-            <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Road</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#B22222" }} />
-            <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Trail</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Heatmap toggle */}
-      <div className="absolute top-4 right-4 z-20">
-        <button
-          onClick={onToggleHeatmap}
-          className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
-            showHeatmap
-              ? "bg-primary text-on-primary"
-              : "bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container"
-          }`}
-        >
-          <Icon name="layers" className="text-xs inline mr-1" />
-          {showHeatmap ? "Heatmap ON" : "Heatmap OFF"}
-        </button>
-      </div>
-
-      {/* Loading overlay */}
-      {isLoading && (
-        <div className="absolute inset-0 bg-[#fbf9f8]/70 flex items-center justify-center z-30">
-          <div className="bg-surface-container-lowest px-6 py-4 rounded-2xl shadow-lg flex items-center gap-3">
-            <Icon name="progress_activity" className="text-primary animate-spin text-xl" />
-            <span className="text-sm font-medium text-on-surface">Processing GPX&hellip;</span>
-          </div>
-        </div>
-      )}
-
-      {/* Start point selection hint */}
-      {isSelectingStartPoint && (
-        <div className="absolute inset-0 z-20 flex items-start justify-center pt-4 pointer-events-none">
-          <div className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs font-bold shadow-lg pointer-events-auto">
-            <Icon name="place" className="text-xs inline mr-1" />
-            Click the map to set start point
-          </div>
-        </div>
-      )}
+      <MapLegend />
+      <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
+      <LoadingOverlay isLoading={isLoading} />
+      <StartPointHint isSelectingStartPoint={isSelectingStartPoint} />
     </div>
   );
 }

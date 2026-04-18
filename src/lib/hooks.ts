@@ -38,8 +38,9 @@ export function useGPXRoutes(userId: string | null) {
 
   // Sync from Firestore when user is available
   useEffect(() => {
-    if (!userId || !db) return;
+    if (!userId) return;
     const load = async () => {
+      if (!db) return;
       try {
         const q = query(collection(db, "routes"), where("userId", "==", userId));
         const snap = await getDocs(q);
@@ -151,7 +152,7 @@ export function useGPXRoutes(userId: string | null) {
         .map((r) => r.id);
 
       const updated = currentRoutes.map((r) =>
-        dupIds.includes(r.id) ? { ...r, name, type } : r
+        dupIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | undefined } : r
       );
       saveRoutes(updated);
 

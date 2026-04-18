@@ -87,7 +87,7 @@ export default function Home() {
 
   const handleUpdateRoute = (id: string, name: string, type: string) => {
     updateRoute(id, name, type, routes);
-    if (selectedRoute && selectedRoute.id === id) setSelectedRoute({ ...selectedRoute, name, type });
+    if (selectedRoute && selectedRoute.id === id) setSelectedRoute({ ...selectedRoute, name, type: type as "road" | "trail" | undefined });
     setEditingRoute(null);
   };
 
@@ -125,6 +125,7 @@ export default function Home() {
         isRegistering={isRegistering} setIsRegistering={setIsRegistering}
         showForgotPassword={showForgotPassword} setShowForgotPassword={setShowForgotPassword}
         handleAuth={handleAuth}
+        setAuthError={setAuthError}
       />
     );
   }
@@ -150,18 +151,7 @@ export default function Home() {
               <span className="text-sm font-extrabold text-primary font-headline">Apex Run</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowSuggestPanel(!showSuggestPanel)}
-              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                showSuggestPanel
-                  ? "bg-primary text-on-primary"
-                  : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-              }`}
-            >
-              <Icon name="auto_awesome" className="text-sm" />Generate
-            </button>
-          </div>
+          <div className="flex items-center gap-2" />
         </header>
 
         {/* Scrollable content */}

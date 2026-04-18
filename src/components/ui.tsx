@@ -27,7 +27,7 @@ interface StatCardProps {
 
 export function StatCard({ label, value, unit, icon }: StatCardProps) {
   return (
-    <div className="bg-surface-container rounded-2xl p-4 flex items-center gap-3">
+    <div className="bg-surface-container rounded-2xl p-4 flex items-center gap-3 shadow-card">
       <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center shrink-0">
         <Icon name={icon} className="text-on-primary-container text-lg" />
       </div>
@@ -194,12 +194,14 @@ interface LoginScreenProps {
   showForgotPassword: boolean;
   setShowForgotPassword: (v: boolean) => void;
   handleAuth: (e: React.FormEvent) => void;
+  setAuthError: (v: string) => void;
 }
 
 export function LoginScreen({
   email, setEmail, password, setPassword,
   authError, authSuccess, isRegistering, setIsRegistering,
   showForgotPassword, setShowForgotPassword, handleAuth,
+  setAuthError,
 }: LoginScreenProps) {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
