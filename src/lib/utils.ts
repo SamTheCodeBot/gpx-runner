@@ -68,7 +68,7 @@ export function downloadGPXFile(route: { name: string; coordinates: [number, num
     .map(([lon, lat]) => `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>0</ele><time>${new Date().toISOString()}</time></trkpt>`)
     .join("\n");
   const gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Apex Run" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx version="1.1" creator="GPX running" xmlns="http://www.topografix.com/GPX/1/1">
 <metadata><name>${route.name}</name><time>${new Date().toISOString()}</time></metadata>
 <trk><name>${route.name}</name><trkseg>${pts}</trkseg></trk>
 </gpx>`;

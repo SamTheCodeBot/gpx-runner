@@ -19,9 +19,9 @@ export function Sidebar({ user, onLogout, fileInputRef, onFileUpload }: SidebarP
           <div className="w-9 h-9 rounded-xl bg-primary-container flex items-center justify-center shrink-0">
             <Icon name="sprint" filled className="text-on-primary-container text-xl" />
           </div>
-          <h1 className="text-xl font-extrabold tracking-tight font-headline text-on-primary">Apex Run</h1>
+          <h1 className="text-xl font-extrabold tracking-tight font-headline text-on-primary">GPX running</h1>
         </div>
-        <p className="text-[10px] text-on-primary-container/80 font-medium">Personal Performance Hub</p>
+        <p className="text-[10px] text-on-primary-container/80 font-medium">Track your runs</p>
       </div>
 
       {/* Nav */}

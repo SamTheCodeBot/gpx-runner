@@ -148,7 +148,7 @@ export default function Home() {
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
                 <Icon name="sprint" filled className="text-on-primary-container text-sm" />
               </div>
-              <span className="text-sm font-extrabold text-primary font-headline">Apex Run</span>
+              <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
             </div>
           </div>
           <div className="flex items-center gap-2" />
@@ -156,8 +156,6 @@ export default function Home() {
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar">
-          <StatsBar stats={stats} />
-
           <MapSection
             routes={filteredRoutes}
             selectedRoute={selectedRoute}

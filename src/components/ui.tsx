@@ -212,8 +212,8 @@ export function LoginScreen({
             <span className="material-symbols-outlined filled text-on-primary-container text-2xl">sprint</span>
           </div>
           <div>
-            <h1 className="text-2xl font-extrabold text-primary font-headline tracking-tight">Apex Run</h1>
-            <p className="text-xs text-on-surface-variant">Personal Performance Hub</p>
+            <h1 className="text-2xl font-extrabold text-primary font-headline tracking-tight">GPX running</h1>
+            <p className="text-xs text-on-surface-variant">Track your runs</p>
           </div>
         </div>
 
