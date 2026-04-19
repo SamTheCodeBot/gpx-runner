@@ -148,6 +148,14 @@ export function useGPXRoutes(userId: string | null) {
           console.error("Failed to delete from Firebase Storage", e);
         }
       }
+      if (db) {
+        try {
+          const { deleteDoc } = await import("firebase/firestore");
+          await deleteDoc(doc(db, "routes", id));
+        } catch (e) {
+          console.error("Failed to delete from Firestore", e);
+        }
+      }
     },
     [saveRoutes]
   );
