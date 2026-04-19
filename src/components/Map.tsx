@@ -34,52 +34,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
 }) {
   const map = useMap();
   const lastFitKeyRef = useRef<string | null>(null);
-  const routesInitRef = useRef(false);
 
-  // Fit map to all routes on initial load (when no route is selected/suggested)
-  useEffect(() => {
-    if (!map || routesInitRef.current) return;
-    if (suggestedRoute || selectedRoute) return;
-    if (routes.length === 0) return;
-
-    const allCoords = routes.flatMap((r) => r.coordinates);
-    if (allCoords.length === 0) return;
-
-    const lats = allCoords.map(([, lat]) => lat);
-    const lons = allCoords.map(([lon]) => lon);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons);
-    const maxLon = Math.max(...lons);
-    const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
-
-    // Compute zoom from spread — tighter so city routes get zoom 11-14
-    let zoom = 13;
-    if (maxDiff > 20) zoom = 3;
-    else if (maxDiff > 10) zoom = 4;
-    else if (maxDiff > 5)  zoom = 5;
-    else if (maxDiff > 2)  zoom = 6;
-    else if (maxDiff > 1)  zoom = 7;
-    else if (maxDiff > 0.5) zoom = 8;
-    else if (maxDiff > 0.3) zoom = 9;
-    else if (maxDiff > 0.15) zoom = 10;
-    else if (maxDiff > 0.08) zoom = 11;
-    else if (maxDiff > 0.04) zoom = 12;
-    else if (maxDiff > 0.02) zoom = 13;
-    else if (maxDiff > 0.005) zoom = 14;
-    else zoom = 15;
-
-
-    const center: [number, number] = [
-      (minLat + maxLat) / 2,
-      (minLon + maxLon) / 2,
-    ];
-
-    map.setView(center, zoom, { animate: false });
-    routesInitRef.current = true;
-  }, [map, routes, suggestedRoute, selectedRoute]);
-
-  // Fit map: all routes on init, or selected/suggested route when chosen
   useEffect(() => {
     let targetCoords: [number, number][] = [];
     let fitKey: string | null = null;
@@ -91,8 +46,6 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       targetCoords = selectedRoute.coordinates;
       fitKey = `selected:${selectedRoute.id}`;
     } else if (routes.length > 0) {
-      // Fit to all routes: only on first load (routesInitRef), not on every change
-      if (routesInitRef.current) return;
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
       fitKey = `all:${routes.length}`;
@@ -104,7 +57,6 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
-      // Compute center + zoom from all route coordinates
       const lats = targetCoords.map(([, lat]) => lat);
       const lons = targetCoords.map(([lon]) => lon);
       const minLat = Math.min(...lats);
@@ -126,10 +78,8 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       else if (maxDiff > 0.02) zoom = 13;
       else if (maxDiff > 0.005) zoom = 14;
       else zoom = 15;
-
       const center: [number, number] = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
       map.setView(center, zoom, { animate: false });
-      routesInitRef.current = true;
     } else {
       const bounds = L.latLngBounds(
         targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
@@ -159,13 +109,13 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
   const markers: { position: [number, number]; km: number }[] = [];
   let totalDistance = 0;
   let lastKm = 0;
-  
+
   for (let i = 1; i < coordinates.length; i++) {
     const dist = calcDistance(coordinates[i-1], coordinates[i]);
     totalDistance += dist;
-    
+
     const currentKm = Math.floor(totalDistance);
-    if (currentKm > lastKm && currentKm <= 50) { // Show up to 50km markers
+    if (currentKm > lastKm && currentKm <= 50) {
       markers.push({
         position: coordinates[i],
         km: currentKm
@@ -173,15 +123,15 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
       lastKm = currentKm;
     }
   }
-  
+
   return markers;
 }
 
-export default function Map({ 
-  routes, 
-  selectedRoute, 
-  showHeatmap, 
-  suggestedRoute, 
+export default function Map({
+  routes,
+  selectedRoute,
+  showHeatmap,
+  suggestedRoute,
   selectedStartPoint,
   onMapClick,
   isSelectingStartPoint,
@@ -190,7 +140,6 @@ export default function Map({
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
   useEffect(() => {
-    // Request user's geolocation
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -200,7 +149,6 @@ export default function Map({
         },
         (error) => {
           console.log("Geolocation error:", error);
-          // Silently fail - will use default
         },
         { timeout: 5000 }
       );
@@ -214,18 +162,17 @@ export default function Map({
       const avgLon = coords.reduce((sum, [lon]) => sum + lon, 0) / coords.length;
       return [avgLat, avgLon] as [number, number];
     }
-    
+
     if (routes.length === 0) {
-      // Use user's location if available, fallback to Stockholm
       if (userLocation) {
         return userLocation;
       }
       return [59.3293, 18.0686] as [number, number];
     }
-    
+
     const allCoords = routes.flatMap((r) => r.coordinates);
     if (allCoords.length === 0) return [59.3293, 18.0686] as [number, number];
-    
+
     const avgLat = allCoords.reduce((sum, [_lon, lat]) => sum + lat, 0) / allCoords.length;
     const avgLon = allCoords.reduce((sum, [lon, _lat]) => sum + lon, 0) / allCoords.length;
 
@@ -235,7 +182,6 @@ export default function Map({
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
-    // If a route is selected, show ONLY that route — hide all others
     if (selectedRoute) {
       return [{
         positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
@@ -257,7 +203,6 @@ export default function Map({
   const activeRouteCoords = selectedRoute?.coordinates || suggestedRoute?.coordinates || [];
   const kmMarkers = getKilometerMarkers(activeRouteCoords);
 
-  // Create kilometer marker icon
   const kmMarkerIcon = (km: number) => L.divIcon({
     html: `<div style="
       background: ${darkMode ? '#18181b' : '#ffffff'};
@@ -306,59 +251,25 @@ export default function Map({
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url={darkMode 
+        url={darkMode
           ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         }
       />
-      
+
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
-      
-      {/* Map click events */}
-      <MapEvents onMapClick={onMapClick} />
 
-      {/* Draw selected start point marker */}
-      {selectedStartPoint && (
-        <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>
-          <Popup>Start/End Point</Popup>
-        </Marker>
-      )}
-
-      {/* Draw kilometer markers for selected/suggested route */}
-      {kmMarkers.map((marker, idx) => (
-        <Marker 
-          key={idx} 
-          position={[marker.position[1], marker.position[0]]} 
+      {kmMarkers.map((marker, i) => (
+        <Marker
+          key={`km-${i}`}
+          position={marker.position}
           icon={kmMarkerIcon(marker.km)}
-        >
-          <Popup>{marker.km} km</Popup>
-        </Marker>
+        />
       ))}
 
-      {/* Draw suggested route */}
-      {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
-        <Polyline
-          positions={suggestedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
-          pathOptions={{
-            color: "#f472b6",
-            weight: 5,
-            opacity: 1,
-          }}
-        />
+      {activeRouteCoords.length > 0 && (
+        <Marker position={activeRouteCoords[0]} icon={startPointIcon} />
       )}
-
-      {/* Draw heatmap routes */}
-      {getHeatmapRoutes().map((route, index) => (
-        <Polyline
-          key={`heatmap-${index}`}
-          positions={route.positions}
-          pathOptions={{
-            color: route.color,
-            weight: route.weight,
-            opacity: route.opacity,
-          }}
-        />
-      ))}
     </MapContainer>
   );
 }
