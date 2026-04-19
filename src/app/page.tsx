@@ -9,7 +9,6 @@ import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
-import { UserProfileModal } from "@/components/UserProfileModal";
 import type { GPXRoute } from "./types";
 
 export default function Home() {
@@ -33,7 +32,6 @@ export default function Home() {
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
-  const [showProfile, setShowProfile]       = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
   const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
@@ -169,7 +167,6 @@ export default function Home() {
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
-        onOpenProfile={() => setShowProfile(true)}
       />
 
       {/* Main content */}
@@ -276,7 +273,6 @@ export default function Home() {
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
-          onOpenProfile={() => setShowProfile(true)}
         />
       </main>
 
@@ -295,16 +291,6 @@ export default function Home() {
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={cancelUpload}
-        />
-      )}
-
-      {/* User profile modal */}
-      {showProfile && user && (
-        <UserProfileModal
-          user={user}
-          profile={profile}
-          onSave={saveProfile}
-          onClose={() => setShowProfile(false)}
         />
       )}
     </div>

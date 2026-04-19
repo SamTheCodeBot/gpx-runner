@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
@@ -11,10 +12,9 @@ interface SidebarProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onOpenProfile: () => void;
 }
 
-export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onOpenProfile }: SidebarProps) {
+export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: SidebarProps) {
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
@@ -58,13 +58,13 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            onClick={onOpenProfile}
+          <Link
+            href="/profile"
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Profile"
           >
             <Icon name="manage_accounts" className="text-sm" />
-          </button>
+          </Link>
           <button
             onClick={onLogout}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
@@ -89,10 +89,9 @@ interface MobileDrawerProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onOpenProfile: () => void;
 }
 
-export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onOpenProfile }: MobileDrawerProps) {
+export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: MobileDrawerProps) {
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
@@ -151,13 +150,14 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => { onOpenProfile(); onClose(); }}
+            <Link
+              href="/profile"
+              onClick={() => onClose()}
               className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
               title="Profile"
             >
               <Icon name="manage_accounts" className="text-sm" />
-            </button>
+            </Link>
             <button
               onClick={() => { onLogout(); onClose(); }}
               className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
