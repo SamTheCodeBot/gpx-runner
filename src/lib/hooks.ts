@@ -349,16 +349,13 @@ export function useUserProfile(userId: string | null) {
     if (!db || !userId) return;
     setLoading(true);
     try {
-      // Check for duplicate displayName
+      // Check for duplicate displayName (single-field query, no composite index needed)
       if (data.displayName) {
         const nameSnap = await getDocs(
-          query(
-            collection(db, "userProfiles"),
-            where("displayName", "==", data.displayName),
-            where("userId", "!=", userId)
-          )
+          query(collection(db, "userProfiles"), where("displayName", "==", data.displayName))
         );
-        if (!nameSnap.empty) {
+        const duplicate = nameSnap.docs.find(d => d.data().userId !== userId);
+        if (duplicate) {
           throw new Error("DUPLICATE_NAME");
         }
       }
