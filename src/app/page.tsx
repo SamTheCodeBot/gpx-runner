@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
-import { Icon, EditModal, LoginScreen } from "@/components/ui";
+import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { Sidebar, MobileBottomNav } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
@@ -29,6 +29,7 @@ export default function Home() {
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
+  const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [activeTab, setActiveTab]          = useState("routes");
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
@@ -71,10 +72,21 @@ export default function Home() {
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
     if (newRoutes.length > 0) {
-      saveRoutes([...routes, ...newRoutes]);
-      setSelectedRoute(newRoutes[0]);
+      setPendingUpload(newRoutes[0]);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const acceptUpload = (name: string, type: string) => {
+    if (!pendingUpload) return;
+    const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" };
+    saveRoutes([...routes, named]);
+    setSelectedRoute(named);
+    setPendingUpload(null);
+  };
+
+  const cancelUpload = () => {
+    setPendingUpload(null);
   };
 
   const handleDeleteRoute = (id: string) => {
@@ -245,6 +257,15 @@ export default function Home() {
           route={editingRoute}
           onSave={(name, type) => handleUpdateRoute(editingRoute.id, name, type)}
           onClose={() => setEditingRoute(null)}
+        />
+      )}
+
+      {/* Post-upload naming modal */}
+      {pendingUpload && (
+        <UploadModal
+          route={pendingUpload}
+          onAccept={acceptUpload}
+          onCancel={cancelUpload}
         />
       )}
     </div>

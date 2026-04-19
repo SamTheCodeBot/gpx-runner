@@ -125,3 +125,16 @@ body {
   background: #c4c6d2;
   border-radius: 10px;
 }
+
+/* Leaflet map pane must not cover modals (z-index 50+). Move it below. */
+/* This allows EditModal (z-50), login modals etc. to appear on top */
+.leaflet-container { z-index: 1 !important; }
+.leaflet-map-pane { z-index: 2 !important; }
+.leaflet-top, .leaflet-bottom { z-index: 3 !important; }
+.leaflet-control { z-index: 4 !important; }
+.leaflet-popup-pane { z-index: 40 !important; }
+.leaflet-tooltip-pane { z-index: 40 !important; }
+.leaflet-overlay-pane { z-index: 2 !important; }
+.leaflet-marker-pane { z-index: 3 !important; }
+.leaflet-shadow-pane { z-index: 2 !important; }
+.leaflet-tile-pane { z-index: 1 !important; }

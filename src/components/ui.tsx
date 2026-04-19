@@ -117,6 +117,71 @@ export function RouteRow({ route, selected, onSelect, onDelete, onDownload, onEd
   );
 }
 
+// ─── UploadModal ─────────────────────────────────────────────────────────────
+
+interface UploadModalProps {
+  route: GPXRoute;
+  onAccept: (name: string, type: string) => void;
+  onCancel: () => void;
+}
+
+export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
+  const [name, setName] = useState(route.name || "");
+  const [type, setType] = useState<string>("road");
+
+  const accept = () => {
+    if (!name.trim()) return;
+    onAccept(name.trim(), type);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-surface-container-lowest rounded-3xl shadow-xl w-full max-w-sm p-6 animate-fade-in">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-extrabold text-primary font-headline">Name Your Run</h3>
+          <button onClick={onCancel} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
+            <Icon name="close" className="text-on-surface-variant text-sm" />
+          </button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Name</label>
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && accept()}
+              placeholder="Morning run, Trail exploring…"
+              className="w-full px-3 py-2 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Type</label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full px-3 py-2 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface focus:outline-none"
+            >
+              <option value="road">Road</option>
+              <option value="trail">Trail</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+            Cancel
+          </button>
+          <button onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── EditModal ────────────────────────────────────────────────────────────────
 
 interface EditModalProps {
