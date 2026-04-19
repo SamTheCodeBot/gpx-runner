@@ -119,6 +119,12 @@ export default function Home() {
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
     setPendingUpload(null);
+    // Update Firestore with the corrected type (uploadFiles saved it as "road")
+    if (named.id && user?.uid) {
+      const { doc, updateDoc } = require("firebase/firestore");
+      const { db } = require("@/lib/firebase");
+      if (db) updateDoc(doc(db, "routes", named.id), { name, type }).catch(console.error);
+    }
   };
 
   const cancelUpload = () => {

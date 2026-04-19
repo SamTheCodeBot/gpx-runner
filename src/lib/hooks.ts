@@ -36,9 +36,13 @@ export function useGPXRoutes(userId: string | null) {
     }
   }, []);
 
-  // Sync from Firestore when user is available
+  // Sync from Firestore when user is available — always overwrite local state
+  // so a new user never sees another account's routes from localStorage
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setRoutes([]);
+      return;
+    }
     const load = async () => {
       if (!db) return;
       try {
@@ -55,10 +59,9 @@ export function useGPXRoutes(userId: string | null) {
             } as GPXRoute);
           }
         });
-        if (firestoreRoutes.length > 0) {
-          firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
-          setRoutes(firestoreRoutes);
-        }
+        firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
+        setRoutes(firestoreRoutes);
+        localStorage.setItem("gpx-routes", JSON.stringify(firestoreRoutes));
       } catch (e) {
         console.error("Firestore load error", e);
       }
@@ -433,6 +436,23 @@ export function useAccountDeletion() {
           query(collection(db, "userProfiles"), where("userId", "==", userId))
         );
         await Promise.all(profileSnap.docs.map(d => deleteDoc(d.ref)));
+      }
+
+      // Step 4b: Ensure a "shadow user" profile exists for orphaned routes
+      if (db) {
+        const { getDocs: gD, query: q, collection: c, where: w, setDoc: sD, doc: d } = await import("firebase/firestore");
+        const shadowSnap = await gD(q(c(db, "userProfiles"), w("userId", "==", "deleted")));
+        if (shadowSnap.empty) {
+          await sD(d(db, "userProfiles", "deleted"), {
+            username: "deleted",
+            displayName: "Deleted runner",
+            avatar: "person_off",
+            joinedAt: new Date(2000, 0, 1).toISOString(),
+            totalRuns: 0,
+            totalDistance: 0,
+            userId: "deleted",
+          });
+        }
       }
 
       // Step 5: Delete Firebase Auth account

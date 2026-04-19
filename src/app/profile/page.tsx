@@ -65,7 +65,9 @@ export default function ProfilePage() {
     }
   }, [profile]);
 
-  const greeting  = getGreeting();
+  const greeting  = profile?.displayName || profile?.username
+    ? `Hey ${profile?.displayName || profile?.username}!`
+    : getGreeting();
   const joinedAt  = profile?.joinedAt
     ? new Date(profile.joinedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
     : "Just joined";
