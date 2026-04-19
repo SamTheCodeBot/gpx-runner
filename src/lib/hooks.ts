@@ -349,7 +349,12 @@ export function useUserProfile(userId: string | null) {
   useEffect(() => { loadProfile(); }, [loadProfile]);
 
   const saveProfile = useCallback(async (data: Partial<import("@/app/types").UserProfile>) => {
-    if (!db || !userId) return;
+    const { auth } = await import("@/lib/firebase");
+    const currentUid = auth?.currentUser?.uid;
+    if (!db || !currentUid) {
+      console.error("[saveProfile] no uid — auth state:", auth?.currentUser?.uid);
+      return;
+    }
     setLoading(true);
     try {
       // Check for duplicate displayName (single-field query, no composite index needed)
@@ -357,19 +362,19 @@ export function useUserProfile(userId: string | null) {
         const nameSnap = await getDocs(
           query(collection(db, "userProfiles"), where("displayName", "==", data.displayName))
         );
-        const duplicate = nameSnap.docs.find(d => d.data().userId !== userId);
+        const duplicate = nameSnap.docs.find(d => d.data().userId !== currentUid);
         if (duplicate) {
           throw new Error("DUPLICATE_NAME");
         }
       }
-      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", currentUid)));
       const isNew = snap.empty;
       const base: import("@/app/types").UserProfile = isNew
         ? { username: "", displayName: "", avatar: "directions_run", joinedAt: new Date().toISOString(), totalRuns: 0, totalDistance: 0 }
         : (snap.docs[0].data() as import("@/app/types").UserProfile);
-      const updated = { ...base, ...data, userId } as import("@/app/types").UserProfile;
+      const updated = { ...base, ...data, userId: currentUid } as import("@/app/types").UserProfile;
       if (isNew) {
-        await setDoc(doc(collection(db, "userProfiles"), userId), updated);
+        await setDoc(doc(collection(db, "userProfiles"), currentUid), updated);
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), updated);
       }
@@ -377,7 +382,7 @@ export function useUserProfile(userId: string | null) {
       (setProfile as (v: import("@/app/types").UserProfile | null) => void)(updated);
     } catch (e) { console.error("[useUserProfile] save failed", e); throw e; }
     finally { setLoading(false); }
-  }, [userId]);
+  }, []); // no deps — reads currentUid dynamically from auth.currentUser
 
   return { profile, saveProfile, loading };
 }
