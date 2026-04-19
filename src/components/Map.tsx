@@ -58,8 +58,37 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
+      // Option B: zoom to where most routes are (dominant cluster), ignore outliers
+      const toRad = (d: number) => d * Math.PI / 180;
+      const R = 6371;
+
+      // Centroid of all routes
+      const allLats = targetCoords.map(([, lat]) => lat);
+      const allLons = targetCoords.map(([lon]) => lon);
+      const centroidLat = allLats.reduce((s, v) => s + v, 0) / allLats.length;
+      const centroidLon = allLons.reduce((s, v) => s + v, 0) / allLons.length;
+
+      // Distance from centroid per route (km)
+      const routeKmDist = routes.map((r) => {
+        if (r.coordinates.length === 0) return 0;
+        const rLat = r.coordinates.reduce((s, [, lat]) => s + lat, 0) / r.coordinates.length;
+        const rLon = r.coordinates.reduce((s, [lon]) => s + lon, 0) / r.coordinates.length;
+        const a = Math.sin(toRad(rLat - centroidLat) / 2) ** 2 +
+          Math.cos(toRad(centroidLat)) * Math.cos(toRad(rLat)) * Math.sin(toRad(rLon - centroidLon) / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      });
+
+      // Keep closest 80% of routes (or all if ≤3)
+      const idxByDist = routes.map((_, i) => i).sort((a, b) => routeKmDist[a] - routeKmDist[b]);
+      const keepCount = routes.length <= 3 ? routes.length : Math.max(3, Math.ceil(routes.length * 0.8));
+      const dominantSet = new Set(idxByDist.slice(0, keepCount));
+
+      // Collect coords from dominant routes only
+      const clusterCoords: [number, number][] = [];
+      routes.forEach((r, i) => { if (dominantSet.has(i)) r.coordinates.forEach(c => clusterCoords.push(c)); });
+
       const bounds = L.latLngBounds(
-        targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
+        clusterCoords.map(([lon, lat]) => [lat, lon] as [number, number])
       );
       map.fitBounds(bounds, { padding: [50, 50] });
     } else {
