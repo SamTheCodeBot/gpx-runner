@@ -346,24 +346,31 @@ export function useUserProfile(userId: string | null) {
   useEffect(() => { loadProfile(); }, [loadProfile]);
 
   const saveProfile = useCallback(async (data: Partial<import("@/app/types").UserProfile>) => {
-    console.log("[useUserProfile] saveProfile called", { data, hasDb: !!db, userId });
-    if (!db || !userId) {
-      console.error("[useUserProfile] db or userId missing, cannot save");
-      return;
-    }
+    if (!db || !userId) return;
     setLoading(true);
     try {
+      // Check for duplicate displayName
+      if (data.displayName) {
+        const nameSnap = await getDocs(
+          query(
+            collection(db, "userProfiles"),
+            where("displayName", "==", data.displayName),
+            where("userId", "!=", userId)
+          )
+        );
+        if (!nameSnap.empty) {
+          throw new Error("DUPLICATE_NAME");
+        }
+      }
       const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
       const payload = { ...data, userId };
-      console.log("[useUserProfile] saving to Firestore", { payload, existing: !snap.empty });
       if (snap.empty) {
         await setDoc(doc(collection(db, "userProfiles"), userId), payload);
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), payload);
       }
       setProfile(prev => ({ ...(prev || {}), ...data, userId } as import("@/app/types").UserProfile));
-      console.log("[useUserProfile] save confirmed");
-    } catch (e) { console.error("[useUserProfile] save failed", e); }
+    } catch (e) { console.error("[useUserProfile] save failed", e); throw e; }
     finally { setLoading(false); }
   }, [userId]);
 

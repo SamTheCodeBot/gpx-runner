@@ -71,13 +71,13 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
     try {
       await onSave({ displayName: displayName.trim(), avatar });
       setSaved(true);
-      // Reload page after short delay so new avatar/name shows in sidebar
-      setTimeout(() => {
-        window.location.reload();
-      }, 800);
+      setTimeout(() => { window.location.reload(); }, 800);
     } catch (e: any) {
-      console.error("Profile save error:", e);
-      setSaveError(e?.message || "Failed to save. Please try again.");
+      if (e?.message === "DUPLICATE_NAME") {
+        setSaveError(`The name "${displayName.trim()}" is already taken. Please choose another.`);
+      } else {
+        setSaveError(e?.message || "Failed to save. Please try again.");
+      }
     } finally {
       setSaving(false);
     }
