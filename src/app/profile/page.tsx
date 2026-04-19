@@ -30,13 +30,14 @@ function getGreeting() {
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  // Redirect to login if not authenticated
+  // Wait for Firebase auth to initialize before making any routing decisions
   useEffect(() => {
-    if (!user) router.replace("/");
-  }, [user, router]);
+    if (authLoading) return; // still initializing
+    if (!user) router.replace("/"); // not signed in
+  }, [user, authLoading, router]);
 
   const { profile, saveProfile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
   const { deleteAccount, isDeleting, error: deleteError } = useAccountDeletion();
