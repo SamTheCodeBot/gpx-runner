@@ -127,9 +127,10 @@ export default function Home() {
     );
   }
 
-  // ── Desktop layout ───────────────────────────────────────────────────────
-  // Desktop: side-by-side — map takes 50% width (fixed), routes scroll on right
-  // Mobile: stacked — MapSection on top, routes below; tab nav controls which panel shows
+  // ── Desktop: side-by-side flex (no reversal) ─────────────────────────────
+  // Routes left (flex-1, scrollable) | Map right (w-1/2, fixed height)
+  // Mobile: column flex — map at top (fixed height), routes below (scrollable)
+  // activeTab controls which panel is visible on mobile (map tab = map only; routes tab = routes only)
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
@@ -141,7 +142,7 @@ export default function Home() {
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0">
+        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
           <div className="flex items-center gap-3">
             <div className="md:hidden flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
@@ -153,11 +154,14 @@ export default function Home() {
           <div className="flex items-center gap-2" />
         </header>
 
-        {/* Desktop: side-by-side | Mobile: tab-based */}
+        {/* Desktop: side-by-side | Mobile: tab-switched panels */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
-          {/* ── Routes panel (left on desktop, below map on mobile) ── */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar order-2 md:order-1">
+          {/* ── Routes panel ── */}
+          <div className={
+            "flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar " +
+            (activeTab === "map" ? "hidden md:block" : "block")
+          }>
             {suggestedRoute && (
               <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
                 <div className="flex items-center justify-between">
@@ -204,23 +208,23 @@ export default function Home() {
             />
           </div>
 
-          {/* ── Map panel (right on desktop, top on mobile) ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-2">
-            {/* Mobile: only show map when that tab is active */}
-            <div className={activeTab === "routes" ? "hidden md:block" : "block md:block"}>
-              <div className="h-52 md:h-full p-4 md:pr-6 md:pt-6">
-                <MapSection
-                  routes={filteredRoutes}
-                  selectedRoute={selectedRoute}
-                  suggestedRoute={suggestedRoute}
-                  showHeatmap={showHeatmap}
-                  onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
-                  isLoading={isUploading}
-                  selectedStartPoint={selectedStartPoint}
-                  isSelectingStartPoint={isSelectingStartPoint}
-                  onMapClick={handleMapClick}
-                />
-              </div>
+          {/* ── Map panel ── */}
+          <div className={
+            "w-full md:w-1/2 md:shrink-0 " +
+            (activeTab === "routes" ? "hidden md:block" : "block")
+          }>
+            <div className="h-52 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
+              <MapSection
+                routes={filteredRoutes}
+                selectedRoute={selectedRoute}
+                suggestedRoute={suggestedRoute}
+                showHeatmap={showHeatmap}
+                onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                isLoading={isUploading}
+                selectedStartPoint={selectedStartPoint}
+                isSelectingStartPoint={isSelectingStartPoint}
+                onMapClick={handleMapClick}
+              />
             </div>
           </div>
 
