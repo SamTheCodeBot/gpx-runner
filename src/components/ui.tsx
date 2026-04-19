@@ -250,6 +250,8 @@ export function EditModal({ route, onSave, onClose }: EditModalProps) {
 interface LoginScreenProps {
   email: string;
   setEmail: (v: string) => void;
+  username: string;
+  setUsername: (v: string) => void;
   password: string;
   setPassword: (v: string) => void;
   authError: string;
@@ -263,7 +265,7 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({
-  email, setEmail, password, setPassword,
+  email, setEmail, username, setUsername, password, setPassword,
   authError, authSuccess, isRegistering, setIsRegistering,
   showForgotPassword, setShowForgotPassword, handleAuth,
   setAuthError,
@@ -314,6 +316,23 @@ export function LoginScreen({
                 className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
+            {isRegistering && (
+              <div>
+                <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Username</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Choose a unique username"
+                  required={isRegistering}
+                  minLength={3}
+                  maxLength={30}
+                  pattern="[a-zA-Z0-9_]+"
+                  title="Letters, numbers and underscores only"
+                  className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+            )}
             {!showForgotPassword && (
               <div>
                 <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Password</label>

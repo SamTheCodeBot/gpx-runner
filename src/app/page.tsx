@@ -39,6 +39,7 @@ export default function Home() {
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
   const [avoidFamiliar, setAvoidFamiliar]   = useState(true);
+  const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
@@ -71,7 +72,28 @@ export default function Home() {
     }
     try {
       const { login: lg, register: reg } = await import("@/lib/auth");
-      isRegistering ? await reg(email, password) : await lg(email, password);
+      if (isRegistering) {
+        // Duplicate check before creating account
+        if (!username.trim() || username.trim().length < 3) {
+          setAuthError("Please choose a username (at least 3 characters).");
+          return;
+        }
+        const { db } = await import("@/lib/firebase");
+        if (db) {
+          const { getDocs, query, collection, where } = await import("firebase/firestore");
+          const snap = await getDocs(query(collection(db, "userProfiles"), where("username", "==", username.trim())));
+          if (!snap.empty) {
+            setAuthError(`The username "${username.trim()}" is already taken. Please choose another.`);
+            return;
+          }
+        }
+        await reg(email, password);
+        // Create profile immediately with chosen username
+        await saveProfile({ username: username.trim(), displayName: username.trim() });
+        setUsername("");
+      } else {
+        await lg(email, password);
+      }
       setEmail(""); setPassword("");
     } catch (err: any) { setAuthError(err.message || "Auth failed"); }
   };
@@ -143,6 +165,7 @@ export default function Home() {
     return (
       <LoginScreen
         email={email} setEmail={setEmail}
+        username={username} setUsername={setUsername}
         password={password} setPassword={setPassword}
         authError={authError} authSuccess={authSuccess}
         isRegistering={isRegistering} setIsRegistering={setIsRegistering}

@@ -45,9 +45,12 @@ export interface RouteSuggestion {
 }
 
 export interface UserProfile {
+  [key: string]: any;
+  username: string; // unique login username
   displayName: string;
   avatar: string; // Material Symbols icon name
   joinedAt: string; // ISO date string
   totalRuns: number; // cached count
   totalDistance: number; // cached km
+  userId?: string; // Firebase UID (stored in document)
 }

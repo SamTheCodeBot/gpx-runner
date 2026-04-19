@@ -360,13 +360,18 @@ export function useUserProfile(userId: string | null) {
         }
       }
       const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
-      const payload = { ...data, userId };
-      if (snap.empty) {
-        await setDoc(doc(collection(db, "userProfiles"), userId), payload);
+      const isNew = snap.empty;
+      const base: import("@/app/types").UserProfile = isNew
+        ? { username: "", displayName: "", avatar: "directions_run", joinedAt: new Date().toISOString(), totalRuns: 0, totalDistance: 0 }
+        : (snap.docs[0].data() as import("@/app/types").UserProfile);
+      const updated = { ...base, ...data, userId } as import("@/app/types").UserProfile;
+      if (isNew) {
+        await setDoc(doc(collection(db, "userProfiles"), userId), updated);
       } else {
-        await updateDoc(doc(db, "userProfiles", snap.docs[0].id), payload);
+        await updateDoc(doc(db, "userProfiles", snap.docs[0].id), updated);
       }
-      setProfile(prev => ({ ...(prev || {}), ...data, userId } as import("@/app/types").UserProfile));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (setProfile as (v: import("@/app/types").UserProfile | null) => void)(updated);
     } catch (e) { console.error("[useUserProfile] save failed", e); throw e; }
     finally { setLoading(false); }
   }, [userId]);
