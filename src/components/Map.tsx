@@ -155,11 +155,21 @@ export default function Map({
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
+    // If a route is selected, show ONLY that route — hide all others
+    if (selectedRoute) {
+      return [{
+        positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
+        color: selectedRoute.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)',
+        weight: 4,
+        opacity: 1,
+      }];
+    }
+
     return routes.map((route) => ({
       positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
       color: (route.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)'),
-      weight: selectedRoute?.id === route.id ? 4 : 2,
-      opacity: selectedRoute?.id === route.id ? 1 : 0.4,
+      weight: 2,
+      opacity: 0.6,
     }));
   };
 

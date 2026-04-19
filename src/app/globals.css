@@ -138,3 +138,11 @@ body {
 .leaflet-marker-pane { z-index: 3 !important; }
 .leaflet-shadow-pane { z-index: 2 !important; }
 .leaflet-tile-pane { z-index: 1 !important; }
+
+@keyframes slideIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slideIn 0.25s ease-out;
+}

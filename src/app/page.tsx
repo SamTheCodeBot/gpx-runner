@@ -6,7 +6,7 @@ import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
-import { Sidebar, MobileBottomNav } from "@/components/Sidebar";
+import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "./types";
@@ -31,7 +31,7 @@ export default function Home() {
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
-  const [activeTab, setActiveTab]          = useState("routes");
+  const [showDrawer, setShowDrawer]          = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
   const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
@@ -167,6 +167,11 @@ export default function Home() {
         {/* Top bar */}
         <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
           <div className="flex items-center gap-3">
+            {/* Mobile: hamburger menu */}
+            <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -ml-2 rounded-xl hover:bg-surface-container transition-colors">
+              <Icon name="menu" className="text-on-surface-variant text-xl" />
+            </button>
+
             <div className="md:hidden flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
                 <Icon name="sprint" filled className="text-on-primary-container text-sm" />
@@ -251,10 +256,12 @@ export default function Home() {
 
         </div>
 
-        {/* Mobile bottom nav */}
-        <MobileBottomNav
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
+        {/* Mobile drawer */}
+        <MobileDrawer
+          isOpen={showDrawer}
+          onClose={() => setShowDrawer(false)}
+          user={user}
+          onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
         />
