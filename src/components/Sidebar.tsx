@@ -7,13 +7,17 @@ import type { UserProfile } from "@/app/types";
 interface SidebarProps {
   user: User | null;
   profile: UserProfile | null;
+  profileLoading?: boolean;
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenProfile: () => void;
 }
 
-export function Sidebar({ user, profile, onLogout, fileInputRef, onFileUpload, onOpenProfile }: SidebarProps) {
+export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onOpenProfile }: SidebarProps) {
+  const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
+  const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
+
   return (
     <aside className="hidden md:flex w-64 bg-primary text-on-primary flex-col shrink-0">
       {/* Logo area */}
@@ -47,9 +51,9 @@ export function Sidebar({ user, profile, onLogout, fileInputRef, onFileUpload, o
       {/* User section */}
       <div className="px-5 py-5 border-t border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="material-symbols-outlined text-2xl text-on-primary">{profile?.avatar || "directions_run"}</span>
+          <span className={`material-symbols-outlined text-2xl text-on-primary transition-opacity ${profileLoading ? "opacity-30 animate-pulse" : ""}`}>{avatarIcon}</span>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-on-primary truncate">{profile?.displayName || user?.email?.split("@")[0]}</p>
+            <p className="text-sm font-bold text-on-primary truncate">{displayName}</p>
             <p className="text-[10px] text-on-primary-container/80 uppercase tracking-wider">Runner</p>
           </div>
         </div>
@@ -81,13 +85,17 @@ interface MobileDrawerProps {
   onClose: () => void;
   user: User | null;
   profile: UserProfile | null;
+  profileLoading?: boolean;
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenProfile: () => void;
 }
 
-export function MobileDrawer({ isOpen, onClose, user, profile, onLogout, fileInputRef, onFileUpload, onOpenProfile }: MobileDrawerProps) {
+export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onOpenProfile }: MobileDrawerProps) {
+  const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
+  const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
+
   if (!isOpen) return null;
 
   return (
@@ -136,9 +144,9 @@ export function MobileDrawer({ isOpen, onClose, user, profile, onLogout, fileInp
         {/* User section */}
         <div className="px-5 py-5 border-t border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-2xl text-on-primary">{profile?.avatar || "directions_run"}</span>
+            <span className={`material-symbols-outlined text-2xl text-on-primary transition-opacity ${profileLoading ? "opacity-30 animate-pulse" : ""}`}>{avatarIcon}</span>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-on-primary truncate">{profile?.displayName || user?.email?.split("@")[0]}</p>
+              <p className="text-sm font-bold text-on-primary truncate">{displayName}</p>
               <p className="text-[10px] text-on-primary-container/80 uppercase tracking-wider">Runner</p>
             </div>
           </div>

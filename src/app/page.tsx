@@ -44,7 +44,7 @@ export default function Home() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
-  const { profile, saveProfile } = useUserProfile(user?.uid ?? null);
+  const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   const stats = useMemo(() => {
     if (!filteredRoutes.length) return null;
@@ -165,6 +165,7 @@ export default function Home() {
       <Sidebar
         user={user}
         profile={profile}
+        profileLoading={loading}
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
@@ -271,6 +272,7 @@ export default function Home() {
           onClose={() => setShowDrawer(false)}
           user={user}
           profile={profile}
+          profileLoading={loading}
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
