@@ -27,14 +27,56 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => 
   return null;
 }
 
-function MapController({ routes, selectedRoute, suggestedRoute }: { 
-  routes: GPXRoute[]; 
+function MapController({ routes, selectedRoute, suggestedRoute }: {
+  routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   suggestedRoute: RouteSuggestion | null;
 }) {
   const map = useMap();
   const lastFitKeyRef = useRef<string | null>(null);
+  const routesInitRef = useRef(false);
 
+  // Fit map to all routes on initial load (when no route is selected/suggested)
+  useEffect(() => {
+    if (!map || routesInitRef.current) return;
+    if (suggestedRoute || selectedRoute) return;
+    if (routes.length === 0) return;
+
+    const allCoords = routes.flatMap((r) => r.coordinates);
+    if (allCoords.length === 0) return;
+
+    const lats = allCoords.map(([, lat]) => lat);
+    const lons = allCoords.map(([lon]) => lon);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
+
+    // Compute zoom from spread
+    let zoom = 13;
+    if (maxDiff > 50) zoom = 2;
+    else if (maxDiff > 20) zoom = 3;
+    else if (maxDiff > 10) zoom = 4;
+    else if (maxDiff > 5)  zoom = 5;
+    else if (maxDiff > 2)  zoom = 6;
+    else if (maxDiff > 1)  zoom = 7;
+    else if (maxDiff > 0.5) zoom = 8;
+    else if (maxDiff > 0.2) zoom = 9;
+    else if (maxDiff > 0.1) zoom = 10;
+    else if (maxDiff > 0.05) zoom = 11;
+    else if (maxDiff > 0.02) zoom = 12;
+
+    const center: [number, number] = [
+      (minLat + maxLat) / 2,
+      (minLon + maxLon) / 2,
+    ];
+
+    map.setView(center, zoom, { animate: false });
+    routesInitRef.current = true;
+  }, [map, routes, suggestedRoute, selectedRoute]);
+
+  // Fit map: all routes on init, or selected/suggested route when chosen
   useEffect(() => {
     let targetCoords: [number, number][] = [];
     let fitKey: string | null = null;
@@ -45,6 +87,12 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     } else if (selectedRoute && selectedRoute.coordinates.length > 0) {
       targetCoords = selectedRoute.coordinates;
       fitKey = `selected:${selectedRoute.id}`;
+    } else if (routes.length > 0) {
+      // Fit to all routes: only on first load (routesInitRef), not on every change
+      if (routesInitRef.current) return;
+      targetCoords = routes.flatMap((r) => r.coordinates);
+      if (targetCoords.length === 0) return;
+      fitKey = `all:${routes.length}`;
     } else {
       return;
     }
@@ -52,12 +100,38 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (!fitKey || targetCoords.length === 0) return;
     if (lastFitKeyRef.current === fitKey) return;
 
-    const bounds = L.latLngBounds(
-      targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
-    );
-    map.fitBounds(bounds, { padding: [50, 50] });
+    if (fitKey.startsWith("all:")) {
+      // Compute center + zoom from all route coordinates
+      const lats = targetCoords.map(([, lat]) => lat);
+      const lons = targetCoords.map(([lon]) => lon);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLon = Math.min(...lons);
+      const maxLon = Math.max(...lons);
+      const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
+      let zoom = 13;
+      if (maxDiff > 50) zoom = 2;
+      else if (maxDiff > 20) zoom = 3;
+      else if (maxDiff > 10) zoom = 4;
+      else if (maxDiff > 5)  zoom = 5;
+      else if (maxDiff > 2)  zoom = 6;
+      else if (maxDiff > 1)  zoom = 7;
+      else if (maxDiff > 0.5) zoom = 8;
+      else if (maxDiff > 0.2) zoom = 9;
+      else if (maxDiff > 0.1) zoom = 10;
+      else if (maxDiff > 0.05) zoom = 11;
+      else if (maxDiff > 0.02) zoom = 12;
+      const center: [number, number] = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
+      map.setView(center, zoom, { animate: false });
+      routesInitRef.current = true;
+    } else {
+      const bounds = L.latLngBounds(
+        targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
+      );
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
     lastFitKeyRef.current = fitKey;
-  }, [map, selectedRoute, suggestedRoute]);
+  }, [map, routes, selectedRoute, suggestedRoute]);
 
   return null;
 }
@@ -152,39 +226,6 @@ export default function Map({
     return [avgLat, avgLon] as [number, number];
   };
 
-  // Calculate zoom level from route bounds so all routes fit in view
-  const getZoom = () => {
-    if (routes.length === 0) return 13;
-    const allCoords = routes.flatMap((r) => r.coordinates);
-    if (allCoords.length === 0) return 13;
-
-    const lats = allCoords.map(([, lat]) => lat);
-    const lons = allCoords.map(([lon]) => lon);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons);
-    const maxLon = Math.max(...lons);
-
-    const latDiff = maxLat - minLat;
-    const lonDiff = maxLon - minLon;
-    const maxDiff = Math.max(latDiff, lonDiff);
-
-    // Convert degree spread to zoom level
-    // Each zoom level covers roughly half the area of the previous
-    if (maxDiff > 50) return 2;
-    if (maxDiff > 20) return 3;
-    if (maxDiff > 10) return 4;
-    if (maxDiff > 5)  return 5;
-    if (maxDiff > 2)  return 6;
-    if (maxDiff > 1)  return 7;
-    if (maxDiff > 0.5) return 8;
-    if (maxDiff > 0.2) return 9;
-    if (maxDiff > 0.1) return 10;
-    if (maxDiff > 0.05) return 11;
-    if (maxDiff > 0.02) return 12;
-    return 13;
-  };
-
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
@@ -252,7 +293,7 @@ export default function Map({
   return (
     <MapContainer
       center={getCenter()}
-      zoom={getZoom()}
+      zoom={13}
       style={{ height: "100%", width: "100%", background: darkMode ? "#111113" : "#f4f4f5" }}
       zoomControl={true}
       dragging={!isSelectingStartPoint}
