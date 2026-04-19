@@ -330,7 +330,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
 
 export function useUserProfile(userId: string | null) {
   const [profile, setProfile] = useState<import("@/app/types").UserProfile | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // start true so skeleton shows until confirmed
 
   const loadProfile = useCallback(async () => {
     if (!db || !userId) return;
@@ -340,6 +340,7 @@ export function useUserProfile(userId: string | null) {
         setProfile(snap.docs[0].data() as import("@/app/types").UserProfile);
       }
     } catch (e) { console.error("loadProfile", e); }
+    finally { setLoading(false); } // always exit loading state after attempt
   }, [userId]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
