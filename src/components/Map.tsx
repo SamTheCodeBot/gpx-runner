@@ -58,7 +58,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
-      // Recursive clustering: converge to the dominant cluster by iterative centroid refinement
+      // Iterative centroid clustering: converge on the dense cluster, ignore outliers
       const toRad = (d: number) => d * Math.PI / 180;
       const R = 6371;
       const kmDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -71,16 +71,18 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
         return [r.coordinates.reduce((s, [lon]) => s + lon, 0) / n, r.coordinates.reduce((s, [, lat]) => s + lat, 0) / n] as [number, number];
       };
 
-      // Start with all routes, iteratively refine to dominant cluster
       let clusterRoutes = [...routes];
-      for (let iter = 0; iter < 3; iter++) {
+      for (let iter = 0; iter < 4; iter++) {
         const cenLon = clusterRoutes.reduce((s, r) => s + routeCentroid(r)[0], 0) / clusterRoutes.length;
         const cenLat = clusterRoutes.reduce((s, r) => s + routeCentroid(r)[1], 0) / clusterRoutes.length;
-        const sorted = clusterRoutes.map(r => ({ r, d: kmDist(routeCentroid(r)[1], routeCentroid(r)[0], cenLon, cenLat) }))
+        const sorted = clusterRoutes
+          .map(r => ({ r, d: kmDist(routeCentroid(r)[1], routeCentroid(r)[0], cenLat, cenLon) }))
           .sort((a, b) => a.d - b.d);
-        // Keep routes within 60km of centroid (approx small-city radius)
-        clusterRoutes = sorted.filter(x => x.d < 60).map(x => x.r);
-        if (clusterRoutes.length === 0) break;
+        const mid = Math.floor(sorted.length / 2);
+        const medianDist = sorted[mid].d;
+        // Keep routes within 2x median distance of centroid — ignores outliers, keeps cluster
+        clusterRoutes = sorted.filter(x => x.d <= medianDist * 2.5).map(x => x.r);
+        if (clusterRoutes.length <= 1) break;
       }
 
       // Fallback if clustering kills everything
