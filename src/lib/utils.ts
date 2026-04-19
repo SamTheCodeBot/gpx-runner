@@ -14,8 +14,7 @@ export function haversine(lat1: number, lon1: number, lat2: number, lon2: number
 }
 
 const ROUTE_COLORS = [
-  "#22d3ee", "#f472b6", "#a78bfa", "#34d399",
-  "#fbbf24", "#fb923c", "#ef4444", "#3b82f6",
+  "rgb(255 65 164)", "rgb(18 221 251)",
 ];
 let colorIndex = 0;
 export function nextColor(): string {

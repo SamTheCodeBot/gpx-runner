@@ -157,7 +157,7 @@ export default function Map({
 
     return routes.map((route) => ({
       positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
-      color: route.color || (route.type === 'trail' ? '#B22222' : '#006d43'),
+      color: (route.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)'),
       weight: selectedRoute?.id === route.id ? 4 : 2,
       opacity: selectedRoute?.id === route.id ? 1 : 0.4,
     }));

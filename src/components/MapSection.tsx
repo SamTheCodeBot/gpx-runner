@@ -30,11 +30,11 @@ function MapLegend() {
     <div className="absolute bottom-4 left-4 z-20">
       <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
         <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#006d43" }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
           <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Road</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#B22222" }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
           <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Trail</span>
         </div>
       </div>
