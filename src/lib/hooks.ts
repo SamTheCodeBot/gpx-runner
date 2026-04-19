@@ -355,10 +355,11 @@ export function useUserProfile(userId: string | null) {
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), payload);
       }
-      await loadProfile();
+      // Update local state directly — Firestore write is confirmed by this point
+      setProfile(prev => ({ ...(prev || {}), ...data, userId } as import("@/app/types").UserProfile));
     } catch (e) { console.error("saveProfile", e); }
     finally { setLoading(false); }
-  }, [userId, loadProfile]);
+  }, [userId]);
 
   return { profile, saveProfile, loading };
 }
