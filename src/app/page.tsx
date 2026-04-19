@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
@@ -42,7 +42,17 @@ export default function Home() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
-  const stats = useRouteStats(routes);
+  const stats = useMemo(() => {
+    if (!filteredRoutes.length) return null;
+    const totalDistance = filteredRoutes.reduce((s, r) => s + (r.distance || 0), 0) / 1000;
+    const totalElevation = filteredRoutes.reduce((s, r) => s + (r.elevationGain || 0), 0);
+    return {
+      totalRuns: filteredRoutes.length,
+      totalDistance: Math.round(totalDistance * 10) / 10,
+      totalElevation: Math.round(totalElevation),
+      totalTime: 0,
+    };
+  }, [filteredRoutes]);
   const { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, avoidFamiliar);
 
