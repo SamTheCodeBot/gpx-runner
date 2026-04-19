@@ -58,35 +58,35 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
-      // Option B: zoom to where most routes are (dominant cluster), ignore outliers
+      // Recursive clustering: converge to the dominant cluster by iterative centroid refinement
       const toRad = (d: number) => d * Math.PI / 180;
       const R = 6371;
-
-      // Centroid of all routes
-      const allLats = targetCoords.map(([, lat]) => lat);
-      const allLons = targetCoords.map(([lon]) => lon);
-      const centroidLat = allLats.reduce((s, v) => s + v, 0) / allLats.length;
-      const centroidLon = allLons.reduce((s, v) => s + v, 0) / allLons.length;
-
-      // Distance from centroid per route (km)
-      const routeKmDist = routes.map((r) => {
-        if (r.coordinates.length === 0) return 0;
-        const rLat = r.coordinates.reduce((s, [, lat]) => s + lat, 0) / r.coordinates.length;
-        const rLon = r.coordinates.reduce((s, [lon]) => s + lon, 0) / r.coordinates.length;
-        const a = Math.sin(toRad(rLat - centroidLat) / 2) ** 2 +
-          Math.cos(toRad(centroidLat)) * Math.cos(toRad(rLat)) * Math.sin(toRad(rLon - centroidLon) / 2) ** 2;
+      const kmDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const a = Math.sin(toRad(lat2 - lat1) / 2) ** 2 +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lon2 - lon1) / 2) ** 2;
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      });
+      };
+      const routeCentroid = (r: GPXRoute) => {
+        const n = r.coordinates.length;
+        return [r.coordinates.reduce((s, [lon]) => s + lon, 0) / n, r.coordinates.reduce((s, [, lat]) => s + lat, 0) / n] as [number, number];
+      };
 
-      // Keep closest 80% of routes (or all if ≤3)
-      const idxByDist = routes.map((_, i) => i).sort((a, b) => routeKmDist[a] - routeKmDist[b]);
-      const keepCount = routes.length <= 3 ? routes.length : Math.max(3, Math.ceil(routes.length * 0.8));
-      const dominantSet = new Set(idxByDist.slice(0, keepCount));
+      // Start with all routes, iteratively refine to dominant cluster
+      let clusterRoutes = [...routes];
+      for (let iter = 0; iter < 3; iter++) {
+        const cenLon = clusterRoutes.reduce((s, r) => s + routeCentroid(r)[0], 0) / clusterRoutes.length;
+        const cenLat = clusterRoutes.reduce((s, r) => s + routeCentroid(r)[1], 0) / clusterRoutes.length;
+        const sorted = clusterRoutes.map(r => ({ r, d: kmDist(routeCentroid(r)[1], routeCentroid(r)[0], cenLon, cenLat) }))
+          .sort((a, b) => a.d - b.d);
+        // Keep routes within 60km of centroid (approx small-city radius)
+        clusterRoutes = sorted.filter(x => x.d < 60).map(x => x.r);
+        if (clusterRoutes.length === 0) break;
+      }
 
-      // Collect coords from dominant routes only
-      const clusterCoords: [number, number][] = [];
-      routes.forEach((r, i) => { if (dominantSet.has(i)) r.coordinates.forEach(c => clusterCoords.push(c)); });
+      // Fallback if clustering kills everything
+      if (clusterRoutes.length < 2) clusterRoutes = routes;
 
+      const clusterCoords = clusterRoutes.flatMap(r => r.coordinates);
       const bounds = L.latLngBounds(
         clusterCoords.map(([lon, lat]) => [lat, lon] as [number, number])
       );
