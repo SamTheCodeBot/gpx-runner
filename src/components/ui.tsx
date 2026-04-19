@@ -63,34 +63,60 @@ interface RouteRowProps {
   onDelete: () => void;
   onDownload: () => void;
   onEdit: () => void;
+  wishlisted?: boolean;
+  isFavorite?: boolean;
+  onToggleWishlist?: () => void;
+  onToggleFavorite?: () => void;
 }
 
-export function RouteRow({ route, selected, onSelect, onDelete, onDownload, onEdit }: RouteRowProps) {
+export function RouteRow({
+  route, selected, onSelect, onDelete, onDownload, onEdit,
+  wishlisted, isFavorite, onToggleWishlist, onToggleFavorite,
+}: RouteRowProps) {
   const date = new Date(route.date);
   const distKm = (route.distance / 1000).toFixed(1);
   const elevM = Math.round(route.elevationGain);
 
   return (
     <div
-      className={`bg-surface-container rounded-2xl p-4 flex items-center gap-3 cursor-pointer
+      className={`bg-surface-container rounded-2xl p-3 flex items-center gap-2 cursor-pointer
         transition-all hover:bg-surface-container-high group
         ${selected ? "ring-2 ring-primary shadow-sm" : ""}`}
       onClick={onSelect}
     >
+      {/* Color dot */}
       <div
-        className="w-3 h-3 rounded-full shrink-0"
+        className="w-2.5 h-2.5 rounded-full shrink-0"
         style={{ backgroundColor: route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)' }}
       />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
-        <p className="text-[11px] text-on-surface-variant mt-0.5">
+        <p className="text-[10px] text-on-surface-variant mt-0.5">
           {date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
           &nbsp;·&nbsp;{distKm} km&nbsp;·&nbsp;{elevM}m ↑&nbsp;
-          {route.type && <>·&nbsp;{route.type}</>}
+          {route.type && <>·&nbsp;<span className={`capitalize ${route.type === "road" ? "text-pink-400" : route.type === "trail" ? "text-cyan-400" : "text-purple-400"}`}>{route.type}</span></>}
         </p>
       </div>
-      {/* Edit & download actions — always visible when selected on mobile; hover-reveal on desktop */}
-      <div className={`flex items-center gap-1 sm:opacity-0 transition-opacity supports-hover:hover:opacity-100 group-hover:sm:opacity-100 ${selected ? "opacity-100" : "opacity-0 sm:opacity-0"}`}>
+      {/* Row action buttons — always visible when selected on mobile; hover-reveal on desktop */}
+      <div className={`flex items-center gap-0.5 sm:opacity-0 transition-opacity supports-hover:hover:opacity-100 group-hover:sm:opacity-100 ${selected ? "opacity-100" : "opacity-0 sm:opacity-0"}`}>
+        {onToggleFavorite && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+            className={`p-1.5 rounded-lg transition-colors ${isFavorite ? "text-yellow-500" : "text-on-surface-variant hover:text-yellow-500"} hover:bg-surface-container-highest`}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Icon name={isFavorite ? "star" : "star_outline"} className="text-sm" />
+          </button>
+        )}
+        {onToggleWishlist && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleWishlist(); }}
+            className={`p-1.5 rounded-lg transition-colors ${wishlisted ? "text-primary" : "text-on-surface-variant hover:text-primary"} hover:bg-surface-container-highest`}
+            title={wishlisted ? "Remove from wishlist" : "Save to wishlist"}
+          >
+            <Icon name={wishlisted ? "bookmark" : "bookmark_add"} className="text-sm" />
+          </button>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onEdit(); }}
           className="p-1.5 rounded-lg hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"

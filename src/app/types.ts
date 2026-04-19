@@ -9,6 +9,8 @@ export interface GPXRoute {
   color: string;
   userId?: string; // Firebase user ID for cloud sync
   type?: 'road' | 'trail' | 'mixed'; // Route type tag
+  isWishlisted?: boolean;
+  isFavorite?: boolean;
 }
 
 export interface RouteStats {
@@ -53,4 +55,6 @@ export interface UserProfile {
   totalRuns: number; // cached count
   totalDistance: number; // cached km
   userId?: string; // Firebase UID (stored in document)
+  wishlisted?: string[]; // array of route IDs
+  favorites?: string[]; // array of route IDs
 }

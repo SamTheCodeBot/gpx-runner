@@ -283,42 +283,91 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             start: { lat, lng: lon },
             targetDistanceKm: suggestDistance,
             toleranceKm: 1,
-            familiarityMode: avoidFamiliar ? "new" : "familiar",
+            familiarityMode: avoidFamiliar ? "novel" : "familiar",
             gpxFiles,
           }),
         });
 
         const payload = await res.json();
-        if (!res.ok) {
-          if (payload?.error?.includes("OPENROUTESERVICE_API_KEY")) setApiKeyMissing(true);
-          throw new Error(payload?.error || "Request failed");
-        }
 
-        const best = payload?.routes?.[0];
-        if (!best || !Array.isArray(best.geometry) || best.geometry.length < 2) {
-          setSuggestedRoute(null);
-          alert("No valid route found. Try another start point or distance.");
-          return;
+        if (res.ok && payload?.routes?.[0]?.geometry?.length > 1) {
+          // API available — use OpenRouteService
+          const best = payload.routes[0];
+          const coords = best.geometry.map(
+            (p: { lat: number; lng: number }) => [p.lng, p.lat] as [number, number]
+          );
+          setSuggestedRoute({
+            id: `suggested-${Date.now()}`,
+            name: `${avoidFamiliar ? "New" : "Familiar"} Loop — ${(best.distanceMeters / 1000).toFixed(1)}km`,
+            date: new Date().toISOString(),
+            coordinates: coords,
+            distance: best.distanceMeters,
+            elevationGain: 0,
+            color: "#f472b6",
+            isRoundTrip: true,
+            type: "road",
+            familiarityScore: Math.round((best.familiarityRatio ?? 0) * 100),
+          } as GPXRoute & { familiarityScore: number });
+        } else {
+          // API unavailable — fall back to client-side algorithm
+          if (!res.ok && payload?.error?.includes("OPENROUTESERVICE_API_KEY")) {
+            setApiKeyMissing(true);
+          }
+          const { generateRandomRoute } = await import("@/lib/utils");
+          const seed = Date.now();
+          const existingCoords = routes.map((r) => r.coordinates);
+          const generated = generateRandomRoute(
+            [lon, lat], suggestDistance, "mixed",
+            avoidFamiliar ? "novel" : "familiar", existingCoords, seed
+          );
+          setSuggestedRoute({
+            id: `suggested-${Date.now()}`,
+            name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
+            date: new Date().toISOString(),
+            coordinates: generated.coordinates,
+            distance: generated.distance,
+            elevationGain: generated.elevationGain,
+            color: "#f472b6",
+            isRoundTrip: true,
+            type: "mixed",
+            familiarityScore: avoidFamiliar ? 75 : 40,
+          } as GPXRoute & { familiarityScore: number });
         }
-
-        const coords = best.geometry.map((p: { lat: number; lng: number }) => [p.lng, p.lat] as [number, number]);
-        setSuggestedRoute({
-          id: `suggested-${Date.now()}`,
-          name: `${avoidFamiliar ? "New" : "Familiar"} Loop — ${(best.distanceMeters / 1000).toFixed(1)}km`,
-          date: new Date().toISOString(),
-          coordinates: coords,
-          distance: best.distanceMeters,
-          elevationGain: 0,
-          color: "#f472b6",
-          isRoundTrip: true,
-          familiarityScore: Math.round((best.familiarityRatio ?? 0) * 100),
-        } as GPXRoute & { familiarityScore: number });
       } catch (err) {
         console.error(err);
+        // Network error or any other failure — always fall back to client-side algorithm
         if (err instanceof Error && err.message.includes("OPENROUTESERVICE_API_KEY")) {
           setApiKeyMissing(true);
-        } else {
-          alert("Could not generate a valid route.");
+        }
+        try {
+          const { generateRandomRoute } = await import("@/lib/utils");
+          let lat2 = 59.3293, lon2 = 18.0686;
+          if (startPoint) { [lon2, lat2] = startPoint; }
+          else if (routes.length > 0) {
+            const allCoords = routes.flatMap((r) => r.coordinates);
+            if (allCoords.length > 0) {
+              lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
+              lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+            }
+          }
+          const generated = generateRandomRoute(
+            [lon2, lat2], suggestDistance, "mixed",
+            avoidFamiliar ? "novel" : "familiar", [], Date.now()
+          );
+          setSuggestedRoute({
+            id: `suggested-${Date.now()}`,
+            name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
+            date: new Date().toISOString(),
+            coordinates: generated.coordinates,
+            distance: generated.distance,
+            elevationGain: generated.elevationGain,
+            color: "#f472b6",
+            isRoundTrip: true,
+            type: "mixed",
+            familiarityScore: avoidFamiliar ? 75 : 40,
+          } as GPXRoute & { familiarityScore: number });
+        } catch {
+          setSuggestedRoute(null);
         }
       } finally {
         setIsSuggesting(false);
@@ -479,4 +528,125 @@ export function useAccountDeletion() {
   }, []);
 
   return { deleteAccount, isDeleting, error };
+}
+
+// ─── useWishlist ───────────────────────────────────────────────────────────────
+
+export function useWishlist(userId: string | null) {
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Load wishlist from Firestore on mount or when userId changes
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setWishlist(data.wishlisted || []);
+        }
+      } catch (e) { console.error("[useWishlist] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...wishlist, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] add", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const removeFromWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = wishlist.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const toggleWishlist = useCallback(async (routeId: string) => {
+    if (wishlist.includes(routeId)) {
+      await removeFromWishlist(routeId);
+    } else {
+      await addToWishlist(routeId);
+    }
+  }, [wishlist, addToWishlist, removeFromWishlist]);
+
+  return { wishlist, toggleWishlist, loading };
+}
+
+// ─── useFavorites ──────────────────────────────────────────────────────────────
+
+export function useFavorites(userId: string | null) {
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setFavorites(data.favorites || []);
+        }
+      } catch (e) { console.error("[useFavorites] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...favorites, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] add", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const removeFromFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = favorites.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const toggleFavorite = useCallback(async (routeId: string) => {
+    if (favorites.includes(routeId)) {
+      await removeFromFavorites(routeId);
+    } else {
+      await addToFavorites(routeId);
+    }
+  }, [favorites, addToFavorites, removeFromFavorites]);
+
+  return { favorites, toggleFavorite, loading };
 }
