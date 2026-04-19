@@ -93,7 +93,7 @@ export default function Home() {
 
   const acceptUpload = (name: string, type: string) => {
     if (!pendingUpload) return;
-    const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" };
+    const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
     setPendingUpload(null);
@@ -110,7 +110,7 @@ export default function Home() {
 
   const handleUpdateRoute = (id: string, name: string, type: string) => {
     updateRoute(id, name, type, routes);
-    if (selectedRoute && selectedRoute.id === id) setSelectedRoute({ ...selectedRoute, name, type: type as "road" | "trail" | undefined });
+    if (selectedRoute && selectedRoute.id === id) setSelectedRoute({ ...selectedRoute, name, type: type as "road" | "trail" | "mixed" | undefined });
     setEditingRoute(null);
   };
 

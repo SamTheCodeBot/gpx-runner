@@ -8,7 +8,7 @@ export interface GPXRoute {
   duration?: number; // minutes
   color: string;
   userId?: string; // Firebase user ID for cloud sync
-  type?: 'road' | 'trail'; // Route type tag
+  type?: 'road' | 'trail' | 'mixed'; // Route type tag
 }
 
 export interface RouteStats {
@@ -22,7 +22,7 @@ export interface RouteFilter {
   month?: string; // YYYY-MM
   minDistance?: number; // km
   maxDistance?: number; // km
-  type?: 'road' | 'trail' | 'all'; // Filter by route type
+  type?: 'road' | 'trail' | 'mixed' | 'all'; // Filter by route type
 }
 
 export interface RouteSuggestionRequest {

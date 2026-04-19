@@ -159,7 +159,7 @@ export default function Map({
     if (selectedRoute) {
       return [{
         positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
-        color: selectedRoute.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)',
+        color: selectedRoute.type === 'trail' ? 'rgb(18 221 251)' : selectedRoute.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)',
         weight: 4,
         opacity: 1,
       }];
@@ -167,7 +167,7 @@ export default function Map({
 
     return routes.map((route) => ({
       positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
-      color: (route.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)'),
+      color: (route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)'),
       weight: 2,
       opacity: 0.6,
     }));

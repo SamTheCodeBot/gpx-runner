@@ -80,7 +80,7 @@ export function RouteRow({ route, selected, onSelect, onDelete, onDownload, onEd
     >
       <div
         className="w-3 h-3 rounded-full shrink-0"
-        style={{ backgroundColor: route.type === 'trail' ? 'rgb(18 221 251)' : 'rgb(255 65 164)' }}
+        style={{ backgroundColor: route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)' }}
       />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>

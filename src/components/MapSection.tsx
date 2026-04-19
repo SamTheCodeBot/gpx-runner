@@ -37,6 +37,10 @@ function MapLegend() {
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
           <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Trail</span>
         </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
+          <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Mixed</span>
+        </div>
       </div>
     </div>
   );

@@ -171,7 +171,7 @@ export function useGPXRoutes(userId: string | null) {
         .map((r) => r.id);
 
       const updated = currentRoutes.map((r) =>
-        dupIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | undefined } : r
+        dupIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | "mixed" | undefined } : r
       );
       saveRoutes(updated);
 
