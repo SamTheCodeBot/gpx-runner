@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { collection, query, where, getDocs, doc, setDoc } from "firebase/firestore";
-import { ref, uploadBytes } from "firebase/storage";
+import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
 import { parseGPXFile, nextColor, downloadGPXFile } from "@/lib/utils";
@@ -141,6 +141,13 @@ export function useGPXRoutes(userId: string | null) {
       if (!confirm(`Delete "${route.name}"? This cannot be undone.`)) return;
       const updated = currentRoutes.filter((r) => r.id !== id);
       saveRoutes(updated);
+      if (storage && userId) {
+        try {
+          await deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`));
+        } catch (e) {
+          console.error("Failed to delete from Firebase Storage", e);
+        }
+      }
     },
     [saveRoutes]
   );
