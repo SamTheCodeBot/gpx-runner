@@ -167,11 +167,6 @@ export default function Home() {
         {/* Top bar */}
         <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
           <div className="flex items-center gap-3">
-            {/* Mobile: hamburger menu */}
-            <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -ml-2 rounded-xl hover:bg-surface-container transition-colors">
-              <Icon name="menu" className="text-on-surface-variant text-xl" />
-            </button>
-
             <div className="md:hidden flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
                 <Icon name="sprint" filled className="text-on-primary-container text-sm" />
@@ -179,7 +174,12 @@ export default function Home() {
               <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
             </div>
           </div>
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            {/* Mobile: hamburger menu (right side) */}
+            <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
+              <Icon name="menu" className="text-on-surface-variant text-xl" />
+            </button>
+          </div>
         </header>
 
         {/* Desktop: side-by-side | Mobile: tab-switched panels */}

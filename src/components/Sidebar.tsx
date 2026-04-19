@@ -21,7 +21,7 @@ export function Sidebar({ user, onLogout, fileInputRef, onFileUpload }: SidebarP
           </div>
           <h1 className="text-xl font-extrabold tracking-tight font-headline text-on-primary">GPX running</h1>
         </div>
-        <p className="text-[10px] text-on-primary-container/80 font-medium">Track your runs</p>
+        <p className="text-[10px] text-on-primary-container/80 font-medium">Every run, mapped out</p>
       </div>
 
       {/* Nav */}
@@ -94,7 +94,7 @@ export function MobileDrawer({ isOpen, onClose, user, onLogout, fileInputRef, on
             </div>
             <div>
               <h2 className="text-base font-extrabold tracking-tight font-headline">GPX running</h2>
-              <p className="text-[10px] text-on-primary-container/80">Track your runs</p>
+              <p className="text-[10px] text-on-primary-container/80">Every run, mapped out</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
