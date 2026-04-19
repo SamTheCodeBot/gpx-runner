@@ -1,21 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
 
 const RUNNING_AVATARS = [
-  { icon: "directions_run", label: "The Classic", color: "#006d43" },
-  { icon: "hiking",         label: "Trail Blazer", color: "#7c5c00" },
-  { icon: "sprint",         label: "Speedster", color: "#910000" },
-  { icon: "terrain",        label: "Mountain Goat", color: "#00527a" },
-  { icon: "timer",          label: "Marathoner", color: "#5b0099" },
-  { icon: "footprint",      label: "Consistent Strider", color: "#7a3d00" },
-  { icon: "sports_martial_arts", label: "Race Day Hero", color: "#b30000" },
-  { icon: "pool",           label: "Dawn Patroller", color: "#006a6a" },
-  { icon: "fitness_center", label: "Ultra Runner", color: "#3d3d00" },
-  { icon: "bolt",           label: "Sunset Chaser", color: "#830046" },
+  { icon: "directions_run",          label: "The Classic",          color: "#006d43" },
+  { icon: "hiking",                  label: "Trail Blazer",        color: "#7c5c00" },
+  { icon: "sprint",                  label: "Speedster",           color: "#910000" },
+  { icon: "terrain",                 label: "Mountain Goat",       color: "#00527a" },
+  { icon: "timer",                   label: "Marathoner",          color: "#5b0099" },
+  { icon: "footprint",               label: "Consistent Strider",  color: "#7a3d00" },
+  { icon: "sports_martial_arts",    label: "Race Day Hero",       color: "#b30000" },
+  { icon: "pool",                    label: "Dawn Patroller",      color: "#006a6a" },
+  { icon: "fitness_center",         label: "Ultra Runner",        color: "#3d3d00" },
+  { icon: "bolt",                    label: "Sunset Chaser",      color: "#830046" },
 ];
 
 function getGreeting() {
@@ -45,17 +45,39 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
   const [isChangingPw, setIsChangingPw] = useState(false);
   const [saving, setSaving]          = useState(false);
   const [saved, setSaved]             = useState(false);
+  const [saveError, setSaveError]     = useState("");
+
+  // Sync state when profile loads from Firestore
+  useEffect(() => {
+    if (profile) {
+      if (profile.displayName && profile.displayName !== displayName) {
+        setDisplayName(profile.displayName);
+      }
+      if (profile.avatar && profile.avatar !== avatar) {
+        setAvatar(profile.avatar);
+      }
+    }
+  }, [profile]);
 
   const greeting = getGreeting();
-  const joinedAt = profile?.joinedAt ? new Date(profile.joinedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "Just joined";
+  const joinedAt = profile?.joinedAt
+    ? new Date(profile.joinedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : "Just joined";
 
   const handleSave = async () => {
     if (!displayName.trim()) return;
     setSaving(true);
+    setSaveError("");
     try {
       await onSave({ displayName: displayName.trim(), avatar });
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      // Reload page after short delay so new avatar/name shows in sidebar
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    } catch (e: any) {
+      console.error("Profile save error:", e);
+      setSaveError(e?.message || "Failed to save. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -76,7 +98,7 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
         setTimeout(() => setPwSuccess(""), 3000);
       }
     } catch (e: any) {
-      setPwError(e.message || "Failed to update password");
+      setPwError(e?.message || "Failed to update password");
     } finally {
       setIsChangingPw(false);
     }
@@ -144,14 +166,23 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
             />
           </div>
 
+          {/* Save error */}
+          {saveError && (
+            <div className="px-3 py-2 bg-error-container text-error text-xs rounded-xl">{saveError}</div>
+          )}
+
           {/* Save button */}
           <button
             onClick={handleSave}
             disabled={saving || !displayName.trim()}
             className="w-full py-3 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
           >
-            {saving ? <Icon name="progress_activity" className="text-base animate-spin" /> : null}
-            {saved ? <><Icon name="check" className="text-base" /> Saved!</> : "Save Profile"}
+            {saving
+              ? <><Icon name="progress_activity" className="text-base animate-spin" /> Saving…</>
+              : saved
+                ? <><Icon name="check" className="text-base" /> Saved!</>
+                : "Save Profile"
+            }
           </button>
 
           <div className="border-t border-outline-variant/20" />
@@ -207,7 +238,10 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
                 disabled={isChangingPw || !newPassword || !confirmPassword}
                 className="w-full py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
               >
-                {isChangingPw ? <><Icon name="progress_activity" className="text-base animate-spin" /> Updating…</> : "Update Password"}
+                {isChangingPw
+                  ? <><Icon name="progress_activity" className="text-base animate-spin" /> Updating…</>
+                  : "Update Password"
+                }
               </button>
             </div>
           </div>

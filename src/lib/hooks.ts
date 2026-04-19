@@ -345,19 +345,24 @@ export function useUserProfile(userId: string | null) {
   useEffect(() => { loadProfile(); }, [loadProfile]);
 
   const saveProfile = useCallback(async (data: Partial<import("@/app/types").UserProfile>) => {
-    if (!db || !userId) return;
+    console.log("[useUserProfile] saveProfile called", { data, hasDb: !!db, userId });
+    if (!db || !userId) {
+      console.error("[useUserProfile] db or userId missing, cannot save");
+      return;
+    }
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
       const payload = { ...data, userId };
+      console.log("[useUserProfile] saving to Firestore", { payload, existing: !snap.empty });
       if (snap.empty) {
         await setDoc(doc(collection(db, "userProfiles"), userId), payload);
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), payload);
       }
-      // Update local state directly — Firestore write is confirmed by this point
       setProfile(prev => ({ ...(prev || {}), ...data, userId } as import("@/app/types").UserProfile));
-    } catch (e) { console.error("saveProfile", e); }
+      console.log("[useUserProfile] save confirmed");
+    } catch (e) { console.error("[useUserProfile] save failed", e); }
     finally { setLoading(false); }
   }, [userId]);
 
