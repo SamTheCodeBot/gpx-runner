@@ -163,8 +163,11 @@ export default function Home() {
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
       <Sidebar
-        user={user} onLogout={handleLogout}
-        fileInputRef={fileInputRef} onFileUpload={handleFileUpload}
+        user={user}
+        profile={profile}
+        onLogout={handleLogout}
+        fileInputRef={fileInputRef}
+        onFileUpload={handleFileUpload}
         onOpenProfile={() => setShowProfile(true)}
       />
 
@@ -267,6 +270,7 @@ export default function Home() {
           isOpen={showDrawer}
           onClose={() => setShowDrawer(false)}
           user={user}
+          profile={profile}
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
