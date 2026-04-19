@@ -5,6 +5,7 @@ import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
+import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileBottomNav } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
@@ -171,8 +172,7 @@ export default function Home() {
 
           {/* ── Routes panel ── */}
           <div className={
-            "flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar " +
-            (activeTab === "map" ? "hidden md:block" : "block")
+            "flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar order-2 md:order-none"
           }>
             {suggestedRoute && (
               <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
@@ -201,6 +201,8 @@ export default function Home() {
               </div>
             )}
 
+            <StatsBar stats={stats} />
+
             <RouteList
               filteredRoutes={filteredRoutes}
               selectedRoute={selectedRoute}
@@ -221,11 +223,8 @@ export default function Home() {
           </div>
 
           {/* ── Map panel ── */}
-          <div className={
-            "w-full md:w-1/2 md:shrink-0 " +
-            (activeTab === "routes" ? "hidden md:block" : "block")
-          }>
-            <div className="h-52 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
+          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
+            <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}

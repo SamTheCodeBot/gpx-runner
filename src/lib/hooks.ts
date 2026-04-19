@@ -99,6 +99,7 @@ export function useGPXRoutes(userId: string | null) {
             distance: parsed.distance,
             elevationGain: parsed.elevationGain,
             color: nextColor(),
+            type: "road" as const,
             userId: userId || undefined,
           };
 
