@@ -27,8 +27,8 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => 
   return null;
 }
 
-function MapController({ routes, selectedRoute, suggestedRoute }: {
-  routes: GPXRoute[];
+function MapController({ routes, selectedRoute, suggestedRoute }: { 
+  routes: GPXRoute[]; 
   selectedRoute: GPXRoute | null;
   suggestedRoute: RouteSuggestion | null;
 }) {
@@ -46,6 +46,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       targetCoords = selectedRoute.coordinates;
       fitKey = `selected:${selectedRoute.id}`;
     } else if (routes.length > 0) {
+      // Fit map to all routes on initial load
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
       fitKey = `all:${routes.length}`;
@@ -109,13 +110,13 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
   const markers: { position: [number, number]; km: number }[] = [];
   let totalDistance = 0;
   let lastKm = 0;
-
+  
   for (let i = 1; i < coordinates.length; i++) {
     const dist = calcDistance(coordinates[i-1], coordinates[i]);
     totalDistance += dist;
-
+    
     const currentKm = Math.floor(totalDistance);
-    if (currentKm > lastKm && currentKm <= 50) {
+    if (currentKm > lastKm && currentKm <= 50) { // Show up to 50km markers
       markers.push({
         position: coordinates[i],
         km: currentKm
@@ -123,15 +124,15 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
       lastKm = currentKm;
     }
   }
-
+  
   return markers;
 }
 
-export default function Map({
-  routes,
-  selectedRoute,
-  showHeatmap,
-  suggestedRoute,
+export default function Map({ 
+  routes, 
+  selectedRoute, 
+  showHeatmap, 
+  suggestedRoute, 
   selectedStartPoint,
   onMapClick,
   isSelectingStartPoint,
@@ -140,6 +141,7 @@ export default function Map({
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
   useEffect(() => {
+    // Request user's geolocation
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -149,6 +151,7 @@ export default function Map({
         },
         (error) => {
           console.log("Geolocation error:", error);
+          // Silently fail - will use default
         },
         { timeout: 5000 }
       );
@@ -162,26 +165,28 @@ export default function Map({
       const avgLon = coords.reduce((sum, [lon]) => sum + lon, 0) / coords.length;
       return [avgLat, avgLon] as [number, number];
     }
-
+    
     if (routes.length === 0) {
+      // Use user's location if available, fallback to Stockholm
       if (userLocation) {
         return userLocation;
       }
       return [59.3293, 18.0686] as [number, number];
     }
-
+    
     const allCoords = routes.flatMap((r) => r.coordinates);
     if (allCoords.length === 0) return [59.3293, 18.0686] as [number, number];
-
+    
     const avgLat = allCoords.reduce((sum, [_lon, lat]) => sum + lat, 0) / allCoords.length;
     const avgLon = allCoords.reduce((sum, [lon, _lat]) => sum + lon, 0) / allCoords.length;
-
+    
     return [avgLat, avgLon] as [number, number];
   };
 
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
+    // If a route is selected, show ONLY that route — hide all others
     if (selectedRoute) {
       return [{
         positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
@@ -203,6 +208,7 @@ export default function Map({
   const activeRouteCoords = selectedRoute?.coordinates || suggestedRoute?.coordinates || [];
   const kmMarkers = getKilometerMarkers(activeRouteCoords);
 
+  // Create kilometer marker icon
   const kmMarkerIcon = (km: number) => L.divIcon({
     html: `<div style="
       background: ${darkMode ? '#18181b' : '#ffffff'};
@@ -251,25 +257,59 @@ export default function Map({
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url={darkMode
+        url={darkMode 
           ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         }
       />
-
+      
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
+      
+      {/* Map click events */}
+      <MapEvents onMapClick={onMapClick} />
 
-      {kmMarkers.map((marker, i) => (
-        <Marker
-          key={`km-${i}`}
-          position={marker.position}
+      {/* Draw selected start point marker */}
+      {selectedStartPoint && (
+        <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>
+          <Popup>Start/End Point</Popup>
+        </Marker>
+      )}
+
+      {/* Draw kilometer markers for selected/suggested route */}
+      {kmMarkers.map((marker, idx) => (
+        <Marker 
+          key={idx} 
+          position={[marker.position[1], marker.position[0]]} 
           icon={kmMarkerIcon(marker.km)}
-        />
+        >
+          <Popup>{marker.km} km</Popup>
+        </Marker>
       ))}
 
-      {activeRouteCoords.length > 0 && (
-        <Marker position={activeRouteCoords[0]} icon={startPointIcon} />
+      {/* Draw suggested route */}
+      {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
+        <Polyline
+          positions={suggestedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{
+            color: "#f472b6",
+            weight: 5,
+            opacity: 1,
+          }}
+        />
       )}
+
+      {/* Draw heatmap routes */}
+      {getHeatmapRoutes().map((route, index) => (
+        <Polyline
+          key={`heatmap-${index}`}
+          positions={route.positions}
+          pathOptions={{
+            color: route.color,
+            weight: route.weight,
+            opacity: route.opacity,
+          }}
+        />
+      ))}
     </MapContainer>
   );
 }
