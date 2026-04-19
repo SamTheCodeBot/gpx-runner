@@ -58,29 +58,10 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
-      const lats = targetCoords.map(([, lat]) => lat);
-      const lons = targetCoords.map(([lon]) => lon);
-      const minLat = Math.min(...lats);
-      const maxLat = Math.max(...lats);
-      const minLon = Math.min(...lons);
-      const maxLon = Math.max(...lons);
-      const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
-      let zoom = 13;
-      if (maxDiff > 20) zoom = 3;
-      else if (maxDiff > 10) zoom = 4;
-      else if (maxDiff > 5)  zoom = 5;
-      else if (maxDiff > 2)  zoom = 6;
-      else if (maxDiff > 1)  zoom = 7;
-      else if (maxDiff > 0.5) zoom = 8;
-      else if (maxDiff > 0.3) zoom = 9;
-      else if (maxDiff > 0.15) zoom = 10;
-      else if (maxDiff > 0.08) zoom = 11;
-      else if (maxDiff > 0.04) zoom = 12;
-      else if (maxDiff > 0.02) zoom = 13;
-      else if (maxDiff > 0.005) zoom = 14;
-      else zoom = 15;
-      const center: [number, number] = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
-      map.setView(center, zoom, { animate: false });
+      const bounds = L.latLngBounds(
+        targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
+      );
+      map.fitBounds(bounds, { padding: [50, 50] });
     } else {
       const bounds = L.latLngBounds(
         targetCoords.map(([lon, lat]) => [lat, lon] as [number, number])
