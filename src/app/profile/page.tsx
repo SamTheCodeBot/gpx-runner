@@ -119,7 +119,39 @@ export default function ProfilePage() {
     await deleteAccount(user!.uid, deletePassword);
   };
 
-  if (!user) return null;
+  if (!user || profileLoading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <header className="bg-surface-container-lowest border-b border-outline-variant/20 px-4 py-3 flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-2 text-on-surface-variant hover:text-on-surface transition-colors">
+            <Icon name="arrow_back" className="text-xl" />
+            <span className="text-sm font-medium">My Routes</span>
+          </Link>
+          <div className="flex-1" />
+          <span className="text-xs text-on-surface-variant font-medium">GPX running</span>
+        </header>
+        <main className="flex-1 flex justify-center items-start py-8 px-4">
+          <div className="w-full max-w-md space-y-6 animate-pulse">
+            <div className="text-center">
+              <div className="h-8 w-20 mx-auto bg-surface-container rounded-xl" />
+              <div className="h-4 w-32 mx-auto bg-surface-container rounded-xl mt-2" />
+            </div>
+            <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
+              <div className="grid grid-cols-5 gap-2">
+                {[...Array(10)].map((_, i) => (
+                  <div key={i} className="aspect-square bg-surface-container rounded-2xl" />
+                ))}
+              </div>
+            </div>
+            <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
+              <div className="h-4 bg-surface-container rounded-xl w-24 mb-2" />
+              <div className="h-10 bg-surface-container rounded-xl" />
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
