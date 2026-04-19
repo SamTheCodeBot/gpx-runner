@@ -148,8 +148,41 @@ export default function Map({
     
     const avgLat = allCoords.reduce((sum, [_lon, lat]) => sum + lat, 0) / allCoords.length;
     const avgLon = allCoords.reduce((sum, [lon, _lat]) => sum + lon, 0) / allCoords.length;
-    
+
     return [avgLat, avgLon] as [number, number];
+  };
+
+  // Calculate zoom level from route bounds so all routes fit in view
+  const getZoom = () => {
+    if (routes.length === 0) return 13;
+    const allCoords = routes.flatMap((r) => r.coordinates);
+    if (allCoords.length === 0) return 13;
+
+    const lats = allCoords.map(([, lat]) => lat);
+    const lons = allCoords.map(([lon]) => lon);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+
+    const latDiff = maxLat - minLat;
+    const lonDiff = maxLon - minLon;
+    const maxDiff = Math.max(latDiff, lonDiff);
+
+    // Convert degree spread to zoom level
+    // Each zoom level covers roughly half the area of the previous
+    if (maxDiff > 50) return 2;
+    if (maxDiff > 20) return 3;
+    if (maxDiff > 10) return 4;
+    if (maxDiff > 5)  return 5;
+    if (maxDiff > 2)  return 6;
+    if (maxDiff > 1)  return 7;
+    if (maxDiff > 0.5) return 8;
+    if (maxDiff > 0.2) return 9;
+    if (maxDiff > 0.1) return 10;
+    if (maxDiff > 0.05) return 11;
+    if (maxDiff > 0.02) return 12;
+    return 13;
   };
 
   const getHeatmapRoutes = () => {
@@ -219,7 +252,7 @@ export default function Map({
   return (
     <MapContainer
       center={getCenter()}
-      zoom={13}
+      zoom={getZoom()}
       style={{ height: "100%", width: "100%", background: darkMode ? "#111113" : "#f4f4f5" }}
       zoomControl={true}
       dragging={!isSelectingStartPoint}
