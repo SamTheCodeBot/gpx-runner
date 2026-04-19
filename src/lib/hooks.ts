@@ -390,7 +390,6 @@ export function useAccountDeletion() {
       const { auth } = await import("@/lib/firebase");
       const {
         reauthenticateWithCredential,
-        signOut,
         deleteUser,
         EmailAuthProvider,
       } = await import("firebase/auth");
@@ -437,8 +436,7 @@ export function useAccountDeletion() {
       // Step 5: Delete Firebase Auth account
       await deleteUser(currentUser);
 
-      // Step 6: Sign out and redirect
-      await signOut(auth);
+      // Step 6: Redirect (auth state is cleared after deleteUser; signOut is not needed)
       window.location.href = "/";
     } catch (e: any) {
       console.error("[deleteAccount]", e);
