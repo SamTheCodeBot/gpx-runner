@@ -376,3 +376,82 @@ export function useUserProfile(userId: string | null) {
 
   return { profile, saveProfile, loading };
 }
+
+// ─── useAccountDeletion ────────────────────────────────────────────────────────
+
+export function useAccountDeletion() {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError]           = useState("");
+
+  const deleteAccount = useCallback(async (userId: string, password: string) => {
+    setIsDeleting(true);
+    setError("");
+    try {
+      const { auth } = await import("@/lib/firebase");
+      const {
+        reauthenticateWithCredential,
+        signOut,
+        deleteUser,
+        EmailAuthProvider,
+      } = await import("firebase/auth");
+
+      const currentUser = auth?.currentUser;
+      if (!currentUser || !currentUser.email) throw new Error("Not signed in.");
+
+      // Step 1: Re-authenticate (Firebase requires recent auth before delete)
+      const credential = EmailAuthProvider.credential(currentUser.email, password);
+      await reauthenticateWithCredential(currentUser, credential);
+
+      // Step 2: Orphan all routes — change userId so they belong to "a runner"
+      if (db) {
+        const routeSnap = await getDocs(
+          query(collection(db, "routes"), where("userId", "==", userId))
+        );
+        await Promise.all(
+          routeSnap.docs.map(doc =>
+            updateDoc(doc.ref, { userId: "deleted" })
+          )
+        );
+      }
+
+      // Step 3: Delete all GPX files from Storage
+      if (storage) {
+        const { listAll, deleteObject: delRef } = await import("firebase/storage");
+        try {
+          const listRef = ref(storage, `gpx-files/${userId}`);
+          const listResult = await listAll(listRef);
+          await Promise.all(listResult.items.map(item => delRef(item)));
+        } catch {
+          // Storage path may not exist — skip
+        }
+      }
+
+      // Step 4: Delete Firestore user profile document
+      if (db) {
+        const profileSnap = await getDocs(
+          query(collection(db, "userProfiles"), where("userId", "==", userId))
+        );
+        await Promise.all(profileSnap.docs.map(d => deleteDoc(d.ref)));
+      }
+
+      // Step 5: Delete Firebase Auth account
+      await deleteUser(currentUser);
+
+      // Step 6: Sign out and redirect
+      await signOut(auth);
+      window.location.href = "/";
+    } catch (e: any) {
+      console.error("[deleteAccount]", e);
+      if (e?.code === "auth/wrong-password" || e?.message?.includes("wrong-password")) {
+        setError("Incorrect password. Please try again.");
+      } else if (e?.code === "auth/requires-recent-login") {
+        setError("Please log out and log back in before deleting your account.");
+      } else {
+        setError(e?.message || "Failed to delete account. Please try again.");
+      }
+      setIsDeleting(false);
+    }
+  }, []);
+
+  return { deleteAccount, isDeleting, error };
+}

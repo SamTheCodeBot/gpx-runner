@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
+import { useAccountDeletion } from "@/lib/hooks";
 
 const RUNNING_AVATARS = [
   { icon: "directions_run",          label: "The Classic",          color: "#006d43" },
@@ -46,6 +47,8 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
   const [saving, setSaving]          = useState(false);
   const [saved, setSaved]             = useState(false);
   const [saveError, setSaveError]     = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const { deleteAccount, isDeleting, error: deleteError } = useAccountDeletion();
 
   // Sync state when profile loads from Firestore
   useEffect(() => {
@@ -102,6 +105,12 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
     } finally {
       setIsChangingPw(false);
     }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) return;
+    if (!confirm(`Are you absolutely sure? This will permanently delete your account and make all your routes anonymous. This cannot be undone.`)) return;
+    await deleteAccount(user.uid, deletePassword);
   };
 
   return (
@@ -244,6 +253,32 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
                 }
               </button>
             </div>
+          </div>
+
+          {/* Delete account */}
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-error mb-3">Delete Account</p>
+            <p className="text-xs text-on-surface-variant mb-3">
+              Permanently delete your account and anonymize all your routes (they will belong to &quot;a runner&quot;). This cannot be undone.
+            </p>
+            <input
+              type="password"
+              placeholder="Enter your password to confirm"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-error/30 transition-shadow mb-2"
+            />
+            {deleteError && <p className="text-xs text-error font-medium mb-2">{deleteError}</p>}
+            <button
+              onClick={handleDeleteAccount}
+              disabled={isDeleting || !deletePassword}
+              className="w-full py-2.5 bg-error-container text-error rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {isDeleting
+                ? <><Icon name="progress_activity" className="text-base animate-spin" /> Deleting…</>
+                : <><Icon name="warning" className="text-base" /> Delete my account</>
+              }
+            </button>
           </div>
 
           <div className="border-t border-outline-variant/20" />
