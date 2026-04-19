@@ -43,3 +43,11 @@ export interface RouteSuggestion {
   isRoundTrip?: boolean;
   familiarityScore?: number; // 0-100 percentage
 }
+
+export interface UserProfile {
+  displayName: string;
+  avatar: string; // Material Symbols icon name
+  joinedAt: string; // ISO date string
+  totalRuns: number; // cached count
+  totalDistance: number; // cached km
+}

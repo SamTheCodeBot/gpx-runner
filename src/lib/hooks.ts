@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { collection, query, where, getDocs, doc, setDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
@@ -325,4 +325,40 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
   );
 
   return { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
+}
+// ─── useUserProfile ────────────────────────────────────────────────────────────
+
+export function useUserProfile(userId: string | null) {
+  const [profile, setProfile] = useState<import("@/app/types").UserProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadProfile = useCallback(async () => {
+    if (!db || !userId) return;
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (!snap.empty) {
+        setProfile(snap.docs[0].data() as import("@/app/types").UserProfile);
+      }
+    } catch (e) { console.error("loadProfile", e); }
+  }, [userId]);
+
+  useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  const saveProfile = useCallback(async (data: Partial<import("@/app/types").UserProfile>) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      const payload = { ...data, userId };
+      if (snap.empty) {
+        await setDoc(doc(collection(db, "userProfiles"), userId), payload);
+      } else {
+        await updateDoc(doc(db, "userProfiles", snap.docs[0].id), payload);
+      }
+      await loadProfile();
+    } catch (e) { console.error("saveProfile", e); }
+    finally { setLoading(false); }
+  }, [userId, loadProfile]);
+
+  return { profile, saveProfile, loading };
 }

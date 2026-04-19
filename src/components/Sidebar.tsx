@@ -8,9 +8,10 @@ interface SidebarProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenProfile: () => void;
 }
 
-export function Sidebar({ user, onLogout, fileInputRef, onFileUpload }: SidebarProps) {
+export function Sidebar({ user, onLogout, fileInputRef, onFileUpload, onOpenProfile }: SidebarProps) {
   return (
     <aside className="hidden md:flex w-64 bg-primary text-on-primary flex-col shrink-0">
       {/* Logo area */}
@@ -73,9 +74,10 @@ interface MobileDrawerProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenProfile: () => void;
 }
 
-export function MobileDrawer({ isOpen, onClose, user, onLogout, fileInputRef, onFileUpload }: MobileDrawerProps) {
+export function MobileDrawer({ isOpen, onClose, user, onLogout, fileInputRef, onFileUpload, onOpenProfile }: MobileDrawerProps) {
   if (!isOpen) return null;
 
   return (
@@ -122,23 +124,30 @@ export function MobileDrawer({ isOpen, onClose, user, onLogout, fileInputRef, on
         </div>
 
         {/* User section */}
-        <div className="px-5 py-5 border-t border-white/10 flex items-center gap-3">
-          <img
-            alt="Profile"
-            className="w-10 h-10 rounded-full border-2 border-primary-container object-cover bg-primary-container shrink-0"
-            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.email || "U")}&background=001b44&color=fff&bold=true`}
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-on-primary truncate">{user?.email?.split("@")[0]}</p>
-            <p className="text-[10px] text-on-primary-container/80 uppercase tracking-wider">Runner</p>
+        <div className="px-5 py-5 border-t border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="material-symbols-outlined text-2xl text-on-primary">directions_run</span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-on-primary truncate">{user?.email?.split("@")[0]}</p>
+              <p className="text-[10px] text-on-primary-container/80 uppercase tracking-wider">Runner</p>
+            </div>
           </div>
-          <button
-            onClick={() => { onLogout(); onClose(); }}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-            title="Sign out"
-          >
-            <Icon name="logout" className="text-sm" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { onOpenProfile(); onClose(); }}
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title="Profile"
+            >
+              <Icon name="manage_accounts" className="text-sm" />
+            </button>
+            <button
+              onClick={() => { onLogout(); onClose(); }}
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title="Sign out"
+            >
+              <Icon name="logout" className="text-sm" />
+            </button>
+          </div>
         </div>
       </aside>
     </>

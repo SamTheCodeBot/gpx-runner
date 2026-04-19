@@ -3,12 +3,13 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
+import { UserProfileModal } from "@/components/UserProfileModal";
 import type { GPXRoute } from "./types";
 
 export default function Home() {
@@ -32,6 +33,7 @@ export default function Home() {
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
+  const [showProfile, setShowProfile]       = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
   const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
@@ -42,6 +44,8 @@ export default function Home() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
+  const { profile, saveProfile } = useUserProfile(user?.uid ?? null);
+
   const stats = useMemo(() => {
     if (!filteredRoutes.length) return null;
     const totalDistance = filteredRoutes.reduce((s, r) => s + (r.distance || 0), 0) / 1000;
@@ -53,6 +57,7 @@ export default function Home() {
       totalTime: 0,
     };
   }, [filteredRoutes]);
+
   const { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, avoidFamiliar);
 
@@ -160,6 +165,7 @@ export default function Home() {
       <Sidebar
         user={user} onLogout={handleLogout}
         fileInputRef={fileInputRef} onFileUpload={handleFileUpload}
+        onOpenProfile={() => setShowProfile(true)}
       />
 
       {/* Main content */}
@@ -264,6 +270,7 @@ export default function Home() {
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
+          onOpenProfile={() => setShowProfile(true)}
         />
       </main>
 
@@ -282,6 +289,16 @@ export default function Home() {
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={cancelUpload}
+        />
+      )}
+
+      {/* User profile modal */}
+      {showProfile && user && (
+        <UserProfileModal
+          user={user}
+          profile={profile}
+          onSave={saveProfile}
+          onClose={() => setShowProfile(false)}
         />
       )}
     </div>
