@@ -6,10 +6,8 @@ import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions } from "@/lib/hooks";
 import { Icon, EditModal, LoginScreen } from "@/components/ui";
 import { Sidebar, MobileBottomNav } from "@/components/Sidebar";
-import { StatsBar } from "@/components/StatsBar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
-import { SuggestPanel } from "@/components/SuggestPanel";
 import type { GPXRoute } from "./types";
 
 export default function Home() {
@@ -30,7 +28,6 @@ export default function Home() {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
-  const [showSuggestPanel, setShowSuggestPanel] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [activeTab, setActiveTab]          = useState("routes");
   const [searchQuery, setSearchQuery]       = useState("");
@@ -130,6 +127,9 @@ export default function Home() {
     );
   }
 
+  // ── Desktop layout ───────────────────────────────────────────────────────
+  // Desktop: side-by-side — map takes 50% width (fixed), routes scroll on right
+  // Mobile: stacked — MapSection on top, routes below; tab nav controls which panel shows
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
@@ -143,7 +143,6 @@ export default function Home() {
         {/* Top bar */}
         <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0">
           <div className="flex items-center gap-3">
-            {/* Mobile logo */}
             <div className="md:hidden flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
                 <Icon name="sprint" filled className="text-on-primary-container text-sm" />
@@ -154,89 +153,77 @@ export default function Home() {
           <div className="flex items-center gap-2" />
         </header>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar">
-          <MapSection
-            routes={filteredRoutes}
-            selectedRoute={selectedRoute}
-            suggestedRoute={suggestedRoute}
-            showHeatmap={showHeatmap}
-            onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
-            isLoading={isUploading}
-            selectedStartPoint={selectedStartPoint}
-            isSelectingStartPoint={isSelectingStartPoint}
-            onMapClick={handleMapClick}
-          />
+        {/* Desktop: side-by-side | Mobile: tab-based */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
-          {showSuggestPanel && (
-            <SuggestPanel
-              suggestDistance={suggestDistance} onDistanceChange={setSuggestDistance}
-              avoidFamiliar={avoidFamiliar} onAvoidChange={setAvoidFamiliar}
-              isSelectingStartPoint={isSelectingStartPoint}
-              onToggleStartPointSelect={() => setIsSelectingStartPoint(!isSelectingStartPoint)}
-              selectedStartPoint={selectedStartPoint}
-              onClearStartPoint={() => setSelectedStartPoint(null)}
-              isSuggesting={isSuggesting}
-              apiKeyMissing={apiKeyMissing}
-              onGenerate={handleGenerate}
-              onClose={() => setShowSuggestPanel(false)}
-            />
-          )}
-
-          {/* Generated route banner */}
-          {suggestedRoute && (
-            <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <Icon name="check_circle" filled className="text-secondary text-base" />
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
+          {/* ── Routes panel (left on desktop, below map on mobile) ── */}
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar order-2 md:order-1">
+            {suggestedRoute && (
+              <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <Icon name="check_circle" filled className="text-secondary text-base" />
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
+                    </div>
+                    <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      {(suggestedRoute.distance / 1000).toFixed(1)} km
+                    </p>
                   </div>
-                  <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
-                  <p className="text-xs text-on-surface-variant mt-0.5">
-                    {(suggestedRoute.distance / 1000).toFixed(1)} km
-                    {"familiarityScore" in suggestedRoute && suggestedRoute.familiarityScore !== undefined
-                      ? ` · ${suggestedRoute.familiarityScore}% familiar`
-                      : ""}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleGenerate}
-                    disabled={isSuggesting}
-                    className="p-2 hover:bg-primary-container/20 rounded-xl text-xs font-bold text-primary transition-colors"
-                    title="Regenerate"
-                  >
-                    <Icon name="refresh" className="text-base" />
-                  </button>
-                  <button
-                    onClick={clearSuggestion}
-                    className="p-2 hover:bg-primary-container/20 rounded-xl transition-colors"
-                  >
-                    <Icon name="close" className="text-on-surface-variant text-sm" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleGenerate} disabled={isSuggesting}
+                      className="p-2 hover:bg-primary-container/20 rounded-xl text-xs font-bold text-primary transition-colors">
+                      <Icon name="refresh" className="text-base" />
+                    </button>
+                    <button onClick={clearSuggestion}
+                      className="p-2 hover:bg-primary-container/20 rounded-xl transition-colors">
+                      <Icon name="close" className="text-on-surface-variant text-sm" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <RouteList
-            filteredRoutes={filteredRoutes}
-            selectedRoute={selectedRoute}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            showFilters={showFilters}
-            filter={filter}
-            setFilter={setFilter}
-            setShowFilters={setShowFilters}
-            getMonthOptions={getMonthOptions}
-            onSelectRoute={setSelectedRoute}
-            onDeleteRoute={handleDeleteRoute}
-            onDownloadRoute={handleDownload}
-            onEditRoute={setEditingRoute}
-            fileInputRef={fileInputRef}
-            onFileUpload={handleFileUpload}
-          />
+            <RouteList
+              filteredRoutes={filteredRoutes}
+              selectedRoute={selectedRoute}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              showFilters={showFilters}
+              filter={filter}
+              setFilter={setFilter}
+              setShowFilters={setShowFilters}
+              getMonthOptions={getMonthOptions}
+              onSelectRoute={setSelectedRoute}
+              onDeleteRoute={handleDeleteRoute}
+              onDownloadRoute={handleDownload}
+              onEditRoute={setEditingRoute}
+              fileInputRef={fileInputRef}
+              onFileUpload={handleFileUpload}
+            />
+          </div>
+
+          {/* ── Map panel (right on desktop, top on mobile) ── */}
+          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-2">
+            {/* Mobile: only show map when that tab is active */}
+            <div className={activeTab === "routes" ? "hidden md:block" : "block md:block"}>
+              <div className="h-52 md:h-full p-4 md:pr-6 md:pt-6">
+                <MapSection
+                  routes={filteredRoutes}
+                  selectedRoute={selectedRoute}
+                  suggestedRoute={suggestedRoute}
+                  showHeatmap={showHeatmap}
+                  onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                  isLoading={isUploading}
+                  selectedStartPoint={selectedStartPoint}
+                  isSelectingStartPoint={isSelectingStartPoint}
+                  onMapClick={handleMapClick}
+                />
+              </div>
+            </div>
+          </div>
+
         </div>
 
         {/* Mobile bottom nav */}

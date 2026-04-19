@@ -94,7 +94,7 @@ export function MapSection({
   );
 
   return (
-    <div className="w-full bg-surface-container-lowest rounded-2xl overflow-hidden relative shadow-sm md:shadow-card" style={{ minHeight: "280px", height: "min(60vh, 400px)" }}>
+    <div className="w-full h-full bg-surface-container-lowest rounded-2xl overflow-hidden relative shadow-sm md:shadow-card">
       <MapWithNoSSR
         routes={displayRoutes}
         selectedRoute={selectedRoute}
