@@ -53,19 +53,22 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     const maxLon = Math.max(...lons);
     const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
 
-    // Compute zoom from spread
+    // Compute zoom from spread — tighter so city routes get zoom 11-14
     let zoom = 13;
-    if (maxDiff > 50) zoom = 2;
-    else if (maxDiff > 20) zoom = 3;
+    if (maxDiff > 20) zoom = 3;
     else if (maxDiff > 10) zoom = 4;
     else if (maxDiff > 5)  zoom = 5;
     else if (maxDiff > 2)  zoom = 6;
     else if (maxDiff > 1)  zoom = 7;
     else if (maxDiff > 0.5) zoom = 8;
-    else if (maxDiff > 0.2) zoom = 9;
-    else if (maxDiff > 0.1) zoom = 10;
-    else if (maxDiff > 0.05) zoom = 11;
-    else if (maxDiff > 0.02) zoom = 12;
+    else if (maxDiff > 0.3) zoom = 9;
+    else if (maxDiff > 0.15) zoom = 10;
+    else if (maxDiff > 0.08) zoom = 11;
+    else if (maxDiff > 0.04) zoom = 12;
+    else if (maxDiff > 0.02) zoom = 13;
+    else if (maxDiff > 0.005) zoom = 14;
+    else zoom = 15;
+
 
     const center: [number, number] = [
       (minLat + maxLat) / 2,
@@ -110,17 +113,20 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       const maxLon = Math.max(...lons);
       const maxDiff = Math.max(maxLat - minLat, maxLon - minLon);
       let zoom = 13;
-      if (maxDiff > 50) zoom = 2;
-      else if (maxDiff > 20) zoom = 3;
+      if (maxDiff > 20) zoom = 3;
       else if (maxDiff > 10) zoom = 4;
       else if (maxDiff > 5)  zoom = 5;
       else if (maxDiff > 2)  zoom = 6;
       else if (maxDiff > 1)  zoom = 7;
       else if (maxDiff > 0.5) zoom = 8;
-      else if (maxDiff > 0.2) zoom = 9;
-      else if (maxDiff > 0.1) zoom = 10;
-      else if (maxDiff > 0.05) zoom = 11;
-      else if (maxDiff > 0.02) zoom = 12;
+      else if (maxDiff > 0.3) zoom = 9;
+      else if (maxDiff > 0.15) zoom = 10;
+      else if (maxDiff > 0.08) zoom = 11;
+      else if (maxDiff > 0.04) zoom = 12;
+      else if (maxDiff > 0.02) zoom = 13;
+      else if (maxDiff > 0.005) zoom = 14;
+      else zoom = 15;
+
       const center: [number, number] = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
       map.setView(center, zoom, { animate: false });
       routesInitRef.current = true;
