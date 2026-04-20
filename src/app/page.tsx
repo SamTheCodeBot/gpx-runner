@@ -241,7 +241,7 @@ export default function Home() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none bg-blue-300">
 
             {/* Desktop search (hidden on mobile) */}
             <div className="hidden md:block">
@@ -303,10 +303,10 @@ export default function Home() {
           </div>
 
           {/* ── Map panel ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
-            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3">
+          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none bg-red-500">
+            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3 bg-red-300">
               {/* Map — always full height */}
-              <div className="h-52 sm:h-64 md:h-full">
+              <div className="h-52 sm:h-64 md:h-full border-2 border-red-500">
                 <MapSection
                   routes={filteredRoutes}
                   selectedRoute={selectedRoute}
