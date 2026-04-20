@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
       routeCollections: (body.existingRoutes ?? []).map((route) =>
         (route.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
       ),
-      maxCandidates: 180,
-      alternatives: 1,
+      maxCandidates: 20,
+      alternatives: 3,
     });
 
     const best = result.routes[0];

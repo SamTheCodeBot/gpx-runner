@@ -19,7 +19,7 @@ export async function generateRoutes(
 ): Promise<{ routes: GeneratedRoute[]; rejectedCount: number }> {
   const toleranceKm = input.toleranceKm ?? 1;
   const familiarityMode = input.familiarityMode ?? "mixed";
-  const maxCandidates = input.maxCandidates ?? 180;
+  const maxCandidates = Math.min(input.maxCandidates ?? 180, 20);
   const alternatives = input.alternatives ?? 3;
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = toleranceKm * 1000;
@@ -63,31 +63,44 @@ export async function generateRoutes(
     parsedTracks,
   );
 
-  for (const candidate of candidateWaypoints) {
-    const requestPoints = [input.start, ...candidate.waypoints, input.start];
-    const providerResult = await provider.route({ coordinates: requestPoints });
-
-    if (!providerResult || providerResult.geometry.length < 2) {
-      rejectedCount += 1;
-      continue;
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < candidateWaypoints.length; i += BATCH_SIZE) {
+    const batch = candidateWaypoints.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (candidate) => {
+        const requestPoints = [input.start, ...candidate.waypoints, input.start];
+        const providerResult = await provider.route({ coordinates: requestPoints });
+        if (!providerResult || providerResult.geometry.length < 2) {
+          return { candidate, built: null };
+        }
+        return {
+          candidate,
+          built: evaluateBuiltRoute({
+            geometry: providerResult.geometry,
+            distanceMeters: providerResult.distanceMeters,
+            source: "provider",
+            seed: candidate.seed,
+            input,
+            familiarityIndex,
+            targetMeters,
+            targetFamiliarityRange,
+          }),
+        };
+      }),
+    );
+    for (const { built } of results) {
+      if (!built) { rejectedCount += 1; continue; }
+      if (built.decision === "accept") accepted.push(built.route);
+      else rejectedCount += 1;
     }
-
-    const built = evaluateBuiltRoute({
-      geometry: providerResult.geometry,
-      distanceMeters: providerResult.distanceMeters,
-      source: "provider",
-      seed: candidate.seed,
-      input,
-      familiarityIndex,
-      targetMeters,
-      targetFamiliarityRange,
-    });
-
-    if (built.decision === "accept") accepted.push(built.route);
-    else rejectedCount += 1;
   }
 
-  const bestAccepted = dedupeRoutes(accepted).sort((a, b) => b.score - a.score);
+  const bestAccepted = dedupeRoutes(accepted).sort((a, b) => {
+    const distDiffA = Math.abs(a.distanceMeters - targetMeters);
+    const distDiffB = Math.abs(b.distanceMeters - targetMeters);
+    if (distDiffA !== distDiffB) return distDiffA - distDiffB;
+    return b.score - a.score;
+  });
   return { routes: bestAccepted.slice(0, alternatives), rejectedCount };
 }
 

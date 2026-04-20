@@ -96,8 +96,8 @@ export default function WishlistPage() {
             onFileUpload={() => {}}
             wishlist={wishlist}
             favorites={favorites}
-            onToggleWishlist={(r) => toggleWishlist(r.id)}
-            onToggleFavorite={(r) => toggleFavorite(r.id)}
+            onToggleWishlist={(routeId) => toggleWishlist(routeId)}
+            onToggleFavorite={(routeId) => toggleFavorite(routeId)}
           />
         )}
       </main>
