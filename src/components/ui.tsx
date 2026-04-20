@@ -27,17 +27,17 @@ interface StatCardProps {
 
 export function StatCard({ label, value, unit, icon }: StatCardProps) {
   return (
-    <div className="bg-surface-container rounded-2xl p-4 flex items-center gap-3 shadow-card">
-      <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center shrink-0">
-        <Icon name={icon} className="text-on-primary-container text-lg" />
+    <div className="bg-surface-container rounded-2xl p-3 sm:p-4 flex items-center gap-2 sm:gap-3 shadow-card">
+      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary-container flex items-center justify-center shrink-0">
+        <Icon name={icon} className="text-on-primary-container text-base sm:text-lg" />
       </div>
       <div>
-        <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+        <p className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
           {label}
         </p>
-        <p className="text-xl font-extrabold text-primary leading-none mt-0.5">
+        <p className="text-base sm:text-xl font-extrabold text-primary leading-none mt-0.5">
           {value}
-          {unit && <span className="text-sm font-medium text-on-surface-variant ml-0.5">{unit}</span>}
+          {unit && <span className="text-xs sm:text-sm font-medium text-on-surface-variant ml-0.5">{unit}</span>}
         </p>
       </div>
     </div>
@@ -90,7 +90,8 @@ export function RouteRow({ route, selected, onSelect, onDelete, onDownload, onEd
           {route.type && <>·&nbsp;{route.type}</>}
         </p>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Edit & download actions — always visible when selected on mobile; hover-reveal on desktop */}
+      <div className={`flex items-center gap-1 sm:opacity-0 transition-opacity supports-hover:hover:opacity-100 group-hover:sm:opacity-100 ${selected ? "opacity-100" : "opacity-0 sm:opacity-0"}`}>
         <button
           onClick={(e) => { e.stopPropagation(); onEdit(); }}
           className="p-1.5 rounded-lg hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"
@@ -104,13 +105,6 @@ export function RouteRow({ route, selected, onSelect, onDelete, onDownload, onEd
           title="Download GPX"
         >
           <Icon name="download" className="text-sm" />
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="p-1.5 rounded-lg hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
-          title="Delete"
-        >
-          <Icon name="delete" className="text-sm" />
         </button>
       </div>
     </div>
@@ -188,9 +182,10 @@ interface EditModalProps {
   route: GPXRoute;
   onSave: (name: string, type: string) => void;
   onClose: () => void;
+  onDelete: () => void;
 }
 
-export function EditModal({ route, onSave, onClose }: EditModalProps) {
+export function EditModal({ route, onSave, onClose, onDelete }: EditModalProps) {
   const [name, setName] = useState(route.name);
   const [type, setType] = useState(route.type || "road");
 
@@ -240,6 +235,12 @@ export function EditModal({ route, onSave, onClose }: EditModalProps) {
             Save
           </button>
         </div>
+        <button
+          onClick={() => { if (confirm("Delete this route permanently?\nThis cannot be undone.")) { onDelete(); onClose(); } }}
+          className="w-full mt-3 py-2 border border-error/40 text-error/70 rounded-xl text-xs font-medium hover:bg-error-container hover:border-error/60 hover:text-error transition-colors"
+        >
+          Delete route
+        </button>
       </div>
     </div>
   );

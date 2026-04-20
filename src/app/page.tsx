@@ -311,6 +311,7 @@ export default function Home() {
           route={editingRoute}
           onSave={(name, type) => handleUpdateRoute(editingRoute.id, name, type)}
           onClose={() => setEditingRoute(null)}
+          onDelete={() => handleDeleteRoute(editingRoute.id)}
         />
       )}
 
