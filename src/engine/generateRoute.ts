@@ -58,36 +58,54 @@ export async function generateRoutes(
   const candidateWaypoints = buildLoopWaypointCandidates(
     input.start,
     targetMeters,
-    maxCandidates,
+    Math.min(maxCandidates, 20),
     familiarityMode,
     parsedTracks,
   );
 
-  for (const candidate of candidateWaypoints) {
-    const requestPoints = [input.start, ...candidate.waypoints, input.start];
-    const providerResult = await provider.route({ coordinates: requestPoints });
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < candidateWaypoints.length; i += BATCH_SIZE) {
+    const batch = candidateWaypoints.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (candidate) => {
+        const requestPoints = [input.start, ...candidate.waypoints, input.start];
+        const providerResult = await provider.route({ coordinates: requestPoints });
+        if (!providerResult || providerResult.geometry.length < 2) {
+          return { candidate, built: null };
+        }
+        const built = evaluateBuiltRoute({
+          geometry: providerResult.geometry,
+          distanceMeters: providerResult.distanceMeters,
+          source: "provider",
+          seed: candidate.seed,
+          input,
+          familiarityIndex,
+          targetMeters,
+          targetFamiliarityRange,
+        });
+        return { candidate, built };
+      }),
+    );
 
-    if (!providerResult || providerResult.geometry.length < 2) {
-      rejectedCount += 1;
-      continue;
+    for (const { built } of results) {
+      if (!built) {
+        rejectedCount += 1;
+      } else if (built.decision === "accept") {
+        accepted.push(built.route);
+      } else {
+        rejectedCount += 1;
+      }
     }
-
-    const built = evaluateBuiltRoute({
-      geometry: providerResult.geometry,
-      distanceMeters: providerResult.distanceMeters,
-      source: "provider",
-      seed: candidate.seed,
-      input,
-      familiarityIndex,
-      targetMeters,
-      targetFamiliarityRange,
-    });
-
-    if (built.decision === "accept") accepted.push(built.route);
-    else rejectedCount += 1;
   }
 
-  const bestAccepted = dedupeRoutes(accepted).sort((a, b) => b.score - a.score);
+  const bestAccepted = dedupeRoutes(accepted).sort((a, b) => {
+    // Primary sort: closest to target distance
+    const distDiffA = Math.abs(a.distanceMeters - targetMeters);
+    const distDiffB = Math.abs(b.distanceMeters - targetMeters);
+    if (distDiffA !== distDiffB) return distDiffA - distDiffB;
+    // Secondary sort: highest score
+    return b.score - a.score;
+  });
   return { routes: bestAccepted.slice(0, alternatives), rejectedCount };
 }
 
