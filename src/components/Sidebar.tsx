@@ -32,7 +32,7 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 space-y-0.5 mt-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
         <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="#">
           <Icon name="route" filled className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>

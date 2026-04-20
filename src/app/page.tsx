@@ -316,34 +316,35 @@ export default function Home() {
                 onMapClick={handleMapClick}
               />
 
-              {/* Mobile map controls: type legend (left) + heatmap toggle (right) */}
-              <div className="flex md:hidden items-center justify-between px-1 pt-3 mt-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
-                    <span className="text-[9px] text-on-surface-variant">Road</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
-                    <span className="text-[9px] text-on-surface-variant">Trail</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
-                    <span className="text-[9px] text-on-surface-variant">Mixed</span>
-                  </div>
+            </div>
+
+            {/* Mobile map controls: type legend (left) + heatmap toggle (right) — below map, above routes */}
+            <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                  <span className="text-[9px] text-on-surface-variant">Road</span>
                 </div>
-                <button
-                  onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                    showHeatmap
-                      ? "bg-primary text-on-primary"
-                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-                  }`}
-                >
-                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                  {showHeatmap ? "Hide routes" : "Show routes"}
-                </button>
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
+                  <span className="text-[9px] text-on-surface-variant">Trail</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
+                  <span className="text-[9px] text-on-surface-variant">Mixed</span>
+                </div>
               </div>
+              <button
+                onClick={() => setShowHeatmap(!showHeatmap)}
+                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                  showHeatmap
+                    ? "bg-primary text-on-primary"
+                    : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                }`}
+              >
+                <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                {showHeatmap ? "Hide routes" : "Show routes"}
+              </button>
             </div>
           </div>
 
