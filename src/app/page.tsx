@@ -156,8 +156,8 @@ export default function Home() {
     }
   };
 
-  const handleSaveToWishlist = async (route: GPXRoute) => {
-    await toggleWishlist(route.id);
+  const handleSaveToWishlist = async (routeId: string) => {
+    await toggleWishlist(routeId);
   };
 
 
@@ -166,8 +166,8 @@ export default function Home() {
     await toggleWishlist(suggestedRoute.id);
   };
 
-  const handleToggleFavorite = async (route: GPXRoute) => {
-    await toggleFavorite(route.id);
+  const handleToggleFavorite = async (routeId: string) => {
+    await toggleFavorite(routeId);
   };
 
   const handleGenerate = () => {

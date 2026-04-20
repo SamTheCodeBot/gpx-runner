@@ -22,13 +22,14 @@ interface RouteListProps {
   wishlist: string[];
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
+  onToggleWishlist: (routeId: string) => void;
 }
 
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
   showFilters, filter, setFilter, setShowFilters, getMonthOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
-  fileInputRef, onFileUpload, wishlist, favorites, onToggleFavorite,
+  fileInputRef, onFileUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
 }: RouteListProps) {
   const hasActiveFilters = !!(filter.month || filter.type || filter.list);
 
@@ -158,6 +159,7 @@ export function RouteList({
               onDownload={() => onDownloadRoute(route)}
               onEdit={() => onEditRoute(route)}
               onToggleFavorite={() => onToggleFavorite(route.id)}
+              onToggleWishlist={() => onToggleWishlist(route.id)}
             />
           ))}
         </div>
