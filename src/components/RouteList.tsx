@@ -31,27 +31,12 @@ export function RouteList({
 
   return (
     <div>
-      {/* Header */}
+      {/* Header: title left, filter button right */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-extrabold text-primary font-headline">
           All Routes
           <span className="ml-2 text-xs font-medium text-on-surface-variant">({filteredRoutes.length})</span>
         </h3>
-      </div>
-
-      {/* Search */}
-      <div className="relative mb-3">
-        <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm" />
-        <input
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 bg-surface-container border border-outline-variant rounded-full text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-          placeholder="Search routes..."
-        />
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
@@ -62,14 +47,6 @@ export function RouteList({
         >
           <Icon name="tune" className="text-xs" />Filters
         </button>
-        {(filter.month || filter.type) && (
-          <button
-            onClick={() => setFilter({})}
-            className="text-xs text-error font-medium hover:underline"
-          >
-            Clear all
-          </button>
-        )}
       </div>
 
       {/* Filter panel */}
@@ -93,6 +70,14 @@ export function RouteList({
             <option value="trail">Trail</option>
             <option value="mixed">Mixed</option>
           </select>
+          {(filter.month || filter.type) && (
+            <button
+              onClick={() => setFilter({})}
+              className="text-xs text-error font-medium hover:underline"
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 

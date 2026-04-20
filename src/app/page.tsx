@@ -212,32 +212,12 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            {/* Mobile: expandable search icon */}
-            {mobileSearchOpen ? (
-              <div className="flex items-center gap-2 md:hidden">
-                <input
-                  autoFocus
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Escape" && setMobileSearchOpen(false)}
-                  placeholder="Search routes..."
-                  className="w-48 pl-3 pr-2 py-1.5 bg-surface-container border border-outline-variant rounded-full text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(""); }}
-                  className="p-2 rounded-xl hover:bg-surface-container transition-colors"
-                >
-                  <Icon name="close" className="text-on-surface-variant text-base" />
-                </button>
-              </div>
-            ) : (
-              <button
+            <button
                 onClick={() => setMobileSearchOpen(true)}
                 className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
               >
                 <Icon name="search" className="text-on-surface-variant text-lg" />
               </button>
-            )}
 
             {/* Mobile: hamburger menu (right side) */}
             <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
@@ -302,7 +282,27 @@ export default function Home() {
           </div>
 
           {/* ── Map panel ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
+          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
+            {/* Floating search overlay — below header, over map */}
+            {mobileSearchOpen && (
+              <div className="absolute top-2 left-2 right-2 z-30 flex items-center gap-2 md:hidden">
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setMobileSearchOpen(false); setSearchQuery(""); }}}
+                  placeholder="Search routes..."
+                  className="flex-1 pl-4 pr-3 py-2 bg-surface-container-lowest/95 backdrop-blur-md border border-outline-variant rounded-2xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 shadow-lg"
+                />
+                <button
+                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(""); }}
+                  className="p-2 bg-surface-container-lowest/95 backdrop-blur-md rounded-xl shadow-lg hover:bg-surface-container transition-colors"
+                >
+                  <Icon name="close" className="text-on-surface-variant text-base" />
+                </button>
+              </div>
+            )}
+
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
                 routes={filteredRoutes}
@@ -316,19 +316,8 @@ export default function Home() {
                 onMapClick={handleMapClick}
               />
 
-              {/* Mobile map controls: heatmap toggle + type legend */}
-              <div className="flex md:hidden items-center justify-between px-1 pt-2 pb-1">
-                <button
-                  onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                    showHeatmap
-                      ? "bg-primary text-on-primary"
-                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-                  }`}
-                >
-                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                  {showHeatmap ? "Hide routes" : "Show routes"}
-                </button>
+              {/* Mobile map controls: type legend (left) + heatmap toggle (right) */}
+              <div className="flex md:hidden items-center justify-between px-1 pt-3 mt-1">
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1">
                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
@@ -343,6 +332,17 @@ export default function Home() {
                     <span className="text-[9px] text-on-surface-variant">Mixed</span>
                   </div>
                 </div>
+                <button
+                  onClick={() => setShowHeatmap(!showHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide routes" : "Show routes"}
+                </button>
               </div>
             </div>
           </div>

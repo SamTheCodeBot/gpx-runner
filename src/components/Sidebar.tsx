@@ -19,7 +19,7 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
   return (
-    <aside className="hidden md:flex w-64 bg-primary text-on-primary flex-col shrink-0">
+    <aside className="hidden md:flex w-64 h-full bg-primary text-on-primary flex-col shrink-0">
       {/* Logo area */}
       <div className="p-6">
         <div className="flex items-center gap-3 mb-1">

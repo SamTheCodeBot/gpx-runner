@@ -58,7 +58,7 @@ function HeatmapToggle({ showHeatmap, onToggleHeatmap }: { showHeatmap: boolean;
         }`}
       >
         <Icon name="layers" className="text-xs inline mr-1" />
-        {showHeatmap ? "Heatmap ON" : "Heatmap OFF"}
+        {showHeatmap ? "Hide routes" : "Show routes"}
       </button>
     </div>
   );
