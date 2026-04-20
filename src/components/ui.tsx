@@ -65,8 +65,8 @@ interface RouteRowProps {
   onEdit: () => void;
   wishlisted?: boolean;
   isFavorite?: boolean;
-  onToggleWishlist?: () => void;
-  onToggleFavorite?: () => void;
+  onToggleWishlist?: (routeId: string) => void;
+  onToggleFavorite?: (routeId: string) => void;
 }
 
 export function RouteRow({
@@ -101,7 +101,7 @@ export function RouteRow({
       <div className={`flex items-center gap-0.5 sm:opacity-0 transition-opacity supports-hover:hover:opacity-100 group-hover:sm:opacity-100 ${selected ? "opacity-100" : "opacity-0 sm:opacity-0"}`}>
         {onToggleFavorite && (
           <button
-            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(route.id); }}
             className={`p-1.5 rounded-lg transition-colors ${isFavorite ? "text-yellow-500" : "text-on-surface-variant hover:text-yellow-500"} hover:bg-surface-container-highest`}
             title={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
@@ -110,7 +110,7 @@ export function RouteRow({
         )}
         {onToggleWishlist && (
           <button
-            onClick={(e) => { e.stopPropagation(); onToggleWishlist(); }}
+            onClick={(e) => { e.stopPropagation(); onToggleWishlist(route.id); }}
             className={`p-1.5 rounded-lg transition-colors ${wishlisted ? "text-primary" : "text-on-surface-variant hover:text-primary"} hover:bg-surface-container-highest`}
             title={wishlisted ? "Remove from wishlist" : "Save to wishlist"}
           >
