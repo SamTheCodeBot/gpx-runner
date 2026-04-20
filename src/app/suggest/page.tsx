@@ -263,7 +263,9 @@ export default function SuggestPage() {
                 selectedRoute={suggestedRoute}
                 suggestedRoute={suggestedRoute}
                 showHeatmap={showHeatmap}
+                showPersonalHeatmap={false}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                onTogglePersonalHeatmap={() => {}}
                 isLoading={isUploading}
                 selectedStartPoint={selectedStartPoint}
                 isSelectingStartPoint={isSelectingStartPoint}
@@ -290,8 +292,8 @@ export default function SuggestPage() {
                 onClick={() => setShowHeatmap(!showHeatmap)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${showHeatmap ? "bg-secondary text-on-secondary" : "bg-surface-container-high text-on-surface-variant"}`}
               >
-                <Icon name="whatshot" className="text-sm" />
-                Heatmap
+                <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                {showHeatmap ? "Hide" : "Show"}
               </button>
             </div>
           </div>

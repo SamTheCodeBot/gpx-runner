@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
+import { buildPersonalHeatmap, HeatmapSegment } from "@/lib/heatmapUtils";
 
 interface MapProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
+  showPersonalHeatmap?: boolean;
   suggestedRoute?: RouteSuggestion | null;
   selectedStartPoint?: [number, number] | null;
   onMapClick?: (lat: number, lon: number) => void;
@@ -27,8 +29,8 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => 
   return null;
 }
 
-function MapController({ routes, selectedRoute, suggestedRoute }: { 
-  routes: GPXRoute[]; 
+function MapController({ routes, selectedRoute, suggestedRoute }: {
+  routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   suggestedRoute: RouteSuggestion | null;
 }) {
@@ -46,7 +48,6 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       targetCoords = selectedRoute.coordinates;
       fitKey = `selected:${selectedRoute.id}`;
     } else if (routes.length > 0) {
-      // Fit map to all routes on initial load
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
       fitKey = `all:${routes.length}`;
@@ -58,7 +59,6 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (lastFitKeyRef.current === fitKey) return;
 
     if (fitKey.startsWith("all:")) {
-      // Iterative centroid clustering: converge on the dense cluster, ignore outliers
       const toRad = (d: number) => d * Math.PI / 180;
       const R = 6371;
       const kmDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -80,12 +80,10 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
           .sort((a, b) => a.d - b.d);
         const mid = Math.floor(sorted.length / 2);
         const medianDist = sorted[mid].d;
-        // Keep routes within 2x median distance of centroid — ignores outliers, keeps cluster
         clusterRoutes = sorted.filter(x => x.d <= medianDist * 2.5).map(x => x.r);
         if (clusterRoutes.length <= 1) break;
       }
 
-      // Fallback if clustering kills everything
       if (clusterRoutes.length < 2) clusterRoutes = routes;
 
       const clusterCoords = clusterRoutes.flatMap(r => r.coordinates);
@@ -105,67 +103,52 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
   return null;
 }
 
-// Calculate distance between two points in km
 function calcDistance(coord1: [number, number], coord2: [number, number]): number {
   const R = 6371;
   const dLat = (coord2[1] - coord1[1]) * Math.PI / 180;
   const dLon = (coord2[0] - coord1[0]) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(coord1[1] * Math.PI / 180) * Math.cos(coord2[1] * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Get kilometer markers for a route
 function getKilometerMarkers(coordinates: [number, number][]): { position: [number, number]; km: number }[] {
   const markers: { position: [number, number]; km: number }[] = [];
   let totalDistance = 0;
   let lastKm = 0;
-  
+
   for (let i = 1; i < coordinates.length; i++) {
-    const dist = calcDistance(coordinates[i-1], coordinates[i]);
-    totalDistance += dist;
-    
+    totalDistance += calcDistance(coordinates[i - 1], coordinates[i]);
     const currentKm = Math.floor(totalDistance);
-    if (currentKm > lastKm && currentKm <= 50) { // Show up to 50km markers
-      markers.push({
-        position: coordinates[i],
-        km: currentKm
-      });
+    if (currentKm > lastKm && currentKm <= 50) {
+      markers.push({ position: coordinates[i], km: currentKm });
       lastKm = currentKm;
     }
   }
-  
+
   return markers;
 }
 
-export default function Map({ 
-  routes, 
-  selectedRoute, 
-  showHeatmap, 
-  suggestedRoute, 
+export default function Map({
+  routes,
+  selectedRoute,
+  showHeatmap,
+  showPersonalHeatmap = false,
+  suggestedRoute,
   selectedStartPoint,
   onMapClick,
   isSelectingStartPoint,
-  darkMode = true
+  darkMode = true,
 }: MapProps) {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
   useEffect(() => {
-    // Request user's geolocation
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setUserLocation([latitude, longitude]);
-          console.log("User location:", latitude, longitude);
-        },
-        (error) => {
-          console.log("Geolocation error:", error);
-          // Silently fail - will use default
-        },
-        { timeout: 5000 }
+        (position) => setUserLocation([position.coords.latitude, position.coords.longitude]),
+        () => {},
+        { timeout: 5000 },
       );
     }
   }, []);
@@ -173,36 +156,33 @@ export default function Map({
   const getCenter = () => {
     if (suggestedRoute && suggestedRoute.coordinates.length > 0) {
       const coords = suggestedRoute.coordinates;
-      const avgLat = coords.reduce((sum, [, lat]) => sum + lat, 0) / coords.length;
-      const avgLon = coords.reduce((sum, [lon]) => sum + lon, 0) / coords.length;
-      return [avgLat, avgLon] as [number, number];
+      return [
+        coords.reduce((sum, [, lat]) => sum + lat, 0) / coords.length,
+        coords.reduce((sum, [lon]) => sum + lon, 0) / coords.length,
+      ] as [number, number];
     }
-    
-    if (routes.length === 0) {
-      // Use user's location if available, fallback to Stockholm
-      if (userLocation) {
-        return userLocation;
-      }
-      return [59.3293, 18.0686] as [number, number];
-    }
-    
+    if (routes.length === 0) return userLocation ?? [59.3293, 18.0686];
     const allCoords = routes.flatMap((r) => r.coordinates);
-    if (allCoords.length === 0) return [59.3293, 18.0686] as [number, number];
-    
-    const avgLat = allCoords.reduce((sum, [_lon, lat]) => sum + lat, 0) / allCoords.length;
-    const avgLon = allCoords.reduce((sum, [lon, _lat]) => sum + lon, 0) / allCoords.length;
-    
-    return [avgLat, avgLon] as [number, number];
+    if (allCoords.length === 0) return [59.3293, 18.0686];
+    return [
+      allCoords.reduce((sum, [, lat]) => sum + lat, 0) / allCoords.length,
+      allCoords.reduce((sum, [lon]) => sum + lon, 0) / allCoords.length,
+    ] as [number, number];
   };
+
+  // Build personal heatmap segments — only when enabled and no single route is selected
+  const personalHeatmapSegments: HeatmapSegment[] =
+    showPersonalHeatmap && !selectedRoute && routes.length > 0
+      ? buildPersonalHeatmap(routes)
+      : [];
 
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
-    // If a route is selected, show ONLY that route — hide all others
     if (selectedRoute) {
       return [{
         positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
-        color: selectedRoute.type === 'trail' ? 'rgb(18 221 251)' : selectedRoute.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)',
+        color: selectedRoute.type === "trail" ? "rgb(18 221 251)" : selectedRoute.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
         weight: 4,
         opacity: 1,
       }];
@@ -210,51 +190,39 @@ export default function Map({
 
     return routes.map((route) => ({
       positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
-      color: (route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)'),
+      color: route.type === "trail" ? "rgb(18 221 251)" : route.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
       weight: 2,
       opacity: 0.6,
     }));
   };
 
-  // Get selected route or suggested route for kilometer markers
   const activeRouteCoords = selectedRoute?.coordinates || suggestedRoute?.coordinates || [];
   const kmMarkers = getKilometerMarkers(activeRouteCoords);
 
-  // Create kilometer marker icon
-  const kmMarkerIcon = (km: number) => L.divIcon({
-    html: `<div style="
-      background: ${darkMode ? '#18181b' : '#ffffff'};
-      border: 2px solid ${darkMode ? '#22d3ee' : '#0891b2'};
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      font-weight: bold;
-      color: ${darkMode ? '#22d3ee' : '#0891b2'};
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    ">${km}</div>`,
-    className: '',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  });
+  const kmMarkerIcon = (km: number) =>
+    L.divIcon({
+      html: `<div style="
+        background:${darkMode ? "#18181b" : "#ffffff"};
+        border:2px solid ${darkMode ? "#22d3ee" : "#0891b2"};
+        border-radius:50%;width:24px;height:24px;
+        display:flex;align-items:center;justify-content:center;
+        font-size:10px;font-weight:bold;
+        color:${darkMode ? "#22d3ee" : "#0891b2"};
+        box-shadow:0 2px 4px rgba(0,0,0,0.3);
+      ">${km}</div>`,
+      className: "",
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
 
   const startPointIcon = L.divIcon({
     html: `<div style="
-      background: #22d3ee;
-      border: 3px solid ${darkMode ? '#0a0a0b' : '#ffffff'};
-      border-radius: 50%;
-      width: 30px;
-      height: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+      background:#22d3ee;border:3px solid ${darkMode ? "#0a0a0b" : "#ffffff"};
+      border-radius:50%;width:30px;height:30px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:16px;box-shadow:0 0 10px rgba(34,211,238,0.5);
     ">🏃</div>`,
-    className: '',
+    className: "",
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
@@ -269,57 +237,54 @@ export default function Map({
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url={darkMode 
+        url={darkMode
           ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         }
       />
-      
+
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
-      
-      {/* Map click events */}
       <MapEvents onMapClick={onMapClick} />
 
-      {/* Draw selected start point marker */}
       {selectedStartPoint && (
         <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>
           <Popup>Start/End Point</Popup>
         </Marker>
       )}
 
-      {/* Draw kilometer markers for selected/suggested route */}
       {kmMarkers.map((marker, idx) => (
-        <Marker 
-          key={idx} 
-          position={[marker.position[1], marker.position[0]]} 
-          icon={kmMarkerIcon(marker.km)}
-        >
+        <Marker key={idx} position={[marker.position[1], marker.position[0]]} icon={kmMarkerIcon(marker.km)}>
           <Popup>{marker.km} km</Popup>
         </Marker>
       ))}
 
-      {/* Draw suggested route */}
+      {/* Personal heatmap — thick gold lines showing run frequency */}
+      {personalHeatmapSegments.map((seg, idx) => (
+        <Polyline
+          key={`personal-heatmap-${idx}`}
+          positions={seg.positions.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{
+            color: seg.color,
+            weight: seg.weight,
+            opacity: 0.75,
+          }}
+        />
+      ))}
+
+      {/* Suggested route */}
       {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
         <Polyline
           positions={suggestedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
-          pathOptions={{
-            color: "#f472b6",
-            weight: 5,
-            opacity: 1,
-          }}
+          pathOptions={{ color: "#f472b6", weight: 5, opacity: 1 }}
         />
       )}
 
-      {/* Draw heatmap routes */}
+      {/* Standard heatmap */}
       {getHeatmapRoutes().map((route, index) => (
         <Polyline
           key={`heatmap-${index}`}
           positions={route.positions}
-          pathOptions={{
-            color: route.color,
-            weight: route.weight,
-            opacity: route.opacity,
-          }}
+          pathOptions={{ color: route.color, weight: route.weight, opacity: route.opacity }}
         />
       ))}
     </MapContainer>

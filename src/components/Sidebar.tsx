@@ -33,6 +33,8 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+
+        {/* Core nav */}
         <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="/">
           <Icon name="route" filled className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
@@ -41,6 +43,37 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
           <Icon name="explore" className="text-base" />
           <span className="font-semibold text-sm">Route Suggestions</span>
         </a>
+
+        {/* Divider */}
+        <div className="my-3 border-t border-white/10" />
+
+        {/* Heatmap & badges — fun extras */}
+        <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
+
+        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/">
+          <Icon name="whatshot" className="text-base" />
+          <div>
+            <span className="font-semibold text-sm">Personal Heatmap</span>
+            <span className="block text-[10px] text-on-primary/50">Your running density</span>
+          </div>
+        </a>
+
+        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/badges">
+          <Icon name="emoji_events" className="text-base" />
+          <div>
+            <span className="font-semibold text-sm">Badges</span>
+            <span className="block text-[10px] text-on-primary/50">Collect achievements</span>
+          </div>
+        </a>
+
+        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/50 hover:bg-primary-container/40 transition-colors cursor-not-allowed" href="#">
+          <Icon name="groups" className="text-base" />
+          <div>
+            <span className="font-semibold text-sm">Run Clubs</span>
+            <span className="block text-[10px] text-on-primary/50">Coming soon</span>
+          </div>
+        </a>
+
       </nav>
 
       {/* Upload GPX button */}
@@ -106,7 +139,6 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
       {/* Backdrop */}
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-
       {/* Drawer */}
       <aside className="fixed inset-y-0 left-0 z-50 w-72 bg-primary text-on-primary flex flex-col shadow-xl animate-slide-in">
         {/* Header */}
@@ -137,6 +169,34 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             <Icon name="explore" className="text-base" />
             <span className="font-semibold text-sm">Route Suggestions</span>
           </a>
+
+          {/* Divider */}
+          <div className="my-3 border-t border-white/10" />
+          <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
+
+          <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/">
+            <Icon name="whatshot" className="text-base" />
+            <div>
+              <span className="font-semibold text-sm">Personal Heatmap</span>
+              <span className="block text-[10px] text-on-primary/50">Your running density</span>
+            </div>
+          </a>
+
+          <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/badges">
+            <Icon name="emoji_events" className="text-base" />
+            <div>
+              <span className="font-semibold text-sm">Badges</span>
+              <span className="block text-[10px] text-on-primary/50">Collect achievements</span>
+            </div>
+          </a>
+
+          <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/40 cursor-not-allowed">
+            <Icon name="groups" className="text-base" />
+            <div>
+              <span className="font-semibold text-sm">Run Clubs</span>
+              <span className="block text-[10px] text-on-primary/50">Coming soon</span>
+            </div>
+          </div>
         </nav>
 
         {/* Upload GPX button */}
