@@ -31,31 +31,54 @@ export function RouteList({
 
   return (
     <div>
-      {/* Header with filter button on right */}
-      <div className="flex items-center justify-between mb-2">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-extrabold text-primary font-headline">
           All Routes
           <span className="ml-2 text-xs font-medium text-on-surface-variant">({filteredRoutes.length})</span>
         </h3>
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-3">
+        <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm" />
+        <input
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          className="w-full pl-10 pr-4 py-2 bg-surface-container border border-outline-variant rounded-full text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+          placeholder="Search routes..."
+        />
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors border ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
             showFilters || hasActiveFilters
               ? "bg-primary-container border-primary-container text-on-primary-container"
               : "bg-surface-container border-outline-variant text-on-surface-variant hover:border-outline"
           }`}
         >
-          <Icon name="tune" className="text-[9px]" />Filters
+          <Icon name="tune" className="text-xs" />Filters
         </button>
+        {(filter.month || filter.type) && (
+          <button
+            onClick={() => setFilter({})}
+            className="text-xs text-error font-medium hover:underline"
+          >
+            Clear all
+          </button>
+        )}
       </div>
 
       {/* Filter panel */}
       {showFilters && (
-        <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-2 mb-2 flex flex-wrap items-center gap-2 animate-fade-in">
+        <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-3 mb-3 flex flex-wrap items-center gap-2 animate-fade-in">
           <select
             value={filter.month || ""}
             onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
-            className="px-2 py-1 bg-surface-container border border-outline-variant rounded-lg text-[10px] text-on-surface focus:outline-none"
+            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
           >
             <option value="">All months</option>
             {getMonthOptions().map((m) => <option key={m} value={m}>{m}</option>)}
@@ -63,21 +86,13 @@ export function RouteList({
           <select
             value={filter.type || "all"}
             onChange={(e) => setFilter({ ...filter, type: e.target.value === "all" ? undefined : e.target.value })}
-            className="px-2 py-1 bg-surface-container border border-outline-variant rounded-lg text-[10px] text-on-surface focus:outline-none"
+            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
           >
             <option value="all">All types</option>
             <option value="road">Road</option>
             <option value="trail">Trail</option>
             <option value="mixed">Mixed</option>
           </select>
-          {(filter.month || filter.type) && (
-            <button
-              onClick={() => setFilter({})}
-              className="text-[10px] text-error font-medium hover:underline ml-auto"
-            >
-              Clear
-            </button>
-          )}
         </div>
       )}
 
