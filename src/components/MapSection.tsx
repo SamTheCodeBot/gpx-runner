@@ -13,9 +13,21 @@ const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
   ),
 });
 
+interface MapSectionProps {
+  routes: GPXRoute[];
+  selectedRoute: GPXRoute | null;
+  suggestedRoute: GPXRoute | null;
+  showHeatmap: boolean;
+  onToggleHeatmap: () => void;
+  isLoading: boolean;
+  selectedStartPoint: [number, number] | null;
+  isSelectingStartPoint: boolean;
+  onMapClick: (lat: number, lon: number) => void;
+}
+
 function MapLegend() {
   return (
-    <div className="hidden md:flex absolute bottom-4 left-4 z-20">
+    <div className="absolute bottom-4 left-4 z-20">
       <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
@@ -36,7 +48,7 @@ function MapLegend() {
 
 function HeatmapToggle({ showHeatmap, onToggleHeatmap }: { showHeatmap: boolean; onToggleHeatmap: () => void }) {
   return (
-    <div className="hidden md:block absolute top-4 right-4 z-20">
+    <div className="absolute top-4 right-4 z-20">
       <button
         onClick={onToggleHeatmap}
         className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
@@ -79,17 +91,8 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap,
   onToggleHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
-}: {
-  routes: GPXRoute[];
-  selectedRoute: GPXRoute | null;
-  suggestedRoute: GPXRoute | null;
-  showHeatmap: boolean;
-  onToggleHeatmap: () => void;
-  isLoading: boolean;
-  selectedStartPoint: [number, number] | null;
-  isSelectingStartPoint: boolean;
-  onMapClick: (lat: number, lon: number) => void;
-}) {
+}: MapSectionProps) {
+  // Routes with coordinates for display
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
   );
@@ -107,7 +110,6 @@ export function MapSection({
         darkMode={false}
       />
 
-      {/* Desktop-only overlays */}
       <MapLegend />
       <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
       <LoadingOverlay isLoading={isLoading} />

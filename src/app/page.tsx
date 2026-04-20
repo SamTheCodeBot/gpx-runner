@@ -26,7 +26,7 @@ export default function Home() {
   // ── Core data ───────────────────────────────────────────────────────────────
   const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
 
-  // ── UI state ───────────────────────────────────────────────────────────────
+  // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
@@ -40,8 +40,6 @@ export default function Home() {
   const [suggestDistance, setSuggestDistance] = useState(5);
   const [avoidFamiliar, setAvoidFamiliar]   = useState(true);
   const [username, setUsername]             = useState("");
-  // ── Mobile search expand ───────────────────────────────────────────────────
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
@@ -75,6 +73,7 @@ export default function Home() {
     try {
       const { login: lg, register: reg } = await import("@/lib/auth");
       if (isRegistering) {
+        // Duplicate check before creating account
         if (!username.trim() || username.trim().length < 3) {
           setAuthError("Please choose a username (at least 3 characters).");
           return;
@@ -89,6 +88,7 @@ export default function Home() {
           }
         }
         await reg(email, password);
+        // Create profile immediately with chosen username
         await saveProfile({ username: username.trim(), displayName: username.trim() });
         setUsername("");
       } else {
@@ -119,6 +119,7 @@ export default function Home() {
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
     setPendingUpload(null);
+    // Update Firestore with the corrected type (uploadFiles saved it as "road")
     if (named.id && user?.uid) {
       const { doc, updateDoc } = require("firebase/firestore");
       const { db } = require("@/lib/firebase");
@@ -126,7 +127,9 @@ export default function Home() {
     }
   };
 
-  const cancelUpload = () => { setPendingUpload(null); };
+  const cancelUpload = () => {
+    setPendingUpload(null);
+  };
 
   const handleDeleteRoute = (id: string) => {
     deleteRoute(id, routes);
@@ -148,11 +151,14 @@ export default function Home() {
     }
   };
 
-  const handleGenerate = () => { getSuggestion(selectedStartPoint, routes); };
+  const handleGenerate = () => {
+    getSuggestion(selectedStartPoint, routes);
+  };
 
   const getMonthOptions = () =>
     Array.from(new Set(routes.map((r) => r.date.substring(0, 7)))).sort().reverse();
 
+  // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -176,6 +182,10 @@ export default function Home() {
     );
   }
 
+  // ── Desktop: side-by-side flex (no reversal) ─────────────────────────────
+  // Routes left (flex-1, scrollable) | Map right (w-1/2, fixed height)
+  // Mobile: column flex — map at top (fixed height), routes below (scrollable)
+  // activeTab controls which panel is visible on mobile (map tab = map only; routes tab = routes only)
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
@@ -190,10 +200,9 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* ── Top bar ── */}
+        {/* Top bar */}
         <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
-          <div className="flex items-center gap-2">
-            {/* Mobile logo */}
+          <div className="flex items-center gap-3">
             <div className="md:hidden flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
                 <Icon name="sprint" filled className="text-on-primary-container text-sm" />
@@ -201,73 +210,35 @@ export default function Home() {
               <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
             </div>
           </div>
-
-          <div className="flex items-center gap-1">
-            {/* Mobile: expandable search icon */}
-            {mobileSearchOpen ? (
-              <div className="flex items-center gap-2 md:hidden">
-                <input
-                  autoFocus
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Escape" && setMobileSearchOpen(false)}
-                  placeholder="Search routes..."
-                  className="w-48 pl-3 pr-2 py-1.5 bg-surface-container border border-outline-variant rounded-full text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(""); }}
-                  className="p-2 rounded-xl hover:bg-surface-container transition-colors"
-                >
-                  <Icon name="close" className="text-on-surface-variant text-base" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setMobileSearchOpen(true)}
-                className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
-              >
-                <Icon name="search" className="text-on-surface-variant text-lg" />
-              </button>
-            )}
-
-            {/* Mobile hamburger (right side) */}
+          <div className="flex items-center gap-2">
+            {/* Mobile: hamburger menu (right side) */}
             <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
               <Icon name="menu" className="text-on-surface-variant text-xl" />
             </button>
           </div>
         </header>
 
-        {/* ── Desktop: side-by-side | Mobile: stacked ── */}
+        {/* Desktop: side-by-side | Mobile: tab-switched panels */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none">
-
-            {/* Desktop search (hidden on mobile) */}
-            <div className="hidden md:block">
-              <div className="relative mb-3">
-                <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm" />
-                <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-surface-container border border-outline-variant rounded-full text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                  placeholder="Search routes..."
-                />
-              </div>
-            </div>
-
+          <div className={
+            "flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar order-2 md:order-none"
+          }>
             {suggestedRoute && (
-              <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-3 md:p-4 animate-fade-in">
+              <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2 mb-0.5">
                       <Icon name="check_circle" filled className="text-secondary text-base" />
                       <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
                     </div>
-                    <h4 className="text-sm md:text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
-                    <p className="text-[11px] text-on-surface-variant mt-0.5">{(suggestedRoute.distance / 1000).toFixed(1)} km</p>
+                    <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      {(suggestedRoute.distance / 1000).toFixed(1)} km
+                    </p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <button onClick={handleGenerate} disabled={isSuggesting}
                       className="p-2 hover:bg-primary-container/20 rounded-xl text-xs font-bold text-primary transition-colors">
                       <Icon name="refresh" className="text-base" />
@@ -304,50 +275,18 @@ export default function Home() {
 
           {/* ── Map panel ── */}
           <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
-            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3">
-              {/* Map — always full height */}
-              <div className="h-52 sm:h-64 md:h-full">
-                <MapSection
-                  routes={filteredRoutes}
-                  selectedRoute={selectedRoute}
-                  suggestedRoute={suggestedRoute}
-                  showHeatmap={showHeatmap}
-                  onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
-                  isLoading={isUploading}
-                  selectedStartPoint={selectedStartPoint}
-                  isSelectingStartPoint={isSelectingStartPoint}
-                  onMapClick={handleMapClick}
-                />
-              </div>
-
-              {/* Mobile map controls — below the map */}
-              <div className="flex items-center justify-between gap-3 md:hidden">
-                {/* Type legend */}
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
-                    <span className="text-[9px] font-bold text-on-surface-variant">Road</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
-                    <span className="text-[9px] font-bold text-on-surface-variant">Trail</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
-                    <span className="text-[9px] font-bold text-on-surface-variant">Mixed</span>
-                  </div>
-                </div>
-                {/* Heatmap toggle */}
-                <button
-                  onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-colors ${
-                    showHeatmap ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
-                  }`}
-                >
-                  <Icon name="layers" className="text-xs inline mr-0.5" />
-                  {showHeatmap ? "ON" : "OFF"}
-                </button>
-              </div>
+            <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
+              <MapSection
+                routes={filteredRoutes}
+                selectedRoute={selectedRoute}
+                suggestedRoute={suggestedRoute}
+                showHeatmap={showHeatmap}
+                onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                isLoading={isUploading}
+                selectedStartPoint={selectedStartPoint}
+                isSelectingStartPoint={isSelectingStartPoint}
+                onMapClick={handleMapClick}
+              />
             </div>
           </div>
 
@@ -372,7 +311,6 @@ export default function Home() {
           route={editingRoute}
           onSave={(name, type) => handleUpdateRoute(editingRoute.id, name, type)}
           onClose={() => setEditingRoute(null)}
-          onDelete={() => handleDeleteRoute(editingRoute.id)}
         />
       )}
 
