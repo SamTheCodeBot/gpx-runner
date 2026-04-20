@@ -19,7 +19,7 @@ interface RouteListProps {
   onEditRoute: (r: GPXRoute) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  wishlist: GPXRoute[];
+  wishlist: string[];
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
 }
