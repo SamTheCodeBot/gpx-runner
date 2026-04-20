@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -55,8 +55,6 @@ export default function Home() {
     };
   }, [filteredRoutes]);
 
-  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
-  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -142,15 +140,9 @@ export default function Home() {
 
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
+;
 
-  const handleSaveToWishlist = async (routeId: string) => {
-    await toggleWishlist(routeId);
-  };
-
-
-  const handleToggleFavorite = async (routeId: string) => {
-    await toggleFavorite(routeId);
-  };
+;
 
 
   const getMonthOptions = () =>
@@ -248,10 +240,6 @@ export default function Home() {
               onEditRoute={setEditingRoute}
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
-              wishlist={wishlist}
-              favorites={favorites}
-              onToggleWishlist={handleSaveToWishlist}
-              onToggleFavorite={handleToggleFavorite}
             />
           </div>
 

@@ -19,17 +19,19 @@ interface RouteListProps {
   onEditRoute: (r: GPXRoute) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  wishlist: string[];
-  favorites: string[];
-  onToggleFavorite: (routeId: string) => void;
-  onToggleWishlist: (routeId: string) => void;
+  wishlist?: string[];
+  favorites?: string[];
+  onToggleFavorite?: (routeId: string) => void;
+  onToggleWishlist?: (routeId: string) => void;
 }
 
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
   showFilters, filter, setFilter, setShowFilters, getMonthOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
-  fileInputRef, onFileUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
+  fileInputRef, onFileUpload,
+  wishlist = [], favorites = [],
+  onToggleFavorite, onToggleWishlist,
 }: RouteListProps) {
   const hasActiveFilters = !!(filter.month || filter.type || filter.list);
 
@@ -67,7 +69,7 @@ export function RouteList({
       {/* Filter bar: wishlist/favorites pills + type/month filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {/* List filter: All / Favorites / Wishlist */}
-        {wishlist.length > 0 || favorites.length > 0 ? (
+        {wishlist?.length > 0 || favorites?.length > 0 ? (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container rounded-full border border-outline-variant">
             <button
               onClick={() => setFilter({ ...filter, list: "all" })}
@@ -158,8 +160,8 @@ export function RouteList({
               onDelete={() => onDeleteRoute(route.id)}
               onDownload={() => onDownloadRoute(route)}
               onEdit={() => onEditRoute(route)}
-              onToggleFavorite={() => onToggleFavorite(route.id)}
-              onToggleWishlist={() => onToggleWishlist(route.id)}
+              onToggleFavorite={() => onToggleFavorite?.(route.id)}
+              onToggleWishlist={() => onToggleWishlist?.(route.id)}
             />
           ))}
         </div>

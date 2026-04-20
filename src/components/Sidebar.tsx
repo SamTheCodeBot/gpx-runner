@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
@@ -15,10 +16,16 @@ interface SidebarProps {
 }
 
 export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: SidebarProps) {
+  const pathname = usePathname();
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading
     ? user?.email?.split("@")[0] || "Runner"
     : (profile?.displayName || user?.email?.split("@")[0]);
+
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    return pathname.startsWith(href);
+  };
 
   return (
     <aside className="hidden md:flex w-64 h-full bg-primary text-on-primary flex-col shrink-0 overflow-hidden">
@@ -35,47 +42,31 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-        <Link
-          href="/"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary"
-        >
-          <Icon name="route" filled className="text-base" />
+        <Link href="/" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="route" filled={isActive("/")} className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
         </Link>
 
-        <Link
-          href="/favorites"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors"
-        >
-          <Icon name="favorite" className="text-base" />
+        <Link href="/favorites" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/favorites") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="favorite" filled={isActive("/favorites")} className="text-base" />
           <span className="font-semibold text-sm">Favorites</span>
         </Link>
 
-        <Link
-          href="/wishlist"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors"
-        >
-          <Icon name="bookmark" className="text-base" />
+        <Link href="/wishlist" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/wishlist") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="bookmark" filled={isActive("/wishlist")} className="text-base" />
           <span className="font-semibold text-sm">Wishlist</span>
         </Link>
 
-        <Link
-          href="/suggest"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors"
-        >
-          <Icon name="explore" className="text-base" />
+        <Link href="/suggest" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
           <span className="font-semibold text-sm">Route Suggestions</span>
         </Link>
 
-        {/* Divider */}
         <div className="my-3 border-t border-white/10" />
         <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
 
-        <Link
-          href="/badges"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors"
-        >
-          <Icon name="emoji_events" className="text-base" />
+        <Link href="/badges" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/badges") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="emoji_events" filled={isActive("/badges")} className="text-base" />
           <div>
             <span className="font-semibold text-sm">Badges</span>
             <span className="block text-[10px] text-on-primary/50">Collect achievements</span>
@@ -136,10 +127,16 @@ interface MobileDrawerProps {
 }
 
 export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: MobileDrawerProps) {
+  const pathname = usePathname();
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading
     ? user?.email?.split("@")[0] || "Runner"
     : (profile?.displayName || user?.email?.split("@")[0]);
+
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    return pathname.startsWith(href);
+  };
 
   if (!isOpen) return null;
 
@@ -165,20 +162,20 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
 
         {/* Nav */}
         <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-          <Link href="/" onClick={onClose} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container">
-            <Icon name="route" filled className="text-base" />
+          <Link href="/" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="route" filled={isActive("/")} className="text-base" />
             <span className="font-semibold text-sm">My Routes</span>
           </Link>
-          <Link href="/favorites" onClick={onClose} className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors">
-            <Icon name="favorite" className="text-base" />
+          <Link href="/favorites" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/favorites") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="favorite" filled={isActive("/favorites")} className="text-base" />
             <span className="font-semibold text-sm">Favorites</span>
           </Link>
-          <Link href="/wishlist" onClick={onClose} className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors">
-            <Icon name="bookmark" className="text-base" />
+          <Link href="/wishlist" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/wishlist") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="bookmark" filled={isActive("/wishlist")} className="text-base" />
             <span className="font-semibold text-sm">Wishlist</span>
           </Link>
-          <Link href="/suggest" onClick={onClose} className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors">
-            <Icon name="explore" className="text-base" />
+          <Link href="/suggest" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
             <span className="font-semibold text-sm">Route Suggestions</span>
           </Link>
 

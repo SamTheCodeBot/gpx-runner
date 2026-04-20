@@ -168,7 +168,7 @@ export default function Map({
           console.log("Geolocation error:", error);
           // Silently fail - will use default
         },
-        { timeout: 5000 }
+        { timeout: 5000, maximumAge: 10 * 60 * 1000 }
       );
     }
   }, []);
