@@ -16,13 +16,13 @@ const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
 interface MapSectionProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
-  suggestedRoute: GPXRoute | null;
+  suggestedRoute?: GPXRoute | null;
   showHeatmap: boolean;
   onToggleHeatmap: () => void;
   isLoading: boolean;
-  selectedStartPoint: [number, number] | null;
-  isSelectingStartPoint: boolean;
-  onMapClick: (lat: number, lon: number) => void;
+  selectedStartPoint?: [number, number] | null;
+  isSelectingStartPoint?: boolean;
+  onMapClick?: (lat: number, lon: number) => void;
 }
 
 function MapLegend() {
@@ -90,7 +90,10 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
 
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap,
-  onToggleHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
+  onToggleHeatmap, isLoading,
+  selectedStartPoint = null,
+  isSelectingStartPoint = false,
+  onMapClick,
 }: MapSectionProps) {
   // Routes with coordinates for display
   const displayRoutes = suggestedRoute ? [] : routes.filter(
@@ -104,7 +107,7 @@ export function MapSection({
         selectedRoute={selectedRoute}
         showHeatmap={showHeatmap}
         suggestedRoute={suggestedRoute ?? undefined}
-        selectedStartPoint={selectedStartPoint}
+        selectedStartPoint={selectedStartPoint ?? undefined}
         isSelectingStartPoint={isSelectingStartPoint}
         onMapClick={onMapClick}
         darkMode={false}

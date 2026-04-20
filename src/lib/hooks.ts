@@ -480,3 +480,124 @@ export function useAccountDeletion() {
 
   return { deleteAccount, isDeleting, error };
 }
+
+// ─── useWishlist ───────────────────────────────────────────────────────────────
+
+export function useWishlist(userId: string | null) {
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Load wishlist from Firestore on mount or when userId changes
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setWishlist(data.wishlisted || []);
+        }
+      } catch (e) { console.error("[useWishlist] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...wishlist, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] add", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const removeFromWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = wishlist.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const toggleWishlist = useCallback(async (routeId: string) => {
+    if (wishlist.includes(routeId)) {
+      await removeFromWishlist(routeId);
+    } else {
+      await addToWishlist(routeId);
+    }
+  }, [wishlist, addToWishlist, removeFromWishlist]);
+
+  return { wishlist, toggleWishlist, loading };
+}
+
+// ─── useFavorites ──────────────────────────────────────────────────────────────
+
+export function useFavorites(userId: string | null) {
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setFavorites(data.favorites || []);
+        }
+      } catch (e) { console.error("[useFavorites] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...favorites, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] add", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const removeFromFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = favorites.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const toggleFavorite = useCallback(async (routeId: string) => {
+    if (favorites.includes(routeId)) {
+      await removeFromFavorites(routeId);
+    } else {
+      await addToFavorites(routeId);
+    }
+  }, [favorites, addToFavorites, removeFromFavorites]);
+
+  return { favorites, toggleFavorite, loading };
+}
