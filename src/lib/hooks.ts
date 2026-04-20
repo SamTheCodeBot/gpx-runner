@@ -427,7 +427,6 @@ export function useUserProfile(userId: string | null) {
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), updated);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (setProfile as (v: import("@/app/types").UserProfile | null) => void)(updated);
     } catch (e) { console.error("[useUserProfile] save failed", e); throw e; }
     finally { setLoading(false); }

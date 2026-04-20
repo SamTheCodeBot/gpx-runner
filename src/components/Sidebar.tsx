@@ -33,9 +33,13 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="#">
+        <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="/">
           <Icon name="route" filled className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
+        </a>
+        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/suggest">
+          <Icon name="explore" className="text-base" />
+          <span className="font-semibold text-sm">Route Suggestions</span>
         </a>
       </nav>
 
@@ -129,6 +133,10 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
               <span className="font-semibold text-sm">My Routes</span>
             </div>
           </div>
+          <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/suggest">
+            <Icon name="explore" className="text-base" />
+            <span className="font-semibold text-sm">Route Suggestions</span>
+          </a>
         </nav>
 
         {/* Upload GPX button */}
