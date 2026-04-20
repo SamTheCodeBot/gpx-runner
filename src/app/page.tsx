@@ -191,7 +191,7 @@ export default function Home() {
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* ── Top bar ── */}
-        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 md:hidden">
+        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
           <div className="flex items-center gap-2">
             {/* Mobile logo */}
             <div className="md:hidden flex items-center gap-2">
@@ -241,7 +241,7 @@ export default function Home() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none bg-blue-300">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none">
 
             {/* Desktop search (hidden on mobile) */}
             <div className="hidden md:block">
@@ -303,10 +303,10 @@ export default function Home() {
           </div>
 
           {/* ── Map panel ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none bg-red-500">
-            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3 bg-red-300">
+          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
+            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3">
               {/* Map — always full height */}
-              <div className="h-52 sm:h-64 md:h-full border-2 border-red-500">
+              <div className="h-52 sm:h-64 md:h-full">
                 <MapSection
                   routes={filteredRoutes}
                   selectedRoute={selectedRoute}
@@ -340,12 +340,12 @@ export default function Home() {
                 {/* Heatmap toggle */}
                 <button
                   onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2 py-0.5 rounded-lg text-[9px] font-bold transition-colors ${
+                  className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-colors ${
                     showHeatmap ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
                   }`}
                 >
-                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                  {showHeatmap ? "Hide routes" : "Show routes"}
+                  <Icon name="layers" className="text-xs inline mr-0.5" />
+                  {showHeatmap ? "ON" : "OFF"}
                 </button>
               </div>
             </div>
