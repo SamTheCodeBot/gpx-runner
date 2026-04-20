@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
+import { buildPersonalHeatmap } from "@/lib/heatmapUtils";
 
 interface MapProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
+  showPersonalHeatmap?: boolean;
   suggestedRoute?: RouteSuggestion | null;
   selectedStartPoint?: [number, number] | null;
   onMapClick?: (lat: number, lon: number) => void;
@@ -144,6 +146,7 @@ export default function Map({
   routes, 
   selectedRoute, 
   showHeatmap, 
+  showPersonalHeatmap = false,
   suggestedRoute, 
   selectedStartPoint,
   onMapClick,
@@ -322,6 +325,21 @@ export default function Map({
           }}
         />
       ))}
+
+      {/* Personal heatmap — thick gold lines showing segment frequency */}
+      {showPersonalHeatmap && !selectedRoute && routes.length > 0 && (
+        buildPersonalHeatmap(routes).map((seg, idx) => (
+          <Polyline
+            key={`personal-heatmap-${idx}`}
+            positions={seg.positions.map(([lon, lat]) => [lat, lon] as [number, number])}
+            pathOptions={{
+              color: seg.color,
+              weight: seg.weight,
+              opacity: 0.75,
+            }}
+          />
+        ))
+      )}
     </MapContainer>
   );
 }

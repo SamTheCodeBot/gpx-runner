@@ -258,6 +258,42 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {/* Badge count */}
+          {profile && (
+            <Link href="/badges" className="block bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10 hover:border-primary/30 transition-colors group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#ffd700]/10 flex items-center justify-center">
+                    <Icon name="emoji_events" className="text-[#ffd700] text-xl" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-extrabold text-on-surface">Achievement Badges</p>
+                    <p className="text-[10px] text-on-surface-variant">View your collection</p>
+                  </div>
+                </div>
+                <Icon name="arrow_forward" className="text-on-surface-variant group-hover:text-primary transition-colors text-xl" />
+              </div>
+            </Link>
+          )}
+
+          {/* Clubs */}
+          {profile && profile.clubs && profile.clubs.length > 0 && (
+            <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="groups" className="text-primary text-base" />
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Run Clubs</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {profile.clubs.map((club: string) => (
+                  <div key={club} className="flex items-center gap-2 bg-primary-container text-on-primary px-3 py-2 rounded-xl">
+                    <Icon name="groups" className="text-sm" />
+                    <span className="text-xs font-bold">{club}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Change password */}
           <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-3">Change Password</p>

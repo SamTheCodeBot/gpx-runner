@@ -57,4 +57,6 @@ export interface UserProfile {
   userId?: string; // Firebase UID (stored in document)
   wishlisted?: string[]; // array of route IDs
   favorites?: string[]; // array of route IDs
+  clubs?: string[]; // run club IDs the user is a member of
+  clubLogos?: Record<string, string>; // clubId → logo URL
 }

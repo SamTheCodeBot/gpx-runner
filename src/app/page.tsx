@@ -29,6 +29,7 @@ export default function Home() {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
+  const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
@@ -281,7 +282,9 @@ export default function Home() {
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}
                 showHeatmap={showHeatmap}
+                showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
                 isLoading={isUploading}
               />
 
