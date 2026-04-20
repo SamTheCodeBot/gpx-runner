@@ -27,7 +27,7 @@ interface MapSectionProps {
 
 function MapLegend() {
   return (
-    <div className="absolute bottom-4 left-4 z-20">
+    <div className="hidden md:flex absolute bottom-4 left-4 z-20">
       <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
@@ -48,7 +48,7 @@ function MapLegend() {
 
 function HeatmapToggle({ showHeatmap, onToggleHeatmap }: { showHeatmap: boolean; onToggleHeatmap: () => void }) {
   return (
-    <div className="absolute top-4 right-4 z-20">
+    <div className="hidden md:block absolute top-4 right-4 z-20">
       <button
         onClick={onToggleHeatmap}
         className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${

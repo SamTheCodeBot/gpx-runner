@@ -32,6 +32,7 @@ export default function Home() {
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
   const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
@@ -210,7 +211,34 @@ export default function Home() {
               <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {/* Mobile: expandable search icon */}
+            {mobileSearchOpen ? (
+              <div className="flex items-center gap-2 md:hidden">
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && setMobileSearchOpen(false)}
+                  placeholder="Search routes..."
+                  className="w-48 pl-3 pr-2 py-1.5 bg-surface-container border border-outline-variant rounded-full text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <button
+                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(""); }}
+                  className="p-2 rounded-xl hover:bg-surface-container transition-colors"
+                >
+                  <Icon name="close" className="text-on-surface-variant text-base" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setMobileSearchOpen(true)}
+                className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
+              >
+                <Icon name="search" className="text-on-surface-variant text-lg" />
+              </button>
+            )}
+
             {/* Mobile: hamburger menu (right side) */}
             <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
               <Icon name="menu" className="text-on-surface-variant text-xl" />
@@ -287,6 +315,35 @@ export default function Home() {
                 isSelectingStartPoint={isSelectingStartPoint}
                 onMapClick={handleMapClick}
               />
+
+              {/* Mobile map controls: heatmap toggle + type legend */}
+              <div className="flex md:hidden items-center justify-between px-1 pt-2 pb-1">
+                <button
+                  onClick={() => setShowHeatmap(!showHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide routes" : "Show routes"}
+                </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                    <span className="text-[9px] text-on-surface-variant">Road</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
+                    <span className="text-[9px] text-on-surface-variant">Trail</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
+                    <span className="text-[9px] text-on-surface-variant">Mixed</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
