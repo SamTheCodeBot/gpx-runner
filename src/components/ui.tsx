@@ -27,17 +27,17 @@ interface StatCardProps {
 
 export function StatCard({ label, value, unit, icon }: StatCardProps) {
   return (
-    <div className="bg-surface-container rounded-2xl p-3 sm:p-4 flex items-center gap-2 sm:gap-3 shadow-card">
-      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary-container flex items-center justify-center shrink-0">
-        <Icon name={icon} className="text-on-primary-container text-base sm:text-lg" />
+    <div className="bg-surface-container rounded-xl p-2 sm:p-3 flex items-center gap-2 shadow-card">
+      <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg bg-primary-container flex items-center justify-center shrink-0">
+        <Icon name={icon} className="text-on-primary-container text-xs sm:text-base" />
       </div>
       <div>
-        <p className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+        <p className="text-[8px] sm:text-[9px] font-extrabold uppercase tracking-wider text-on-surface-variant leading-tight">
           {label}
         </p>
-        <p className="text-base sm:text-xl font-extrabold text-primary leading-none mt-0.5">
+        <p className="text-sm sm:text-base font-extrabold text-primary leading-none mt-0.5">
           {value}
-          {unit && <span className="text-xs sm:text-sm font-medium text-on-surface-variant ml-0.5">{unit}</span>}
+          {unit && <span className="text-[10px] sm:text-xs font-medium text-on-surface-variant ml-0.5">{unit}</span>}
         </p>
       </div>
     </div>
