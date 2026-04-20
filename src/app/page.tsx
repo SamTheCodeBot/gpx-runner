@@ -191,7 +191,7 @@ export default function Home() {
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* ── Top bar ── */}
-        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20">
+        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 md:hidden">
           <div className="flex items-center gap-2">
             {/* Mobile logo */}
             <div className="md:hidden flex items-center gap-2">
