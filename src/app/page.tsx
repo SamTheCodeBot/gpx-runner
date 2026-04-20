@@ -340,12 +340,12 @@ export default function Home() {
                 {/* Heatmap toggle */}
                 <button
                   onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-colors ${
+                  className={`px-2 py-0.5 rounded-lg text-[9px] font-bold transition-colors ${
                     showHeatmap ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
                   }`}
                 >
-                  <Icon name="layers" className="text-xs inline mr-0.5" />
-                  {showHeatmap ? "ON" : "OFF"}
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide routes" : "Show routes"}
                 </button>
               </div>
             </div>
