@@ -231,7 +231,7 @@ export default function Home() {
 
           {/* ── Routes panel ── */}
           <div className={
-            "flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar order-2 md:order-none"
+            "flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none"
           }>
             {suggestedRoute && (
               <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">

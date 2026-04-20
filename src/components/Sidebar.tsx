@@ -19,7 +19,7 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
   return (
-    <aside className="hidden md:flex w-64 h-full bg-primary text-on-primary flex-col shrink-0">
+    <aside className="hidden md:flex w-64 h-full bg-primary text-on-primary flex-col shrink-0 overflow-hidden">
       {/* Logo area */}
       <div className="p-6">
         <div className="flex items-center gap-3 mb-1">
@@ -32,7 +32,7 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 space-y-0.5 mt-1">
+      <nav className="flex-1 px-3 space-y-0.5 mt-1 overflow-y-auto">
         <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="#">
           <Icon name="route" filled className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
