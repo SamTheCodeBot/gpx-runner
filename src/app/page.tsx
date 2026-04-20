@@ -237,6 +237,28 @@ export default function Home() {
           </div>
         </header>
 
+        {/* ── Floating search overlay (mobile only) ── */}
+        {mobileSearchOpen && (
+          <div className="md:hidden absolute top-14 left-0 right-0 z-30 px-4 py-2 bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/20">
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setMobileSearchOpen(false)}
+                placeholder="Search routes..."
+                className="flex-1 pl-3 pr-2 py-1.5 bg-surface-container border border-outline-variant rounded-full text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+              <button
+                onClick={() => { setMobileSearchOpen(false); }}
+                className="p-1.5 rounded-lg hover:bg-surface-container transition-colors"
+              >
+                <Icon name="close" className="text-on-surface-variant text-sm" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Desktop: side-by-side | Mobile: stacked ── */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
@@ -344,8 +366,8 @@ export default function Home() {
                     showHeatmap ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant"
                   }`}
                 >
-                  <Icon name="layers" className="text-xs inline mr-0.5" />
-                  {showHeatmap ? "ON" : "OFF"}
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide routes" : "Show routes"}
                 </button>
               </div>
             </div>

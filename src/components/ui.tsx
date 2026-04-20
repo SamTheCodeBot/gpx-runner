@@ -27,17 +27,16 @@ interface StatCardProps {
 
 export function StatCard({ label, value, unit, icon }: StatCardProps) {
   return (
-    <div className="bg-surface-container rounded-xl p-2 sm:p-3 flex items-center gap-2 shadow-card">
-      <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg bg-primary-container flex items-center justify-center shrink-0">
-        <Icon name={icon} className="text-on-primary-container text-xs sm:text-base" />
+    <div className="bg-surface-container rounded-xl px-2 py-1.5 sm:px-3 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-card">
+      <div className="w-5 h-5 sm:w-6 sm:h-6 rounded flex items-center justify-center shrink-0">
+        <Icon name={icon} className="text-on-surface-variant text-xs sm:text-sm" />
       </div>
       <div>
-        <p className="text-[8px] sm:text-[9px] font-extrabold uppercase tracking-wider text-on-surface-variant leading-tight">
+        <p className="text-[7px] sm:text-[8px] font-extrabold uppercase tracking-wider text-on-surface-variant leading-tight">
           {label}
         </p>
-        <p className="text-sm sm:text-base font-extrabold text-primary leading-none mt-0.5">
-          {value}
-          {unit && <span className="text-[10px] sm:text-xs font-medium text-on-surface-variant ml-0.5">{unit}</span>}
+        <p className="text-xs sm:text-sm font-extrabold text-primary leading-none">
+          {value}{unit && <span className="text-[9px] sm:text-[10px] font-medium text-on-surface-variant ml-0.5">{unit}</span>}
         </p>
       </div>
     </div>
