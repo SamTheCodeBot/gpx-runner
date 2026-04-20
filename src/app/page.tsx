@@ -203,34 +203,15 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Mobile: expandable search icon */}
-            {mobileSearchOpen ? (
-              <div className="flex items-center gap-2 md:hidden">
-                <input
-                  autoFocus
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Escape" && setMobileSearchOpen(false)}
-                  placeholder="Search routes..."
-                  className="w-48 pl-3 pr-2 py-1.5 bg-surface-container border border-outline-variant rounded-full text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  onClick={() => { setMobileSearchOpen(false); setSearchQuery(""); }}
-                  className="p-2 rounded-xl hover:bg-surface-container transition-colors"
-                >
-                  <Icon name="close" className="text-on-surface-variant text-base" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setMobileSearchOpen(true)}
-                className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
-              >
-                <Icon name="search" className="text-on-surface-variant text-lg" />
-              </button>
-            )}
+            {/* Search icon — opens floating search overlay on mobile */}
+            <button
+              onClick={() => setMobileSearchOpen(true)}
+              className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
+            >
+              <Icon name="search" className="text-on-surface-variant text-lg" />
+            </button>
 
-            {/* Mobile hamburger (right side) */}
+            {/* Hamburger (right side) */}
             <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
               <Icon name="menu" className="text-on-surface-variant text-xl" />
             </button>
@@ -263,7 +244,7 @@ export default function Home() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none">
+          <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4 md:p-6 space-y-4 md:space-y-5 custom-scrollbar order-2 md:order-none">
 
             {/* Desktop search (hidden on mobile) */}
             <div className="hidden md:block">
@@ -326,7 +307,7 @@ export default function Home() {
 
           {/* ── Map panel ── */}
           <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none">
-            <div className="p-4 md:pr-6 md:pt-6 md:pb-4 space-y-3">
+            <div className="px-4 pt-4 pb-2 md:pr-6 md:pt-6 md:pb-4 space-y-3">
               {/* Map — always full height */}
               <div className="h-52 sm:h-64 md:h-full">
                 <MapSection

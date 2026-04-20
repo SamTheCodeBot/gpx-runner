@@ -81,30 +81,6 @@ export function RouteList({
         </div>
       )}
 
-      {/* Filter panel */}
-      {showFilters && (
-        <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-3 mb-3 flex flex-wrap items-center gap-2 animate-fade-in">
-          <select
-            value={filter.month || ""}
-            onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
-            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
-          >
-            <option value="">All months</option>
-            {getMonthOptions().map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select
-            value={filter.type || "all"}
-            onChange={(e) => setFilter({ ...filter, type: e.target.value === "all" ? undefined : e.target.value })}
-            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
-          >
-            <option value="all">All types</option>
-            <option value="road">Road</option>
-            <option value="trail">Trail</option>
-            <option value="mixed">Mixed</option>
-          </select>
-        </div>
-      )}
-
       {/* Routes */}
       {filteredRoutes.length === 0 ? (
         <div className="text-center py-10">
