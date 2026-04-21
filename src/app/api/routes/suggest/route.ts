@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateTrainingRoutes } from '../../../../../src/api/routeGeneratorService';
+import { generateTrainingRoutes } from "@/api/routeGeneratorService";
 
 type SuggestionRequest = {
   distance?: number;
