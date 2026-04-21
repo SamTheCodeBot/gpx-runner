@@ -169,17 +169,17 @@ export default function SuggestPage() {
                   </div>
                 </div>
 
-                {/* Familiar / Novel */}
+                {/* Route area: your area = familiar running, new area = explore somewhere new */}
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium text-on-surface-variant w-16">Mode</span>
                   <button onClick={() => setAvoidFamiliar(false)}
                     className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
                       !avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🏠 Familiar</button>
+                    }`}>🏡 Your area</button>
                   <button onClick={() => setAvoidFamiliar(true)}
                     className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
                       avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🧭 Novel</button>
+                    }`}>🧭 New area</button>
                 </div>
 
                 {/* Start point */}
@@ -263,7 +263,9 @@ export default function SuggestPage() {
                 selectedRoute={suggestedRoute}
                 suggestedRoute={suggestedRoute}
                 showHeatmap={showHeatmap}
+                showPersonalHeatmap={false}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                onTogglePersonalHeatmap={() => {}}
                 isLoading={isUploading}
                 selectedStartPoint={selectedStartPoint}
                 isSelectingStartPoint={isSelectingStartPoint}
