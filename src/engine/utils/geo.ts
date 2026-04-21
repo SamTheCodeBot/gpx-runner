@@ -10,6 +10,15 @@ export function toDegrees(value: number): number {
   return (value * 180) / Math.PI;
 }
 
+/** Sum of haversine distances along a chain of points — i.e. what ORS would return if it ignored all intermediate waypoints and just connected them in order */
+export function computeStraightLineDistance(points: LatLng[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    total += haversineMeters(points[i], points[i + 1]);
+  }
+  return total;
+}
+
 export function haversineMeters(a: LatLng, b: LatLng): number {
   const dLat = toRadians(b.lat - a.lat);
   const dLng = toRadians(b.lng - a.lng);

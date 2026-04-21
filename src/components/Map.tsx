@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
-import { buildPersonalHeatmap, HeatmapSegment } from "@/lib/heatmapUtils";
+import { buildPersonalHeatmap, HeatmapSegment } from "@/engine/heatmapUtils";
 
 interface MapProps {
   routes: GPXRoute[];
@@ -229,7 +229,7 @@ export default function Map({
 
   return (
     <MapContainer
-      center={getCenter()}
+      center={getCenter() as [number, number]}
       zoom={13}
       style={{ height: "100%", width: "100%", background: darkMode ? "#111113" : "#f4f4f5" }}
       zoomControl={true}

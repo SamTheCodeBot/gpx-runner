@@ -6,7 +6,7 @@
  * Cells with more overlapping routes get higher intensity → rendered as thicker lines.
  */
 
-import { LatLng } from "@/app/types";
+import { LatLng } from "@/types";
 
 const CELL_SIZE_M = 50; // metres per grid cell
 

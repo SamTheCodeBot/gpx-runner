@@ -10,16 +10,16 @@ import {
   computeOutAndBackRatio,
   scoreRoute,
 } from "./scoring/quality";
-import { canonicalPointKey, normalizeLoop, toSegments } from "./utils/geo";
+import { canonicalPointKey, computeStraightLineDistance, normalizeLoop, toSegments } from "./utils/geo";
 import { GenerateRouteInput, GeneratedRoute, RouteProvider } from "../types";
 
 export async function generateRoutes(
   provider: RouteProvider,
   input: GenerateRouteInput,
 ): Promise<{ routes: GeneratedRoute[]; rejectedCount: number }> {
-  const toleranceKm = input.toleranceKm ?? 1;
+  const toleranceKm = input.toleranceKm ?? 0.5;
   const familiarityMode = input.familiarityMode ?? "mixed";
-  const maxCandidates = input.maxCandidates ?? 180;
+  const maxCandidates = input.maxCandidates ?? 20;
   const alternatives = input.alternatives ?? 3;
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = toleranceKm * 1000;
@@ -119,7 +119,7 @@ function evaluateBuiltRoute(params: {
   targetMeters: number;
   targetFamiliarityRange: { min: number; max: number };
 }): { route: GeneratedRoute; decision: "accept" | "reject" } {
-  const toleranceMeters = (params.input.toleranceKm ?? 1) * 1000;
+  const toleranceMeters = (params.input.toleranceKm ?? 0.5) * 1000;
   const loopGeometry = normalizeLoop(params.geometry);
   const segments = toSegments(loopGeometry);
   const familiarityMode = params.input.familiarityMode ?? "mixed";
@@ -183,6 +183,17 @@ function evaluateBuiltRoute(params: {
       ...debug,
     },
   };
+
+  // ── ORS sanity check ────────────────────────────────────────────────────────
+  // If ORS returned a route that is less than 40% of the target distance, it almost
+  // certainly ignored the waypoints and returned a near-straight-line shortcut.
+  const orsLazyDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
+  if (params.distanceMeters < orsLazyDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.40) {
+    return {
+      route: { ...route, debug: { ...route.debug, orsIgnoredWaypoints: true } },
+      decision: "reject",
+    };
+  }
 
   if (distanceOk && familiarityOk && loopOk) return { route, decision: "accept" };
   return { route, decision: "reject" };
