@@ -1,5 +1,5 @@
-import { generateTrainingRoutes } from "../../../../src/api/routeGeneratorService";
-import type { LatLng } from "../../../../src/types";
+import { generateTrainingRoutes } from "@/api/routeGeneratorService";
+import type { LatLng } from "@/app/types";
 
 type RequestBody = {
   start?: { lat?: number; lng?: number };
@@ -31,11 +31,11 @@ export async function POST(request: Request): Promise<Response> {
     const result = await generateTrainingRoutes({
       start: { lat: Number(body.start.lat), lng: Number(body.start.lng) },
       targetDistanceKm: Number(body.targetDistanceKm),
-      toleranceKm: Number.isFinite(body.toleranceKm) ? Number(body.toleranceKm) : 1,
+      toleranceKm: Number.isFinite(body.toleranceKm) ? Number(body.toleranceKm) : 0.5,
       familiarityMode: body.familiarityMode ?? "mixed",
       gpxFiles: body.gpxFiles ?? [],
       routeCollections: (body.existingRoutes ?? []).map(toLatLngTrack).filter((track) => track.length >= 2),
-      maxCandidates: 180,
+      maxCandidates: 20,
       alternatives: 3,
     });
 
