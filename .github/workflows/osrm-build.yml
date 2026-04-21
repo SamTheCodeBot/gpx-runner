@@ -20,12 +20,9 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push OSRM Sweden image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./osrm
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:${{ github.sha }}
-          platforms: linux/amd64
-          no-cache: true
+        run: |
+          docker build --push \
+            --tag ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:latest \
+            --tag ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:${{ github.sha }} \
+            --platform linux/amd64 \
+            osrm/
