@@ -148,7 +148,7 @@ export default function Map({
       navigator.geolocation.getCurrentPosition(
         (position) => setUserLocation([position.coords.latitude, position.coords.longitude]),
         () => {},
-        { timeout: 5000 },
+        { timeout: 5000, maximumAge: 10 * 60 * 1000 }
       );
     }
   }, []);

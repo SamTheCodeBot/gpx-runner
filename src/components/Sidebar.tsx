@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
@@ -15,6 +16,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: SidebarProps) {
+  const pathname = usePathname();
+  const isActive = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
@@ -35,14 +38,14 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
 
         {/* Core nav */}
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary-container text-on-primary" href="/">
-          <Icon name="route" filled className="text-base" />
+        <Link href="/" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="route" filled={isActive("/")} className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
-        </a>
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/suggest">
-          <Icon name="explore" className="text-base" />
+        </Link>
+        <Link href="/suggest" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
           <span className="font-semibold text-sm">Route Suggestions</span>
-        </a>
+        </Link>
 
         {/* Divider */}
         <div className="my-3 border-t border-white/10" />
@@ -129,6 +132,8 @@ interface MobileDrawerProps {
 }
 
 export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: MobileDrawerProps) {
+  const pathname = usePathname();
+  const isActive = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
@@ -159,16 +164,14 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
 
         {/* Nav */}
         <nav className="flex-1 px-4 py-4 space-y-1">
-          <div className="px-4 py-3 rounded-xl bg-primary-container">
-            <div className="flex items-center gap-3">
-              <Icon name="route" filled className="text-base" />
-              <span className="font-semibold text-sm">My Routes</span>
-            </div>
-          </div>
-          <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/suggest">
-            <Icon name="explore" className="text-base" />
+          <Link href="/" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="route" filled={isActive("/")} className="text-base" />
+            <span className="font-semibold text-sm">My Routes</span>
+          </Link>
+          <Link href="/suggest" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
             <span className="font-semibold text-sm">Route Suggestions</span>
-          </a>
+          </Link>
 
           {/* Divider */}
           <div className="my-3 border-t border-white/10" />
