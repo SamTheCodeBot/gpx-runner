@@ -10,16 +10,16 @@ import {
   computeOutAndBackRatio,
   scoreRoute,
 } from "./scoring/quality";
-import { canonicalPointKey, normalizeLoop, toSegments } from "./utils/geo";
+import { canonicalPointKey, computeStraightLineDistance, normalizeLoop, toSegments } from "./utils/geo";
 import { GenerateRouteInput, GeneratedRoute, RouteProvider } from "../types";
 
 export async function generateRoutes(
   provider: RouteProvider,
   input: GenerateRouteInput,
 ): Promise<{ routes: GeneratedRoute[]; rejectedCount: number }> {
-  const toleranceKm = input.toleranceKm ?? 1;
+  const toleranceKm = input.toleranceKm ?? 0.5;
   const familiarityMode = input.familiarityMode ?? "mixed";
-  const maxCandidates = Math.min(input.maxCandidates ?? 180, 20);
+  const maxCandidates = input.maxCandidates ?? 20;
   const alternatives = input.alternatives ?? 3;
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = toleranceKm * 1000;
@@ -58,7 +58,7 @@ export async function generateRoutes(
   const candidateWaypoints = buildLoopWaypointCandidates(
     input.start,
     targetMeters,
-    maxCandidates,
+    Math.min(maxCandidates, 20),
     familiarityMode,
     parsedTracks,
   );
@@ -73,32 +73,37 @@ export async function generateRoutes(
         if (!providerResult || providerResult.geometry.length < 2) {
           return { candidate, built: null };
         }
-        return {
-          candidate,
-          built: evaluateBuiltRoute({
-            geometry: providerResult.geometry,
-            distanceMeters: providerResult.distanceMeters,
-            source: "provider",
-            seed: candidate.seed,
-            input,
-            familiarityIndex,
-            targetMeters,
-            targetFamiliarityRange,
-          }),
-        };
+        const built = evaluateBuiltRoute({
+          geometry: providerResult.geometry,
+          distanceMeters: providerResult.distanceMeters,
+          source: "provider",
+          seed: candidate.seed,
+          input,
+          familiarityIndex,
+          targetMeters,
+          targetFamiliarityRange,
+        });
+        return { candidate, built };
       }),
     );
+
     for (const { built } of results) {
-      if (!built) { rejectedCount += 1; continue; }
-      if (built.decision === "accept") accepted.push(built.route);
-      else rejectedCount += 1;
+      if (!built) {
+        rejectedCount += 1;
+      } else if (built.decision === "accept") {
+        accepted.push(built.route);
+      } else {
+        rejectedCount += 1;
+      }
     }
   }
 
   const bestAccepted = dedupeRoutes(accepted).sort((a, b) => {
+    // Primary sort: closest to target distance
     const distDiffA = Math.abs(a.distanceMeters - targetMeters);
     const distDiffB = Math.abs(b.distanceMeters - targetMeters);
     if (distDiffA !== distDiffB) return distDiffA - distDiffB;
+    // Secondary sort: highest score
     return b.score - a.score;
   });
   return { routes: bestAccepted.slice(0, alternatives), rejectedCount };
@@ -114,7 +119,7 @@ function evaluateBuiltRoute(params: {
   targetMeters: number;
   targetFamiliarityRange: { min: number; max: number };
 }): { route: GeneratedRoute; decision: "accept" | "reject" } {
-  const toleranceMeters = (params.input.toleranceKm ?? 1) * 1000;
+  const toleranceMeters = (params.input.toleranceKm ?? 0.5) * 1000;
   const loopGeometry = normalizeLoop(params.geometry);
   const segments = toSegments(loopGeometry);
   const familiarityMode = params.input.familiarityMode ?? "mixed";
@@ -178,6 +183,18 @@ function evaluateBuiltRoute(params: {
       ...debug,
     },
   };
+
+  // ── ORS sanity check ────────────────────────────────────────────────────────
+  // If ORS returned a route that is less than 40% of the target distance, it almost
+  // certainly ignored the waypoints and returned a near-straight-line shortcut.
+  // This is the root cause of the 0.4 km / 0.7 km "awful route" bug.
+  const orsLazyDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
+  if (params.distanceMeters < orsLazyDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.40) {
+    return {
+      route: { ...route, debug: { ...route.debug, orsIgnoredWaypoints: true } },
+      decision: "reject",
+    };
+  }
 
   if (distanceOk && familiarityOk && loopOk) return { route, decision: "accept" };
   return { route, decision: "reject" };
