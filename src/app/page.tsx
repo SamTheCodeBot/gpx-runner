@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -29,17 +29,14 @@ export default function Home() {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
+  const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
-  const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
-  const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
-  const [suggestDistance, setSuggestDistance] = useState(5);
-  const [avoidFamiliar, setAvoidFamiliar]   = useState(true);
+  const [filter, setFilter]                = useState<{ month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -58,8 +55,6 @@ export default function Home() {
     };
   }, [filteredRoutes]);
 
-  const { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion } =
-    useRouteSuggestions(suggestDistance, avoidFamiliar);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -145,16 +140,10 @@ export default function Home() {
 
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
-  const handleMapClick = (lat: number, lon: number) => {
-    if (isSelectingStartPoint) {
-      setSelectedStartPoint([lon, lat]);
-      setIsSelectingStartPoint(false);
-    }
-  };
+;
 
-  const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes);
-  };
+;
+
 
   const getMonthOptions = () =>
     Array.from(new Set(routes.map((r) => r.date.substring(0, 7)))).sort().reverse();
@@ -233,33 +222,6 @@ export default function Home() {
           <div className={
             "flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none"
           }>
-            {suggestedRoute && (
-              <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <Icon name="check_circle" filled className="text-secondary text-base" />
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
-                    </div>
-                    <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
-                    <p className="text-xs text-on-surface-variant mt-0.5">
-                      {(suggestedRoute.distance / 1000).toFixed(1)} km
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={handleGenerate} disabled={isSuggesting}
-                      className="p-2 hover:bg-primary-container/20 rounded-xl text-xs font-bold text-primary transition-colors">
-                      <Icon name="refresh" className="text-base" />
-                    </button>
-                    <button onClick={clearSuggestion}
-                      className="p-2 hover:bg-primary-container/20 rounded-xl transition-colors">
-                      <Icon name="close" className="text-on-surface-variant text-sm" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <StatsBar stats={stats} />
 
             <RouteList
@@ -307,13 +269,11 @@ export default function Home() {
               <MapSection
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}
-                suggestedRoute={suggestedRoute}
                 showHeatmap={showHeatmap}
+                showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
                 isLoading={isUploading}
-                selectedStartPoint={selectedStartPoint}
-                isSelectingStartPoint={isSelectingStartPoint}
-                onMapClick={handleMapClick}
               />
 
             </div>

@@ -20,13 +20,13 @@ export async function POST(request: NextRequest) {
     const result = await generateTrainingRoutes({
       start: { lat: Number(body.centerLat), lng: Number(body.centerLon) },
       targetDistanceKm: Number(body.distance),
-      toleranceKm: 1,
+      toleranceKm: 0.5,
       familiarityMode: body.avoidFamiliar ? 'new' : 'familiar',
       routeCollections: (body.existingRoutes ?? []).map((route) =>
         (route.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
       ),
-      maxCandidates: 180,
-      alternatives: 1,
+      maxCandidates: 20,
+      alternatives: 3,
     });
 
     const best = result.routes[0];
