@@ -1,22 +1,14 @@
 name: Build OSRM Docker Image
 
 on:
-  push:
-    branches:
-      - feat/route-suggestions
-    paths:
-      - 'osrm/**'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      packages: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,16 +19,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract OSM + Build image
-        run: |
-          docker build \
-            --target extractor \
-            --cache-from=ghcr.io/${{ github.repository }}/osrm-sweden-extract:latest \
-            -t ghcr.io/${{ github.repository }}/osrm-sweden:latest \
-            -t gpxrunner/osrm-sweden:latest \
-            --build-arg BUILDKIT_INLINE_CACHE=1 \
-            osrm/
-
-      - name: Push to GitHub Container Registry
-        run: |
-          docker push ghcr.io/${{ github.repository }}/osrm-sweden:latest
+      - name: Build and push OSRM Sweden image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./osrm
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/osrm-sweden:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
