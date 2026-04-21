@@ -184,13 +184,14 @@ function evaluateBuiltRoute(params: {
     },
   };
 
-  // ── ORS sanity check ────────────────────────────────────────────────────────
-  // If ORS returned a route that is less than 40% of the target distance, it almost
-  // certainly ignored the waypoints and returned a near-straight-line shortcut.
-  const orsLazyDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
-  if (params.distanceMeters < orsLazyDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.40) {
+  // ── Provider sanity check ──────────────────────────────────────────────────
+  // If the provider returned a route that is less than 40% of the target distance
+  // AND less than 1.15× the straight-line waypoint path, it may have ignored the
+  // intermediate waypoints and returned a near-straight-line shortcut.
+  const waypointPathDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
+  if (params.distanceMeters < waypointPathDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.40) {
     return {
-      route: { ...route, debug: { ...route.debug, orsIgnoredWaypoints: true } },
+      route: { ...route, debug: { ...route.debug, waypointPathShort: true } },
       decision: "reject",
     };
   }
