@@ -1,5 +1,5 @@
 import { generateTrainingRoutes } from "@/api/routeGeneratorService";
-import type { LatLng } from "@/app/types";
+import type { LatLng } from "@/types";
 
 type RequestBody = {
   start?: { lat?: number; lng?: number };
