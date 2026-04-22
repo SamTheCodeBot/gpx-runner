@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
 
 # Stage 1: Download OSM data and clone osrm-backend for profiles
-FROM ubuntu:24.04 AS fetcher
+FROM debian:bookworm-slim AS fetcher
 
 WORKDIR /data
 
-# Ubuntu 24.04 has curl by default — use it directly
+# Install curl and git (debian:bookworm-slim has these available)
+RUN apt-get update && apt-get install -y curl git && rm -rf /var/lib/apt/lists/*
+
 # Download Sweden OSM extract (~800MB)
 RUN curl -sL https://download.geofabrik.de/europe/sweden-latest.osm.pbf -o sweden.osm.pbf && ls -lh sweden.osm.pbf
 
