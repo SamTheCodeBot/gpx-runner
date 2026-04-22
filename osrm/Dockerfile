@@ -2,8 +2,8 @@ FROM osrm/osrm-backend
 
 WORKDIR /data
 
-# Download Sweden OSM extract (~800MB) using wget from base image
-RUN wget -q https://download.geofabrik.de/europe/sweden-latest.osm.pbf -O sweden.osm.pbf && ls -lh sweden.osm.pbf
+# Download Sweden OSM extract (~800MB) using curl
+RUN curl -sL https://download.geofabrik.de/europe/sweden-latest.osm.pbf -o sweden.osm.pbf && ls -lh sweden.osm.pbf
 
 # Extract, partition, customize (runs once at build time — 15-25 min)
 # The resulting .osrm files are baked into the image.
