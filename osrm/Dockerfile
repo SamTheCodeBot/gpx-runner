@@ -38,6 +38,8 @@ WORKDIR /data
 
 COPY --from=builder /data/*.osrm* .
 
-EXPOSE 5000
+ENV PORT=10000
 
-CMD osrm-routed --algorithm mld /data/sweden.osm.pbf
+EXPOSE 10000
+
+CMD osrm-routed --algorithm mld --port $PORT /data/sweden.osm.pbf
