@@ -1,5 +1,6 @@
 // Route generation providers
-// Two approaches: (1) client-side using uploaded routes, (2) Mapbox Directions API
+// Option 1: Client-side using uploaded routes (graph + loop algorithm)
+// Option 2: Mapbox Directions API (circular waypoint routing)
 
 import { GPXRoute } from "@/app/types";
 import { haversine } from "@/lib/utils";
@@ -20,173 +21,156 @@ export interface GeneratedRoute {
 
 /**
  * Generate a loop by stitching segments from uploaded GPX routes.
- * Works entirely client-side, no API needed.
- * 
  * Algorithm:
- * 1. Find all route points within searchRadiusKm of start point
- * 2. Build a graph of connected trail segments from those points
- * 3. Do a random walk from start point, collecting segments until targetDistance reached
- * 4. Return to start point to close the loop
+ * 1. Find all coordinates within radius of start point
+ * 2. Build a graph of nearby trail/road segments
+ * 3. Nearest-neighbor path building that forms a loop, respecting target distance
  */
 export async function generateFromMyRoutes(
   startPoint: [number, number],
   targetDistanceKm: number,
   routes: GPXRoute[],
   routeType: "road" | "trail" | "mixed" = "mixed",
-  familiarityMode: "familiar" | "novel" = "familiar",
+  _familiarityMode: "familiar" | "novel" = "familiar",
   signal?: AbortSignal
 ): Promise<GeneratedRoute> {
   const [startLon, startLat] = startPoint;
-  const searchRadiusKm = Math.max(2, targetDistanceKm * 0.8); // look within 80% of target distance
+  const targetM = targetDistanceKm * 1000;
+  const searchRadiusKm = Math.max(targetDistanceKm * 0.8, 2);
 
-  // Filter routes that are relevant type and within search radius
-  const nearbyRoutes = routes.filter(r => {
-    if (routeType !== "mixed" && r.type && r.type !== routeType && r.type !== "mixed") return false;
-    // Check if any coordinate is within radius
-    return r.coordinates.some(([rlon, rlat]) => {
-      const dist = haversine(rlat, rlon, startLat, startLon) / 1000;
-      return dist <= searchRadiusKm;
-    });
-  });
+  // Collect all coordinates from uploaded routes, filter by type and proximity
+  interface Pt { lon: number; lat: number; }
+  const allPts: Pt[] = [];
 
-  if (nearbyRoutes.length === 0) {
-    // Fall back to creating a basic loop around start point
-    return generateFallbackLoop(startPoint, targetDistanceKm, routeType, "my-routes");
-  }
-
-  // Collect all waypoints from nearby routes as a graph
-  interface Waypoint { lon: number; lat: number; routeId: string; }
-  const waypoints: Waypoint[] = [];
-  
-  for (const route of nearbyRoutes) {
+  for (const route of routes) {
+    if (routeType !== "mixed" && route.type && route.type !== routeType && route.type !== "mixed") continue;
     for (const [rlon, rlat] of route.coordinates) {
-      const distKm = haversine(rlat, rlon, startLat, startLon) / 1000;
-      if (distKm <= searchRadiusKm) {
-        waypoints.push({ lon: rlon, lat: rlat, routeId: route.id });
-      }
+      const d = haversine(rlat, rlon, startLat, startLon) / 1000;
+      if (d <= searchRadiusKm) allPts.push({ lon: rlon, lat: rlat });
     }
   }
 
-  // Cluster waypoints into nodes (snap to grid of ~50m resolution)
-  const gridSize = 0.00045; // ~50m in degrees
-  const grid = new Map<string, { lon: number; lat: number; ways: Waypoint[] }>();
-  
-  for (const wp of waypoints) {
-    const gx = Math.round(wp.lon / gridSize) * gridSize;
-    const gy = Math.round(wp.lat / gridSize) * gridSize;
-    const key = `${gx.toFixed(6)},${gy.toFixed(6)}`;
-    if (!grid.has(key)) grid.set(key, { lon: gx, lat: gy, ways: [] });
-    grid.get(key)!.ways.push(wp);
+  if (allPts.length < 4) {
+    return generateFallbackLoop(startPoint, targetDistanceKm, routeType, "my-routes");
   }
 
-  // Build adjacency: connect neighboring grid cells
-  const nodes = Array.from(grid.values());
-  const nodeIndex = new Map(nodes.map((n, i) => {
-    const key = `${n.lon.toFixed(6)},${n.lat.toFixed(6)}`;
-    return [key, i];
+  // Sample points to keep computation manageable (max 200)
+  const step = Math.max(1, Math.floor(allPts.length / 150));
+  const pts = allPts.filter((_, i) => i % step === 0);
+
+  // Cluster into a grid (~80m resolution) to create graph nodes
+  const gridSize = 0.00072; // ~80m in degrees
+  const grid = new Map<string, Pt[]>();
+  for (const p of pts) {
+    const gx = Math.round(p.lon / gridSize) * gridSize;
+    const gy = Math.round(p.lat / gridSize) * gridSize;
+    const key = `${gx.toFixed(5)},${gy.toFixed(5)}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key)!.push(p);
+  }
+
+  // Each grid cell = one node; use cell center as representative point
+  const nodes: Pt[] = Array.from(grid.values()).map(cell => ({
+    lon: cell[0].lon,
+    lat: cell[0].lat,
   }));
 
-  interface Edge { to: number; dist: number; }
-  const edges: Edge[][] = nodes.map(() => []);
+  // Build adjacency: connect nodes within ~250m of each other
+  type AdjEntry = { nodeIdx: number; dist: number };
+  const edges: Map<number, AdjEntry[]> = new Map();
+  nodes.forEach((_, i) => edges.set(i, []));
 
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const d = haversine(nodes[i].lat, nodes[i].lon, nodes[j].lat, nodes[j].lon);
-      if (d < gridSize * 3) { // connect if within ~150m
-        edges[i].push({ to: j, dist: d });
-        edges[j].push({ to: i, dist: d });
+      if (d < 0.25) {
+        edges.get(i)!.push({ nodeIdx: j, dist: d });
+        edges.get(j)!.push({ nodeIdx: i, dist: d });
       }
     }
   }
 
-  // Find start node (closest to start point)
-  let startNodeIdx = 0;
-  let minDist = Infinity;
+  // Find start node (closest to startPoint)
+  let startIdx = 0;
+  let minD = Infinity;
   for (let i = 0; i < nodes.length; i++) {
     const d = haversine(nodes[i].lat, nodes[i].lon, startLat, startLon);
-    if (d < minDist) { minDist = d; startNodeIdx = i; }
+    if (d < minD) { minD = d; startIdx = i; }
   }
 
-  // Random walk to collect targetDistance meters
-  const targetM = targetDistanceKm * 1000;
-  const path: number[] = [startNodeIdx];
-  const visitedEdges = new Set<string>();
-  let totalDist = 0;
-  let currentNode = startNodeIdx;
-  let deadEndCounter = 0;
+  // Nearest-neighbor loop: always go to closest unvisited node,
+  // but stop when we've accumulated enough distance (with buffer for return leg)
+  const visited = new Set<number>();
+  const path: number[] = [startIdx];
+  visited.add(startIdx);
+  let totalDistM = 0;
+  let current = startIdx;
 
-  while (totalDist < targetM * 1.1 && deadEndCounter < 50) {
+  while (true) {
     if (signal?.aborted) throw new Error("Aborted");
+    const adj = edges.get(current)!;
+    const unvisited = adj.filter(e => !visited.has(e.nodeIdx));
+    if (unvisited.length === 0) break;
 
-    const availableEdges = edges[currentNode].filter(e => {
-      const key = `${currentNode}-${e.to}`;
-      return !visitedEdges.has(key);
-    });
+    // Pick nearest unvisited node
+    unvisited.sort((a, b) => a.dist - b.dist);
+    const next = unvisited[0];
 
-    if (availableEdges.length === 0) {
-      deadEndCounter++;
-      // Force jump back toward start
-      const dToStart = nodes.map((n, i) => ({
-        i,
-        d: haversine(n.lat, n.lon, startLat, startLon)
-      })).sort((a, b) => a.d - b.d);
-      const jumpTarget = dToStart[Math.floor(Math.random() * Math.min(5, dToStart.length))].i;
-      if (!path.includes(jumpTarget)) {
-        path.push(jumpTarget);
-        totalDist += haversine(nodes[currentNode].lat, nodes[currentNode].lon, nodes[jumpTarget].lat, nodes[jumpTarget].lon);
-        currentNode = jumpTarget;
-      }
-      continue;
+    // Estimate distance if we go to next AND return home
+    const distHome = haversine(nodes[next.nodeIdx].lat, nodes[next.nodeIdx].lon, startLat, startLon);
+    const projectedTotal = totalDistM + next.dist + distHome;
+
+    // If we have enough distance and going further would overshoot, break and go home
+    if (totalDistM >= targetM * 0.65 && projectedTotal >= targetM * 0.9) {
+      break;
     }
 
-    // Pick next edge (random weighted by inverse distance for trail feel, or just random)
-    const e = availableEdges[Math.floor(Math.random() * availableEdges.length)];
-    const key = `${currentNode}-${e.to}`;
-    visitedEdges.add(key);
-    path.push(e.to);
-    totalDist += e.dist;
-    currentNode = e.to;
-    deadEndCounter = 0;
+    visited.add(next.nodeIdx);
+    path.push(next.nodeIdx);
+    totalDistM += next.dist;
+    current = next.nodeIdx;
+
+    if (totalDistM > targetM * 1.2) break;
   }
 
-  // Close loop back to start
-  const returnDist = haversine(nodes[currentNode].lat, nodes[currentNode].lon, startLat, startLon);
-  totalDist += returnDist;
+  // Close the loop back to start
+  const returnDist = haversine(nodes[current].lat, nodes[current].lon, startLat, startLon);
+  totalDistM += returnDist;
 
-  // Extract coordinates from path
-  const coords: [number, number][] = path.map(i => [nodes[i].lon, nodes[i].lat]);
-  
-  // Add some intermediate points to smooth the path (resample every ~20m)
+  // Convert path to coordinates
+  let coords: [number, number][] = path.map(i => [nodes[i].lon, nodes[i].lat]);
+
+  // Resample each segment for accurate distance
   const resampled: [number, number][] = [];
   for (let i = 0; i < coords.length - 1; i++) {
     const d = haversine(coords[i][1], coords[i][0], coords[i + 1][1], coords[i + 1][0]);
-    const numPts = Math.max(2, Math.round(d / 20));
-    for (let j = 0; j <= numPts; j++) {
-      const f = j / numPts;
+    const n = Math.max(2, Math.round(d / 15));
+    for (let j = 0; j <= n; j++) {
+      const f = j / n;
       resampled.push([
         coords[i][0] + f * (coords[i + 1][0] - coords[i][0]),
         coords[i][1] + f * (coords[i + 1][1] - coords[i][1]),
       ]);
     }
   }
-  // Ensure it ends at start
+  // Ensure last point is exactly start
   resampled[resampled.length - 1] = [startLon, startLat];
 
   // Recalculate actual distance
-  let actualDist = 0;
+  let actualM = 0;
   for (let i = 1; i < resampled.length; i++) {
-    actualDist += haversine(resampled[i - 1][1], resampled[i - 1][0], resampled[i][1], resampled[i][0]);
+    actualM += haversine(resampled[i - 1][1], resampled[i - 1][0], resampled[i][1], resampled[i][0]);
   }
 
   const names = [
-    "Trail Mix Loop", "Local Loop", "Neighborhood Run", "Village Circuit",
+    "Trail Mix Loop", "Local Loop", "Neighbourhood Run", "Village Circuit",
     "Forest Path", "Coastal Route", "Hidden Trail", "Countryside Loop",
   ];
 
   return {
     name: names[Math.floor(Math.random() * names.length)],
     coordinates: resampled,
-    distance: Math.round(actualDist),
+    distance: Math.round(actualM),
     elevationGain: Math.round(Math.random() * (routeType === "trail" ? 100 : routeType === "mixed" ? 70 : 40)),
     isRoundTrip: true,
     type: routeType,
@@ -196,6 +180,11 @@ export async function generateFromMyRoutes(
 
 // ─── Provider 2: Mapbox Directions API ────────────────────────────────────────
 
+/**
+ * Generate a proper circular loop using Mapbox.
+ * Strategy: place waypoints around a circle of given radius,
+ * use Mapbox roundtrip to create a proper loop route.
+ */
 export async function generateFromMapbox(
   startPoint: [number, number],
   targetDistanceKm: number,
@@ -204,38 +193,50 @@ export async function generateFromMapbox(
   signal?: AbortSignal
 ): Promise<GeneratedRoute> {
   const [lng, lat] = startPoint;
-  
-  // Mapbox walking profile
-  const profile = "mapbox/walking";
-  const radiusKm = targetDistanceKm * 0.6;
-  
-  // Generate a random waypoint that's roughly at targetDistance/2 from start
-  // We'll use a simple bearing + distance to create a visible loop
-  const angle = Math.random() * 2 * Math.PI;
-  const distKm = targetDistanceKm * 0.4;
-  const dLat = (distKm / 6371) * (180 / Math.PI);
-  const dLon = (distKm / (6371 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
-  const waypointLng = lng + dLon * Math.cos(angle);
-  const waypointLat = lat + dLat * Math.sin(angle);
 
-  const coordStr = `${lng.toFixed(6)},${lat.toFixed(6)};${waypointLng.toFixed(6)},${waypointLat.toFixed(6)}`;
-  const url = `https://api.mapbox.com/directions/v5/${profile}/${coordStr}?geometries=geojson&overview=full&access_token=${apiKey}`;
+  // Radius of circle so circumference ≈ target distance: C = 2πr → r = target / 2π
+  const radiusKm = targetDistanceKm / (2 * Math.PI);
+  // Clamp radius to reasonable walking distance
+  const clampedRadius = Math.max(0.3, Math.min(radiusKm, 4));
+
+  // Generate 6 waypoints evenly around the circle + start point
+  const numWpts = 6;
+  const waypointList: string[] = [`${lng.toFixed(6)},${lat.toFixed(6)}`];
+
+  for (let i = 1; i <= numWpts; i++) {
+    const angle = (i / numWpts) * 2 * Math.PI;
+    const dLat = (clampedRadius / 6371) * (180 / Math.PI);
+    const dLon = (clampedRadius / (6371 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+    const wlat = lat + dLat * Math.sin(angle);
+    const wlon = lng + dLon * Math.cos(angle);
+    waypointList.push(`${wlon.toFixed(6)},${wlat.toFixed(6)}`);
+  }
+
+  // Close back to start (creates a proper loop)
+  waypointList.push(`${lng.toFixed(6)},${lat.toFixed(6)}`);
+
+  const coordStr = waypointList.join(";");
+  const url =
+    `https://api.mapbox.com/directions/v5/mapbox/walking/${coordStr}` +
+    `?geometries=geojson&overview=full&roundtrip=true&access_token=${apiKey}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
   try {
+    if (signal?.aborted) throw new Error("Aborted");
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
-    if (!res.ok) throw new Error(`Mapbox API error: ${res.status}`);
+    if (!res.ok) throw new Error(`Mapbox error: ${res.status}`);
 
     const data = await res.json();
     if (!data.routes || data.routes.length === 0) {
-      throw new Error("No route found from Mapbox");
+      throw new Error("No route from Mapbox");
     }
 
-    const route = data.routes[0];
+    // Use the longest route (most circular option)
+    const route = data.routes.sort((a: any, b: any) => b.distance - a.distance)[0];
     const coords: [number, number][] = route.geometry.coordinates.map(
       (c: number[]) => [c[0], c[1]] as [number, number]
     );
@@ -250,14 +251,12 @@ export async function generateFromMapbox(
       source: "mapbox",
     };
   } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      throw new Error("Mapbox request timed out");
-    }
+    if ((err as Error).name === "AbortError") throw new Error("Mapbox timeout");
     throw err;
   }
 }
 
-// ─── Fallback: Simple pseudo-random loop when no data available ───────────────
+// ─── Fallback: Simple pseudo-random loop ─────────────────────────────────────
 
 function generateFallbackLoop(
   startPoint: [number, number],
@@ -266,18 +265,19 @@ function generateFallbackLoop(
   source: "my-routes" | "mapbox"
 ): GeneratedRoute {
   const [startLon, startLat] = startPoint;
-  const numPoints = routeType === "road" ? 6 : routeType === "trail" ? 14 : 9;
-  const radiusKm = targetDistanceKm * 0.35;
+
+  const numPts = routeType === "road" ? 6 : routeType === "trail" ? 14 : 9;
+  const radiusKm = targetDistanceKm * 0.38;
 
   const coords: [number, number][] = [[startLon, startLat]];
   let cx = startLon, cy = startLat;
 
-  for (let i = 0; i < numPoints; i++) {
-    const t = i / numPoints;
-    const biasLon = t < 0.5 ? startLon : startLon + (startLon - cx) * 0.1;
-    const biasLat = t < 0.5 ? startLat : startLat + (startLat - cy) * 0.1;
-    const r = radiusKm * (0.5 + Math.random() * 0.5);
-    const angle = (i / numPoints) * 2 * Math.PI + Math.random() * 0.5;
+  for (let i = 0; i < numPts; i++) {
+    const t = i / numPts;
+    const biasLon = t < 0.5 ? startLon : startLon + (startLon - cx) * 0.08;
+    const biasLat = t < 0.5 ? startLat : startLat + (startLat - cy) * 0.08;
+    const r = radiusKm * (0.45 + Math.random() * 0.55);
+    const angle = (i / numPts) * 2 * Math.PI + Math.random() * 0.4;
     const dLat = (r / 6371) * (180 / Math.PI);
     const dLon = (r / (6371 * Math.cos((cy * Math.PI) / 180))) * (180 / Math.PI);
     cx = biasLon + dLon * Math.cos(angle);
@@ -286,11 +286,11 @@ function generateFallbackLoop(
   }
   coords.push([startLon, startLat]);
 
-  // Resample for distance accuracy
+  // Resample for accurate distance
   const resampled: [number, number][] = [coords[0]];
   for (let i = 1; i < coords.length; i++) {
     const d = haversine(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
-    const n = Math.max(2, Math.round(d / 25));
+    const n = Math.max(2, Math.round(d / 20));
     for (let j = 1; j <= n; j++) {
       const f = j / n;
       resampled.push([
