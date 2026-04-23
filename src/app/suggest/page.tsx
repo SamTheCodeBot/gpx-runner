@@ -30,7 +30,9 @@ export default function SuggestPage() {
   const [avoidFamiliar, setAvoidFamiliar] = useState(true);
   const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
   const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("my-routes");
-  const [mapboxApiKey, setMapboxApiKey] = useState("");
+  const [mapboxApiKey, setMapboxApiKey] = useState(
+    typeof window !== "undefined" ? (window as any).__MAPBOX_KEY__ || "" : ""
+  );
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
