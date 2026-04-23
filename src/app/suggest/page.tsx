@@ -31,7 +31,7 @@ export default function SuggestPage() {
   const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
   const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("my-routes");
   const [mapboxApiKey, setMapboxApiKey] = useState(
-    typeof window !== "undefined" ? (window as any).__MAPBOX_KEY__ || "" : ""
+    typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_MAPBOX_TOKEN as string) || "" : ""
   );
   const [showHeatmap, setShowHeatmap] = useState(true);
 
