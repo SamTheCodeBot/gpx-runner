@@ -11,6 +11,8 @@ export interface GPXRoute {
   type?: 'road' | 'trail' | 'mixed'; // Route type tag
   isWishlisted?: boolean;
   isFavorite?: boolean;
+  isRoundTrip?: boolean;
+  startPoint?: [number, number];
 }
 
 export interface RouteStats {

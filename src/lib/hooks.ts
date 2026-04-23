@@ -249,19 +249,20 @@ export function useRouteFilter(
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
 
   const getSuggestion = useCallback(
-    async (startPoint: [number, number] | null, routes: GPXRoute[]) => {
+    async (
+      startPoint: [number, number] | null,
+      routes: GPXRoute[],
+      source: "my-routes" | "mapbox" | "both" = "my-routes",
+      mapboxApiKey: string = ""
+    ) => {
       setIsSuggesting(true);
-      setApiKeyMissing(false);
       try {
-        // Determine start coordinates
-        let lat = 59.3293; // Stockholm
-        let lon = 18.0686;
-        if (startPoint) {
-          [lon, lat] = startPoint;
-        } else if (routes.length > 0) {
+        let lat = 56.9; // Falkenberg
+        let lon = 12.5;
+        if (startPoint) { [lon, lat] = startPoint; }
+        else if (routes.length > 0) {
           const allCoords = routes.flatMap((r) => r.coordinates);
           if (allCoords.length > 0) {
             lat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
@@ -269,106 +270,70 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
-        const gpxFiles = routes.map((r) => {
-          const pts = r.coordinates
-            .map(([lon, lat]) => `<trkpt lat="${lat}" lon="${lon}"></trkpt>`)
-            .join("");
-          return `<?xml?><gpx><trk><trkseg>${pts}</trkseg></trk></gpx>`;
-        });
+        const { generateFromMyRoutes, generateFromMapbox } = await import("@/lib/route-providers");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
 
-        const res = await fetch("/api/generate-route", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            start: { lat, lng: lon },
-            targetDistanceKm: suggestDistance,
-            toleranceKm: 1,
-            familiarityMode: avoidFamiliar ? "novel" : "familiar",
-            gpxFiles,
-          }),
-        });
-
-        const payload = await res.json();
-
-        if (res.ok && payload?.routes?.[0]?.geometry?.length > 1) {
-          // API available — use OpenRouteService
-          const best = payload.routes[0];
-          const coords = best.geometry.map(
-            (p: { lat: number; lng: number }) => [p.lng, p.lat] as [number, number]
-          );
-          setSuggestedRoute({
-            id: `suggested-${Date.now()}`,
-            name: `${avoidFamiliar ? "New" : "Familiar"} Loop — ${(best.distanceMeters / 1000).toFixed(1)}km`,
-            date: new Date().toISOString(),
-            coordinates: coords,
-            distance: best.distanceMeters,
-            elevationGain: 0,
-            color: "#f472b6",
-            isRoundTrip: true,
-            type: "road",
-            familiarityScore: Math.round((best.familiarityRatio ?? 0) * 100),
-          } as GPXRoute & { familiarityScore: number });
-        } else {
-          // API unavailable — fall back to client-side algorithm
-          if (!res.ok && payload?.error?.includes("OPENROUTESERVICE_API_KEY")) {
-            setApiKeyMissing(true);
-          }
-          const { generateRandomRoute } = await import("@/lib/utils");
-          const seed = Date.now();
-          const existingCoords = routes.map((r) => r.coordinates);
-          const generated = generateRandomRoute(
-            [lon, lat], suggestDistance, "mixed",
-            avoidFamiliar ? "novel" : "familiar", existingCoords, seed
-          );
-          setSuggestedRoute({
-            id: `suggested-${Date.now()}`,
-            name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
-            date: new Date().toISOString(),
-            coordinates: generated.coordinates,
-            distance: generated.distance,
-            elevationGain: generated.elevationGain,
-            color: "#f472b6",
-            isRoundTrip: true,
-            type: "mixed",
-            familiarityScore: avoidFamiliar ? 75 : 40,
-          } as GPXRoute & { familiarityScore: number });
-        }
-      } catch (err) {
-        console.error(err);
-        // Network error or any other failure — always fall back to client-side algorithm
-        if (err instanceof Error && err.message.includes("OPENROUTESERVICE_API_KEY")) {
-          setApiKeyMissing(true);
-        }
+        let result = null;
         try {
-          const { generateRandomRoute } = await import("@/lib/utils");
-          let lat2 = 59.3293, lon2 = 18.0686;
-          if (startPoint) { [lon2, lat2] = startPoint; }
-          else if (routes.length > 0) {
-            const allCoords = routes.flatMap((r) => r.coordinates);
-            if (allCoords.length > 0) {
-              lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
-              lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+          if (source === "my-routes") {
+            result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
+          } else if (source === "mapbox") {
+            if (!mapboxApiKey) throw new Error("Mapbox API key required");
+            result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
+          } else {
+            // "both" — try my-routes first, fall back to mapbox
+            try {
+              result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
+            } catch {
+              if (mapboxApiKey) {
+                result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
+              } else {
+                throw new Error("No routes nearby and no Mapbox key");
+              }
             }
           }
-          const generated = generateRandomRoute(
-            [lon2, lat2], suggestDistance, "mixed",
-            avoidFamiliar ? "novel" : "familiar", [], Date.now()
-          );
-          setSuggestedRoute({
-            id: `suggested-${Date.now()}`,
-            name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
-            date: new Date().toISOString(),
-            coordinates: generated.coordinates,
-            distance: generated.distance,
-            elevationGain: generated.elevationGain,
-            color: "#f472b6",
-            isRoundTrip: true,
-            type: "mixed",
-            familiarityScore: avoidFamiliar ? 75 : 40,
-          } as GPXRoute & { familiarityScore: number });
-        } catch {
-          setSuggestedRoute(null);
+
+          if (result) {
+            setSuggestedRoute({
+              id: `suggested-${Date.now()}`,
+              name: result.name,
+              date: new Date().toISOString(),
+              coordinates: result.coordinates,
+              distance: result.distance,
+              elevationGain: result.elevationGain,
+              color: "#f472b6",
+              isRoundTrip: true,
+              type: result.type,
+            });
+          }
+        } finally {
+          clearTimeout(timeout);
         }
+      } catch (err) {
+        console.error("[useRouteSuggestions]", err);
+        const { generateRandomRoute } = await import("@/lib/utils");
+        let lat2 = 56.9, lon2 = 12.5;
+        if (startPoint) { [lon2, lat2] = startPoint; }
+        else if (routes.length > 0) {
+          const allCoords = routes.flatMap((r) => r.coordinates);
+          if (allCoords.length > 0) {
+            lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
+            lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+          }
+        }
+        const generated = generateRandomRoute([lon2, lat2], suggestDistance, "mixed", avoidFamiliar ? "novel" : "familiar", [], Date.now());
+        setSuggestedRoute({
+          id: `suggested-${Date.now()}`,
+          name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
+          date: new Date().toISOString(),
+          coordinates: generated.coordinates,
+          distance: generated.distance,
+          elevationGain: generated.elevationGain,
+          color: "#f472b6",
+          isRoundTrip: true,
+          type: "mixed",
+        });
       } finally {
         setIsSuggesting(false);
       }
@@ -376,7 +341,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     [suggestDistance, avoidFamiliar]
   );
 
-  return { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
+  return { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 

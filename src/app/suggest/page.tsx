@@ -29,6 +29,8 @@ export default function SuggestPage() {
   const [suggestDistance, setSuggestDistance] = useState(5);
   const [avoidFamiliar, setAvoidFamiliar] = useState(true);
   const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
+  const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("my-routes");
+  const [mapboxApiKey, setMapboxApiKey] = useState("");
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
@@ -78,7 +80,9 @@ export default function SuggestPage() {
   };
 
   const handleSaveSuggestedToWishlist = async () => { if (suggestedRoute) await toggleWishlist(suggestedRoute.id); };
-  const handleGenerate = () => { getSuggestion(selectedStartPoint, routes); };
+  const handleGenerate = () => {
+    getSuggestion(selectedStartPoint, routes, routeSource, mapboxApiKey);
+  };
 
   if (authLoading) {
     return <div className="min-h-screen bg-background flex items-center justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -169,7 +173,40 @@ export default function SuggestPage() {
                   </div>
                 </div>
 
-                {/* Route area: your area = familiar running, new area = explore somewhere new */}
+                {/* Route source selector */}
+                <div>
+                  <div className="mb-1.5">
+                    <span className="text-xs font-medium text-on-surface-variant">Route Source</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {(["my-routes", "mapbox", "both"] as const).map(src => (
+                      <button key={src} onClick={() => setRouteSource(src)}
+                        className={`flex-1 py-1.5 rounded-xl text-xs font-bold capitalize transition-colors ${
+                          routeSource === src
+                            ? "bg-primary-container text-on-primary-container"
+                            : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-low"
+                        }`}>{src === "my-routes" ? "My Routes" : src === "mapbox" ? "Mapbox" : "Both"}</button>
+                    ))}
+                  </div>
+                  {routeSource === "mapbox" && (
+                    <div className="mt-2 flex gap-2 items-center">
+                      <input
+                        type="password"
+                        value={mapboxApiKey}
+                        onChange={e => setMapboxApiKey(e.target.value)}
+                        placeholder="Mapbox API Key"
+                        className="flex-1 px-3 py-1.5 bg-surface-container-high rounded-xl text-xs text-on-surface border border-outline-variant focus:border-primary focus:outline-none"
+                      />
+                      <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-primary font-medium underline shrink-0">Get free key</a>
+                    </div>
+                  )}
+                  {routeSource === "both" && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[10px] text-on-surface-variant">Using my routes + Mapbox together</span>
+                    </div>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium text-on-surface-variant w-16">Mode</span>
                   <button onClick={() => setAvoidFamiliar(false)}
