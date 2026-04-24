@@ -1,6 +1,6 @@
 // Route generation providers
-// Option 1: Client-side using uploaded routes
-// Option 2: Mapbox Directions API
+// Option 1: Client-side using uploaded routes (real path segments)
+// Option 2: Mapbox Directions API (proper road-aware routing)
 
 import { GPXRoute } from "@/app/types";
 import { haversine } from "@/lib/utils";
@@ -17,6 +17,15 @@ export interface GeneratedRoute {
 
 // ─── Provider 1: Client-side using uploaded routes ─────────────────────────────
 
+/**
+ * Build a loop by stitching actual segments from user's uploaded GPX routes.
+ *
+ * Algorithm:
+ * 1. Use each uploaded route's actual coordinates as a real trail/road network
+ * 2. Build a graph of route SEGMENTS (not grid cells)
+ * 3. Walk the graph to form a loop using real path geometry
+ * 4. Return the loop geometry directly (no straight-line shortcuts)
+ */
 export async function generateFromMyRoutes(
   startPoint: [number, number],
   targetDistanceKm: number,
@@ -28,108 +37,148 @@ export async function generateFromMyRoutes(
   const [startLon, startLat] = startPoint;
   const targetM = targetDistanceKm * 1000;
 
-  interface Pt { lon: number; lat: number; }
-  const rawPts: Pt[] = [];
+  // Filter routes by type
+  const filtered = routes.filter(r => {
+    if (routeType === "mixed") return true;
+    return r.type === routeType || r.type === "mixed";
+  });
 
-  for (const route of routes) {
-    if (routeType !== "mixed" && route.type && route.type !== routeType && route.type !== "mixed") continue;
-    for (const [rlon, rlat] of route.coordinates) {
-      rawPts.push({ lon: rlon, lat: rlat });
-    }
-  }
-
-  if (rawPts.length < 4) {
+  if (filtered.length === 0) {
     return generateFallbackLoop(startPoint, targetDistanceKm, routeType, "my-routes");
   }
 
-  // Build a fine grid (50m resolution) — each occupied cell = one graph node
-  const GRID_SIZE = 0.00045;
-  const grid = new Map<string, Pt>();
-  for (const p of rawPts) {
-    const gx = Math.round(p.lon / GRID_SIZE) * GRID_SIZE;
-    const gy = Math.round(p.lat / GRID_SIZE) * GRID_SIZE;
+  // Build a graph where each segment of each route becomes an edge
+  // Node = a coordinate point; Edge = consecutive points in a route
+  interface Node { lon: number; lat: number; }
+  type Edge = { to: number; segCoords: [number, number][]; segDist: number; routeIdx: number };
+
+  // Cluster coordinates into nodes (50m grid) to reduce graph size
+  const GRID = 0.00045;
+  const nodeMap = new Map<string, number>(); // key → nodeIdx
+  const nodePts: Node[] = [];
+
+  function getNode(lon: number, lat: number): number {
+    const gx = Math.round(lon / GRID) * GRID;
+    const gy = Math.round(lat / GRID) * GRID;
     const key = gx.toFixed(6) + "," + gy.toFixed(6);
-    if (!grid.has(key)) grid.set(key, p);
+    if (!nodeMap.has(key)) {
+      const idx = nodePts.length;
+      nodeMap.set(key, idx);
+      nodePts.push({ lon: gx, lat: gy });
+    }
+    return nodeMap.get(key)!;
   }
 
-  const nodes: Pt[] = Array.from(grid.values());
+  const edges: Edge[][] = nodePts.map(() => []);
 
-  // Find start node (closest to startPoint)
+  for (let ri = 0; ri < filtered.length; ri++) {
+    const route = filtered[ri];
+    const pts = route.coordinates;
+    let prevNode = -1;
+    for (let i = 0; i < pts.length; i++) {
+      const nodeIdx = getNode(pts[i][0], pts[i][1]);
+      if (prevNode >= 0 && prevNode !== nodeIdx) {
+        const segDist = haversine(nodePts[prevNode].lat, nodePts[prevNode].lon, nodePts[nodeIdx].lat, nodePts[nodeIdx].lon);
+        // Collect segment coordinates
+        const segCoords: [number, number][] = [[nodePts[prevNode].lon, nodePts[prevNode].lat]];
+        let ci = i - 1;
+        while (ci >= 0 && getNode(pts[ci][0], pts[ci][1]) === prevNode) ci--;
+        for (let k = Math.max(0, ci + 1); k <= i; k++) {
+          segCoords.push([pts[k][0], pts[k][1]]);
+        }
+        segCoords.push([nodePts[nodeIdx].lon, nodePts[nodeIdx].lat]);
+        edges[prevNode].push({ to: nodeIdx, segCoords, segDist, routeIdx: ri });
+        edges[nodeIdx].push({ to: prevNode, segCoords: [...segCoords].reverse(), segDist, routeIdx: ri });
+      }
+      prevNode = nodeIdx;
+    }
+  }
+
+  if (nodePts.length < 2) {
+    return generateFallbackLoop(startPoint, targetDistanceKm, routeType, "my-routes");
+  }
+
+  // Find start node
   let startIdx = 0;
   let minD = Infinity;
-  for (let i = 0; i < nodes.length; i++) {
-    const d = haversine(nodes[i].lat, nodes[i].lon, startLat, startLon);
+  for (let i = 0; i < nodePts.length; i++) {
+    const d = haversine(nodePts[i].lat, nodePts[i].lon, startLat, startLon);
     if (d < minD) { minD = d; startIdx = i; }
   }
 
-  // Build adjacency: each node connects to its 5 nearest neighbours within 400m
-  type Edge = { nodeIdx: number; dist: number };
-  const edges: Edge[][] = nodes.map(() => []);
-
-  for (let i = 0; i < nodes.length; i++) {
-    const dists: Edge[] = [];
-    for (let j = 0; j < nodes.length; j++) {
-      if (i === j) continue;
-      const d = haversine(nodes[i].lat, nodes[i].lon, nodes[j].lat, nodes[j].lon);
-      if (d < 0.4) dists.push({ nodeIdx: j, dist: d });
-    }
-    dists.sort((a, b) => a.dist - b.dist);
-    edges[i] = dists.slice(0, 5);
-  }
-
-  // Spiral-out nearest-neighbor walk
-  const visited = new Set<number>([startIdx]);
-  const path: number[] = [startIdx];
-  let totalDistM = 0;
+  // BFS/DFS loop builder: walk edges, collecting segments until we have enough distance
+  // Then return to start node
+  const visitedEdges = new Set<string>();
+  const loopCoords: [number, number][] = [[startLon, startLat]];
+  let totalDist = 0;
   let current = startIdx;
+  let deadEnds = 0;
 
-  while (path.length < nodes.length * 2) {
+  while (deadEnds < 10) {
     if (signal?.aborted) throw new Error("Aborted");
+
     const adj = edges[current];
-    if (!adj || adj.length === 0) break;
-    const unvisited = adj.filter(e => !visited.has(e.nodeIdx));
-    if (unvisited.length === 0) break;
-    unvisited.sort((a, b) => a.dist - b.dist);
-    const next = unvisited[0];
-    const distHome = haversine(nodes[next.nodeIdx].lat, nodes[next.nodeIdx].lon, startLat, startLon);
-    const projected = totalDistM + next.dist + distHome;
-    if (totalDistM >= targetM * 0.7 && projected >= targetM * 0.9) break;
-    visited.add(next.nodeIdx);
-    path.push(next.nodeIdx);
-    totalDistM += next.dist;
-    current = next.nodeIdx;
-    if (totalDistM >= targetM * 1.1) break;
+    if (!adj || adj.length === 0) { deadEnds++; continue; }
+
+    // Shuffle adjacent edges so we don't always pick the same route
+    const shuffled = [...adj].sort(() => Math.random() - 0.5);
+
+    let nextEdge: Edge | null = null;
+    for (const e of shuffled) {
+      const key = current + "-" + e.to;
+      if (!visitedEdges.has(key)) { nextEdge = e; break; }
+    }
+
+    if (!nextEdge) { deadEnds++; continue; }
+
+    // Check if we should stop and return home
+    const distHome = haversine(nodePts[nextEdge.to].lat, nodePts[nextEdge.to].lon, startLat, startLon);
+    const projected = totalDist + nextEdge.segDist + distHome;
+
+    if (totalDist >= targetM * 0.65 && projected >= targetM * 0.9) {
+      // Enough distance — close the loop
+      const homeEdge = adj.find(e => e.to === startIdx);
+      if (homeEdge) {
+        for (const pt of homeEdge.segCoords) loopCoords.push(pt);
+        totalDist += homeEdge.segDist;
+      }
+      break;
+    }
+
+    const edgeKey = current + "-" + nextEdge.to;
+    visitedEdges.add(edgeKey);
+    visitedEdges.add(nextEdge.to + "-" + current);
+
+    // Append segment coordinates (skip first to avoid duplicate point)
+    for (let i = 1; i < nextEdge.segCoords.length; i++) {
+      loopCoords.push(nextEdge.segCoords[i]);
+    }
+
+    totalDist += nextEdge.segDist;
+    current = nextEdge.to;
+
+    if (totalDist >= targetM * 1.15) {
+      // Close loop
+      const homeEdge = adj.find(e => e.to === startIdx);
+      if (homeEdge) {
+        for (const pt of homeEdge.segCoords) loopCoords.push(pt);
+        totalDist += homeEdge.segDist;
+      }
+      break;
+    }
   }
 
-  // Close loop back to start
-  const returnDist = haversine(nodes[current].lat, nodes[current].lon, startLat, startLon);
-  totalDistM += returnDist;
-
-  // Degenerate path check
-  if (path.length < 3 || totalDistM < targetM * 0.3) {
+  if (loopCoords.length < 4) {
     return generateFallbackLoop(startPoint, targetDistanceKm, routeType, "my-routes");
   }
 
-  // Resample every ~20m for accurate distance
-  const coordPath: [number, number][] = path.map(i => [nodes[i].lon, nodes[i].lat]);
-  const resampled: [number, number][] = [];
+  // Ensure loop is closed
+  loopCoords[loopCoords.length - 1] = [startLon, startLat];
 
-  for (let i = 0; i < coordPath.length - 1; i++) {
-    const d = haversine(coordPath[i][1], coordPath[i][0], coordPath[i + 1][1], coordPath[i + 1][0]);
-    const n = Math.max(2, Math.round(d / 20));
-    for (let j = 0; j <= n; j++) {
-      const f = j / n;
-      resampled.push([
-        coordPath[i][0] + f * (coordPath[i + 1][0] - coordPath[i][0]),
-        coordPath[i][1] + f * (coordPath[i + 1][1] - coordPath[i][1]),
-      ]);
-    }
-  }
-  resampled[resampled.length - 1] = [startLon, startLat];
-
+  // Recalculate distance
   let actualM = 0;
-  for (let i = 1; i < resampled.length; i++) {
-    actualM += haversine(resampled[i - 1][1], resampled[i - 1][0], resampled[i][1], resampled[i][0]);
+  for (let i = 1; i < loopCoords.length; i++) {
+    actualM += haversine(loopCoords[i - 1][1], loopCoords[i - 1][0], loopCoords[i][1], loopCoords[i][0]);
   }
 
   const names = [
@@ -139,17 +188,22 @@ export async function generateFromMyRoutes(
 
   return {
     name: names[Math.floor(Math.random() * names.length)],
-    coordinates: resampled,
+    coordinates: loopCoords,
     distance: Math.round(actualM),
     elevationGain: Math.round(Math.random() * (routeType === "trail" ? 100 : routeType === "mixed" ? 70 : 40)),
     isRoundTrip: true,
     type: routeType,
-    source: "my-routes" as const,
+    source: "my-routes",
   };
 }
 
 // ─── Provider 2: Mapbox Directions API ────────────────────────────────────────
 
+/**
+ * Generate a road-aware loop via Mapbox.
+ * Use 2 intermediate waypoints at different angles, placed at realistic walking distances.
+ * Mapbox handles the road routing — we just provide reasonable start/end/mid points.
+ */
 export async function generateFromMapbox(
   startPoint: [number, number],
   targetDistanceKm: number,
@@ -159,17 +213,26 @@ export async function generateFromMapbox(
 ): Promise<GeneratedRoute> {
   const [lng, lat] = startPoint;
 
-  // Single intermediate waypoint at ~45% of target distance, random direction
-  // This forces Mapbox to create a real loop (not back-and-forth)
-  const waypointDistKm = targetDistanceKm * 0.45;
-  const angle = Math.random() * 2 * Math.PI;
-  const dLat = (waypointDistKm / 6371) * (180 / Math.PI);
-  const dLon = (waypointDistKm / (6371 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
-  const wLat = lat + dLat * Math.sin(angle);
-  const wLng = lng + dLon * Math.cos(angle);
+  // Place 2 waypoints at realistic walking distances from start
+  // to force Mapbox to build a proper road-based loop
+  const angles = [
+    (Math.random() * 0.4 + 0.3) * 2 * Math.PI,  // 54-126° random
+    (Math.random() * 0.4 + 1.3) * 2 * Math.PI,  // 234-306° random (opposite side)
+  ];
+  const distKm = Math.min(targetDistanceKm * 0.42, 8);
 
-  const coordStr = lng.toFixed(6) + "," + lat.toFixed(6) + ";" + wLng.toFixed(6) + "," + wLat.toFixed(6) + ";" + lng.toFixed(6) + "," + lat.toFixed(6);
+  const wps: string[] = [lng.toFixed(6) + "," + lat.toFixed(6)];
+  for (const ang of angles) {
+    const dLat = (distKm / 6371) * (180 / Math.PI);
+    const dLon = (distKm / (6371 * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
+    wps.push(
+      (lng + dLon * Math.cos(ang)).toFixed(6) + "," +
+      (lat + dLat * Math.sin(ang)).toFixed(6)
+    );
+  }
+  wps.push(lng.toFixed(6) + "," + lat.toFixed(6)); // back to start
 
+  const coordStr = wps.join(";");
   const url =
     "https://api.mapbox.com/directions/v5/mapbox/walking/" + coordStr +
     "?geometries=geojson&overview=full&roundtrip=true&access_token=" + apiKey;
@@ -189,10 +252,11 @@ export async function generateFromMapbox(
       throw new Error("No route from Mapbox");
     }
 
-    // Pick route closest to target distance
-    const route = data.routes.sort(
+    // Sort by closeness to target distance, take best match
+    const sorted = data.routes.sort(
       (a: any, b: any) => Math.abs(a.distance - targetDistanceKm * 1000) - Math.abs(b.distance - targetDistanceKm * 1000)
-    )[0];
+    );
+    const route = sorted[0];
 
     const coords: [number, number][] = route.geometry.coordinates.map(
       (c: number[]) => [c[0], c[1]] as [number, number]
@@ -205,7 +269,7 @@ export async function generateFromMapbox(
       elevationGain: 0,
       isRoundTrip: true,
       type: routeType,
-      source: "mapbox" as const,
+      source: "mapbox",
     };
   } catch (err) {
     if ((err as Error).name === "AbortError") throw new Error("Mapbox timeout");
@@ -222,11 +286,10 @@ function generateFallbackLoop(
   source: "my-routes" | "mapbox"
 ): GeneratedRoute {
   const [startLon, startLat] = startPoint;
-
   const radiusKm = targetDistanceKm / (2 * Math.PI);
   const numPts = routeType === "road" ? 8 : routeType === "trail" ? 16 : 11;
 
-  const coords: [number, number][] = [[startLon, startLat]];
+  const pts: [number, number][] = [[startLon, startLat]];
   let cx = startLon, cy = startLat;
 
   for (let i = 0; i < numPts; i++) {
@@ -239,19 +302,19 @@ function generateFallbackLoop(
     const dLon = (r / (6371 * Math.cos((cy * Math.PI) / 180))) * (180 / Math.PI);
     cx = biasLon + dLon * Math.cos(angle);
     cy = biasLat + dLat * Math.sin(angle);
-    coords.push([cx, cy]);
+    pts.push([cx, cy]);
   }
-  coords.push([startLon, startLat]);
+  pts.push([startLon, startLat]);
 
-  const resampled: [number, number][] = [coords[0]];
-  for (let i = 1; i < coords.length; i++) {
-    const d = haversine(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
+  const resampled: [number, number][] = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const d = haversine(pts[i - 1][1], pts[i - 1][0], pts[i][1], pts[i][0]);
     const n = Math.max(2, Math.round(d / 15));
     for (let j = 1; j <= n; j++) {
       const f = j / n;
       resampled.push([
-        coords[i - 1][0] + f * (coords[i][0] - coords[i - 1][0]),
-        coords[i - 1][1] + f * (coords[i][1] - coords[i - 1][1]),
+        pts[i - 1][0] + f * (pts[i][0] - pts[i - 1][0]),
+        pts[i - 1][1] + f * (pts[i][1] - pts[i - 1][1]),
       ]);
     }
   }
