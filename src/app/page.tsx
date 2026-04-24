@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -29,17 +29,14 @@ export default function Home() {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
   const [showHeatmap, setShowHeatmap]      = useState(true);
+  const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
   const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
   const [showDrawer, setShowDrawer]          = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string }>({});
-  const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
-  const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
-  const [suggestDistance, setSuggestDistance] = useState(5);
-  const [avoidFamiliar, setAvoidFamiliar]   = useState(true);
+  const [filter, setFilter]                = useState<{ month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -58,8 +55,8 @@ export default function Home() {
     };
   }, [filteredRoutes]);
 
-  const { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion } =
-    useRouteSuggestions(suggestDistance, avoidFamiliar);
+  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
+  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -74,7 +71,6 @@ export default function Home() {
     try {
       const { login: lg, register: reg } = await import("@/lib/auth");
       if (isRegistering) {
-        // Duplicate check before creating account
         if (!username.trim() || username.trim().length < 3) {
           setAuthError("Please choose a username (at least 3 characters).");
           return;
@@ -89,7 +85,6 @@ export default function Home() {
           }
         }
         await reg(email, password);
-        // Create profile immediately with chosen username
         await saveProfile({ username: username.trim(), displayName: username.trim() });
         setUsername("");
       } else {
@@ -120,7 +115,6 @@ export default function Home() {
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
     setPendingUpload(null);
-    // Update Firestore with the corrected type (uploadFiles saved it as "road")
     if (named.id && user?.uid) {
       const { doc, updateDoc } = require("firebase/firestore");
       const { db } = require("@/lib/firebase");
@@ -145,15 +139,16 @@ export default function Home() {
 
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
-  const handleMapClick = (lat: number, lon: number) => {
-    if (isSelectingStartPoint) {
-      setSelectedStartPoint([lon, lat]);
-      setIsSelectingStartPoint(false);
-    }
+  const handleSaveToWishlist = async (routeId: string) => {
+    await toggleWishlist(routeId);
   };
 
-  const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes);
+  const handleToggleFavorite = async (routeId: string) => {
+    await toggleFavorite(routeId);
+  };
+
+  const handleMapClick = () => {
+    // No-op — kept for compatibility with MapSection interface
   };
 
   const getMonthOptions = () =>
@@ -183,10 +178,6 @@ export default function Home() {
     );
   }
 
-  // ── Desktop: side-by-side flex (no reversal) ─────────────────────────────
-  // Routes left (flex-1, scrollable) | Map right (w-1/2, fixed height)
-  // Mobile: column flex — map at top (fixed height), routes below (scrollable)
-  // activeTab controls which panel is visible on mobile (map tab = map only; routes tab = routes only)
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop sidebar */}
@@ -201,64 +192,32 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 md:hidden">
-          <div className="flex items-center gap-3">
-            <div className="md:hidden flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
-                <Icon name="sprint" filled className="text-on-primary-container text-sm" />
-              </div>
-              <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
+        {/* Mobile header */}
+        <header className="md:hidden h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 shrink-0 z-20">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
+              <Icon name="sprint" filled className="text-on-primary-container text-sm" />
             </div>
+            <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
           </div>
           <div className="flex items-center gap-1">
             <button
-                onClick={() => setMobileSearchOpen(true)}
-                className="md:hidden p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
-              >
-                <Icon name="search" className="text-on-surface-variant text-lg" />
-              </button>
-
-            {/* Mobile: hamburger menu (right side) */}
-            <button onClick={() => setShowDrawer(true)} className="md:hidden p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
+              onClick={() => setMobileSearchOpen(true)}
+              className="p-2 -mr-1 rounded-xl hover:bg-surface-container transition-colors"
+            >
+              <Icon name="search" className="text-on-surface-variant text-lg" />
+            </button>
+            <button onClick={() => setShowDrawer(true)} className="p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
               <Icon name="menu" className="text-on-surface-variant text-xl" />
             </button>
           </div>
         </header>
 
-        {/* Desktop: side-by-side | Mobile: tab-switched panels */}
+        {/* Body: side-by-side desktop / stacked mobile */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className={
-            "flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none"
-          }>
-            {suggestedRoute && (
-              <div className="bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <Icon name="check_circle" filled className="text-secondary text-base" />
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
-                    </div>
-                    <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
-                    <p className="text-xs text-on-surface-variant mt-0.5">
-                      {(suggestedRoute.distance / 1000).toFixed(1)} km
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={handleGenerate} disabled={isSuggesting}
-                      className="p-2 hover:bg-primary-container/20 rounded-xl text-xs font-bold text-primary transition-colors">
-                      <Icon name="refresh" className="text-base" />
-                    </button>
-                    <button onClick={clearSuggestion}
-                      className="p-2 hover:bg-primary-container/20 rounded-xl transition-colors">
-                      <Icon name="close" className="text-on-surface-variant text-sm" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+          <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none">
 
             <StatsBar stats={stats} />
 
@@ -278,12 +237,16 @@ export default function Home() {
               onEditRoute={setEditingRoute}
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
+              wishlist={wishlist}
+              favorites={favorites}
+              onToggleWishlist={handleSaveToWishlist}
+              onToggleFavorite={handleToggleFavorite}
             />
           </div>
 
           {/* ── Map panel ── */}
           <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
-            {/* Floating search overlay — below header, over map */}
+            {/* Floating search overlay on mobile */}
             {mobileSearchOpen && (
               <div className="absolute top-2 left-2 right-2 z-30 flex items-center gap-2 md:hidden">
                 <input
@@ -307,18 +270,19 @@ export default function Home() {
               <MapSection
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}
-                suggestedRoute={suggestedRoute}
+                suggestedRoute={null}
                 showHeatmap={showHeatmap}
+                showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
                 isLoading={isUploading}
-                selectedStartPoint={selectedStartPoint}
-                isSelectingStartPoint={isSelectingStartPoint}
+                selectedStartPoint={null}
+                isSelectingStartPoint={false}
                 onMapClick={handleMapClick}
               />
-
             </div>
 
-            {/* Mobile map controls: type legend (left) + heatmap toggle (right) — below map, above routes */}
+            {/* Mobile map controls below map */}
             <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
@@ -333,6 +297,12 @@ export default function Home() {
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
                   <span className="text-[9px] text-on-surface-variant">Mixed</span>
                 </div>
+                {showPersonalHeatmap && (
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 215 0)" }} />
+                    <span className="text-[9px] text-on-surface-variant">Heat</span>
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => setShowHeatmap(!showHeatmap)}
@@ -343,7 +313,7 @@ export default function Home() {
                 }`}
               >
                 <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                {showHeatmap ? "Hide routes" : "Show routes"}
+                {showHeatmap ? "Hide" : "Show"}
               </button>
             </div>
           </div>
