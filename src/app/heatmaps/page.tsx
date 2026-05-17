@@ -118,14 +118,14 @@ export default function PersonalHeatmapsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const acceptUpload = (name: string, type: string) => {
+  const acceptUpload = async (name: string, type: string) => {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
     setPendingUpload(null);
     if (named.id && user?.uid) {
-      const { doc, updateDoc } = require("firebase/firestore");
-      const { db } = require("@/lib/firebase");
+      const { doc, updateDoc } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
       if (db) updateDoc(doc(db, "routes", named.id), { name, type }).catch(console.error);
     }
   };

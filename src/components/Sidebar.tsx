@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
@@ -26,9 +26,128 @@ function UploadRoutePrompt({
 }) {
   const [gpxFiles, setGpxFiles] = useState<File[]>([]);
   const [tcxFiles, setTcxFiles] = useState<File[]>([]);
+  const [matchStatus, setMatchStatus] = useState<{ checking: boolean; ok: boolean; message: string }>({
+    checking: false,
+    ok: true,
+    message: "TCX is optional. GPX-only uploads still work.",
+  });
+
+  type FileSignature = {
+    name: string;
+    startTime: number | null;
+    startPoint: { lat: number; lon: number } | null;
+  };
+
+  const readSignature = useCallback(async (file: File, kind: "gpx" | "tcx"): Promise<FileSignature> => {
+    const text = await file.text();
+    const xml = new DOMParser().parseFromString(text, "application/xml");
+    const parseTime = (value: string | null | undefined) => {
+      if (!value) return null;
+      const time = new Date(value).valueOf();
+      return Number.isFinite(time) ? time : null;
+    };
+
+    if (kind === "gpx") {
+      const point = xml.querySelector("trkpt");
+      const time = parseTime(point?.querySelector("time")?.textContent || xml.querySelector("time")?.textContent);
+      const lat = point ? Number(point.getAttribute("lat")) : NaN;
+      const lon = point ? Number(point.getAttribute("lon")) : NaN;
+      return {
+        name: file.name,
+        startTime: time,
+        startPoint: Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null,
+      };
+    }
+
+    const point = xml.querySelector("Trackpoint");
+    const time = parseTime(point?.querySelector("Time")?.textContent);
+    const lat = Number(point?.querySelector("LatitudeDegrees")?.textContent);
+    const lon = Number(point?.querySelector("LongitudeDegrees")?.textContent);
+    return {
+      name: file.name,
+      startTime: time,
+      startPoint: Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null,
+    };
+  }, []);
+
+  const distanceMeters = useCallback((a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+    const radius = 6371000;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const dLat = lat2 - lat1;
+    const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return radius * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const validate = async () => {
+      if (tcxFiles.length === 0) {
+        setMatchStatus({ checking: false, ok: true, message: "TCX is optional. GPX-only uploads still work." });
+        return;
+      }
+      if (gpxFiles.length === 0) {
+        setMatchStatus({ checking: false, ok: false, message: "Choose a GPX route file before adding TCX metrics." });
+        return;
+      }
+      if (gpxFiles.length !== tcxFiles.length) {
+        setMatchStatus({ checking: false, ok: false, message: "For now, upload the same number of GPX and TCX files." });
+        return;
+      }
+
+      setMatchStatus({ checking: true, ok: false, message: "Checking GPX and TCX match..." });
+      try {
+        const gpxSignatures = await Promise.all(gpxFiles.map((file) => readSignature(file, "gpx")));
+        const tcxSignatures = await Promise.all(tcxFiles.map((file) => readSignature(file, "tcx")));
+        const usedGpx = new Set<number>();
+
+        for (const tcx of tcxSignatures) {
+          const matchedIndex = gpxSignatures.findIndex((gpx, index) => {
+            if (usedGpx.has(index)) return false;
+            const timeOk =
+              gpx.startTime !== null &&
+              tcx.startTime !== null &&
+              Math.abs(gpx.startTime - tcx.startTime) <= 15 * 60 * 1000;
+            const pointOk =
+              gpx.startPoint !== null &&
+              tcx.startPoint !== null &&
+              distanceMeters(gpx.startPoint, tcx.startPoint) <= 500;
+            if (gpx.startTime !== null && tcx.startTime !== null && gpx.startPoint !== null && tcx.startPoint !== null) {
+              return timeOk && pointOk;
+            }
+            return timeOk || pointOk;
+          });
+
+          if (matchedIndex === -1) {
+            throw new Error('TCX file "' + tcx.name + '" does not match the selected GPX file.');
+          }
+          usedGpx.add(matchedIndex);
+        }
+
+        if (!cancelled) {
+          setMatchStatus({ checking: false, ok: true, message: "GPX and TCX match." });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMatchStatus({
+            checking: false,
+            ok: false,
+            message: error instanceof Error ? error.message : "Could not verify that GPX and TCX match.",
+          });
+        }
+      }
+    };
+
+    validate();
+    return () => {
+      cancelled = true;
+    };
+  }, [gpxFiles, tcxFiles, readSignature, distanceMeters]);
 
   const submit = () => {
-    if (gpxFiles.length === 0) return;
+    if (gpxFiles.length === 0 || !matchStatus.ok || matchStatus.checking) return;
     onUpload(gpxFiles, tcxFiles);
     onClose();
   };
@@ -93,12 +212,20 @@ function UploadRoutePrompt({
           </label>
         </div>
 
+        <div className={`mt-3 rounded-2xl px-3 py-2 text-xs ${
+          matchStatus.ok
+            ? "bg-primary-container/30 text-on-surface-variant"
+            : "bg-error-container/40 text-error"
+        }`}>
+          {matchStatus.message}
+        </div>
+
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={submit} disabled={gpxFiles.length === 0} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
-            Upload
+          <button onClick={submit} disabled={gpxFiles.length === 0 || !matchStatus.ok || matchStatus.checking} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+            {matchStatus.checking ? "Checking..." : "Upload"}
           </button>
         </div>
       </div>
