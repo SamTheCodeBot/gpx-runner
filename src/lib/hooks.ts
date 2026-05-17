@@ -182,15 +182,19 @@ export function useGPXRoutes(userId: string | null) {
             distance: parsed.distance,
             elevationGain: parsed.elevationGain,
             samples: mergeMetricSamples(parsed, tcxText),
+            hasTcx: Boolean(tcxText),
             color: nextColor(),
             type: "road" as const,
             userId: userId || undefined,
           };
 
-          // Upload GPX to Firebase Storage
+          // Upload GPX/TCX to Firebase Storage
           if (storage && userId) {
             try {
               await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.gpx`), file);
+              if (tcxFiles[i]) {
+                await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.tcx`), tcxFiles[i]);
+              }
             } catch (e) {
               console.error("Storage upload error", e);
             }
@@ -219,16 +223,17 @@ export function useGPXRoutes(userId: string | null) {
 
   const deleteRoute = useCallback(
     async (id: string, currentRoutes: GPXRoute[]) => {
-      const route = currentRoutes.find((r) => r.id === id);
-      if (!route) return;
       const updated = currentRoutes.filter((r) => r.id !== id);
       saveRoutes(updated);
       if (storage && userId) {
-        try {
-          await deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`));
-        } catch (e) {
-          console.error("Failed to delete from Firebase Storage", e);
-        }
+        await Promise.all([
+          deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`)).catch((e) => {
+            console.error("Failed to delete GPX from Firebase Storage", e);
+          }),
+          deleteObject(ref(storage, `gpx-files/${userId}/${id}.tcx`)).catch((e) => {
+            console.error("Failed to delete TCX from Firebase Storage", e);
+          }),
+        ]);
       }
       if (db) {
         try {

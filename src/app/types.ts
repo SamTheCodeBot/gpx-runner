@@ -22,6 +22,7 @@ export interface GPXRoute {
   isRoundTrip?: boolean;
   startPoint?: [number, number];
   samples?: RouteMetricSample[];
+  hasTcx?: boolean;
 }
 
 export interface RouteStats {
