@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { GPXRoute, RouteSuggestion } from "@/app/types";
-import { buildPersonalHeatmap, HeatmapSegment } from "@/engine/heatmapUtils";
 
 interface MapProps {
   routes: GPXRoute[];
@@ -130,6 +129,171 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
   return markers;
 }
 
+const HEATMAP_RAMPS: Record<string, [[number, number, number], [number, number, number], [number, number, number]]> = {
+  road: [
+    [255, 185, 215],
+    [255, 65, 164],
+    [242, 4, 132],
+  ],
+  trail: [
+    [188, 248, 255],
+    [18, 221, 251],
+    [0, 150, 204],
+  ],
+  mixed: [
+    [231, 190, 255],
+    [197, 45, 255],
+    [132, 0, 208],
+  ],
+};
+
+function mixChannel(a: number, b: number, amount: number): number {
+  return Math.round(a + (b - a) * amount);
+}
+
+function rampColor(type: string | undefined, intensity: number): [number, number, number] {
+  const [low, base, high] = HEATMAP_RAMPS[type || "road"] || HEATMAP_RAMPS.road;
+  const from = intensity <= 0.55 ? low : base;
+  const to = intensity <= 0.55 ? base : high;
+  const amount = intensity <= 0.55 ? intensity / 0.55 : (intensity - 0.55) / 0.45;
+
+  return [
+    mixChannel(from[0], to[0], amount),
+    mixChannel(from[1], to[1], amount),
+    mixChannel(from[2], to[2], amount),
+  ];
+}
+
+function routeTypeIndex(type?: string): number {
+  if (type === "trail") return 1;
+  if (type === "mixed") return 2;
+  return 0;
+}
+
+function typeFromIndex(index: number): "road" | "trail" | "mixed" {
+  if (index === 1) return "trail";
+  if (index === 2) return "mixed";
+  return "road";
+}
+
+function PersonalHeatmapCanvas({ routes, enabled }: { routes: GPXRoute[]; enabled: boolean }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!enabled || routes.length === 0) return;
+
+    const canvas = L.DomUtil.create("canvas", "leaflet-heatmap-canvas") as HTMLCanvasElement;
+    canvas.style.position = "absolute";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "450";
+    map.getPanes().overlayPane.appendChild(canvas);
+
+    let frame = 0;
+
+    const draw = () => {
+      const size = map.getSize();
+      const scale = Math.min(window.devicePixelRatio || 1, 1.5);
+      const width = Math.max(1, Math.round(size.x * scale));
+      const height = Math.max(1, Math.round(size.y * scale));
+      const topLeft = map.containerPointToLayerPoint([0, 0]);
+
+      L.DomUtil.setPosition(canvas, topLeft);
+      canvas.style.width = `${size.x}px`;
+      canvas.style.height = `${size.y}px`;
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.clearRect(0, 0, width, height);
+
+      const densities = [
+        new Float32Array(width * height),
+        new Float32Array(width * height),
+        new Float32Array(width * height),
+      ];
+      const mask = document.createElement("canvas");
+      mask.width = width;
+      mask.height = height;
+      const maskContext = mask.getContext("2d", { willReadFrequently: true });
+      if (!maskContext) return;
+
+      for (const route of routes) {
+        if (!route.coordinates || route.coordinates.length < 2) continue;
+
+        maskContext.clearRect(0, 0, width, height);
+        maskContext.beginPath();
+        route.coordinates.forEach(([lon, lat], index) => {
+          const point = map.latLngToContainerPoint([lat, lon]);
+          const x = point.x * scale;
+          const y = point.y * scale;
+          if (index === 0) maskContext.moveTo(x, y);
+          else maskContext.lineTo(x, y);
+        });
+        maskContext.strokeStyle = "rgb(255 255 255)";
+        maskContext.lineWidth = 7 * scale;
+        maskContext.lineCap = "round";
+        maskContext.lineJoin = "round";
+        maskContext.stroke();
+
+        const alpha = maskContext.getImageData(0, 0, width, height).data;
+        const density = densities[routeTypeIndex(route.type)];
+        for (let i = 3, px = 0; i < alpha.length; i += 4, px += 1) {
+          if (alpha[i] > 0) density[px] += alpha[i] / 255;
+        }
+      }
+
+      let maxDensity = 0;
+      for (const density of densities) {
+        for (let i = 0; i < density.length; i += 1) {
+          if (density[i] > maxDensity) maxDensity = density[i];
+        }
+      }
+      if (maxDensity <= 0) return;
+
+      const output = context.createImageData(width, height);
+      for (let px = 0, out = 0; px < width * height; px += 1, out += 4) {
+        let typeIndex = 0;
+        let value = densities[0][px];
+        if (densities[1][px] > value) {
+          typeIndex = 1;
+          value = densities[1][px];
+        }
+        if (densities[2][px] > value) {
+          typeIndex = 2;
+          value = densities[2][px];
+        }
+        if (value <= 0) continue;
+
+        const intensity = maxDensity <= 1 ? 0 : Math.max(0, Math.min(1, (value - 1) / (maxDensity - 1)));
+        const [r, g, b] = rampColor(typeFromIndex(typeIndex), intensity);
+        output.data[out] = r;
+        output.data[out + 1] = g;
+        output.data[out + 2] = b;
+        output.data[out + 3] = Math.round((0.58 + intensity * 0.37) * Math.min(1, value) * 255);
+      }
+
+      context.putImageData(output, 0, 0);
+    };
+
+    const scheduleDraw = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(draw);
+    };
+
+    scheduleDraw();
+    map.on("moveend zoomend resize", scheduleDraw);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      map.off("moveend zoomend resize", scheduleDraw);
+      canvas.remove();
+    };
+  }, [enabled, map, routes]);
+
+  return null;
+}
+
 export default function Map({
   routes,
   selectedRoute,
@@ -169,12 +333,6 @@ export default function Map({
       allCoords.reduce((sum, [lon]) => sum + lon, 0) / allCoords.length,
     ] as [number, number];
   };
-
-  // Build personal heatmap segments — only when enabled and no single route is selected
-  const personalHeatmapSegments: HeatmapSegment[] =
-    showPersonalHeatmap && !selectedRoute && routes.length > 0
-      ? buildPersonalHeatmap(routes)
-      : [];
 
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
@@ -245,6 +403,7 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
       <MapEvents onMapClick={onMapClick} />
+      <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
 
       {selectedStartPoint && (
         <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>
@@ -275,20 +434,6 @@ export default function Map({
         />
       ))}
 
-      {/* Personal heatmap overlay — continuous route geometry with frequency styling */}
-      {personalHeatmapSegments.map((seg, idx) => (
-        <Polyline
-          key={`personal-heatmap-${idx}`}
-          positions={seg.positions.map(([lon, lat]) => [lat, lon] as [number, number])}
-          pathOptions={{
-            color: seg.color,
-            weight: seg.weight,
-            opacity: seg.opacity,
-            lineCap: "round",
-            lineJoin: "round",
-          }}
-        />
-      ))}
     </MapContainer>
   );
 }
