@@ -249,19 +249,20 @@ export function useRouteFilter(
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
 
   const getSuggestion = useCallback(
-    async (startPoint: [number, number] | null, routes: GPXRoute[]) => {
+    async (
+      startPoint: [number, number] | null,
+      routes: GPXRoute[],
+      source: "my-routes" | "mapbox" | "both" = "my-routes",
+      mapboxApiKey: string = ""
+    ) => {
       setIsSuggesting(true);
-      setApiKeyMissing(false);
       try {
-        // Determine start coordinates
-        let lat = 59.3293; // Stockholm
-        let lon = 18.0686;
-        if (startPoint) {
-          [lon, lat] = startPoint;
-        } else if (routes.length > 0) {
+        let lat = 56.9; // Falkenberg
+        let lon = 12.5;
+        if (startPoint) { [lon, lat] = startPoint; }
+        else if (routes.length > 0) {
           const allCoords = routes.flatMap((r) => r.coordinates);
           if (allCoords.length > 0) {
             lat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
@@ -269,57 +270,70 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
-        const gpxFiles = routes.map((r) => {
-          const pts = r.coordinates
-            .map(([lon, lat]) => `<trkpt lat="${lat}" lon="${lon}"></trkpt>`)
-            .join("");
-          return `<?xml?><gpx><trk><trkseg>${pts}</trkseg></trk></gpx>`;
-        });
+        const { generateFromMyRoutes, generateFromMapbox } = await import("@/lib/route-providers");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
 
-        const res = await fetch("/api/generate-route", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            start: { lat, lng: lon },
-            targetDistanceKm: suggestDistance,
-            toleranceKm: 1,
-            familiarityMode: avoidFamiliar ? "new" : "familiar",
-            gpxFiles,
-          }),
-        });
+        let result = null;
+        try {
+          if (source === "my-routes") {
+            result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
+          } else if (source === "mapbox") {
+            if (!mapboxApiKey) throw new Error("Mapbox API key required");
+            result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
+          } else {
+            // "both" — try my-routes first, fall back to mapbox
+            try {
+              result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
+            } catch {
+              if (mapboxApiKey) {
+                result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
+              } else {
+                throw new Error("No routes nearby and no Mapbox key");
+              }
+            }
+          }
 
-        const payload = await res.json();
-        if (!res.ok) {
-          if (payload?.error?.includes("OPENROUTESERVICE_API_KEY")) setApiKeyMissing(true);
-          throw new Error(payload?.error || "Request failed");
+          if (result) {
+            setSuggestedRoute({
+              id: `suggested-${Date.now()}`,
+              name: result.name,
+              date: new Date().toISOString(),
+              coordinates: result.coordinates,
+              distance: result.distance,
+              elevationGain: result.elevationGain,
+              color: "#f472b6",
+              isRoundTrip: true,
+              type: result.type,
+            });
+          }
+        } finally {
+          clearTimeout(timeout);
         }
-
-        const best = payload?.routes?.[0];
-        if (!best || !Array.isArray(best.geometry) || best.geometry.length < 2) {
-          setSuggestedRoute(null);
-          alert("No valid route found. Try another start point or distance.");
-          return;
+      } catch (err) {
+        console.error("[useRouteSuggestions]", err);
+        const { generateRandomRoute } = await import("@/lib/utils");
+        let lat2 = 56.9, lon2 = 12.5;
+        if (startPoint) { [lon2, lat2] = startPoint; }
+        else if (routes.length > 0) {
+          const allCoords = routes.flatMap((r) => r.coordinates);
+          if (allCoords.length > 0) {
+            lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
+            lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+          }
         }
-
-        const coords = best.geometry.map((p: { lat: number; lng: number }) => [p.lng, p.lat] as [number, number]);
+        const generated = generateRandomRoute([lon2, lat2], suggestDistance, "mixed", avoidFamiliar ? "novel" : "familiar", [], Date.now());
         setSuggestedRoute({
           id: `suggested-${Date.now()}`,
-          name: `${avoidFamiliar ? "New" : "Familiar"} Loop — ${(best.distanceMeters / 1000).toFixed(1)}km`,
+          name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
           date: new Date().toISOString(),
-          coordinates: coords,
-          distance: best.distanceMeters,
-          elevationGain: 0,
+          coordinates: generated.coordinates,
+          distance: generated.distance,
+          elevationGain: generated.elevationGain,
           color: "#f472b6",
           isRoundTrip: true,
-          familiarityScore: Math.round((best.familiarityRatio ?? 0) * 100),
-        } as GPXRoute & { familiarityScore: number });
-      } catch (err) {
-        console.error(err);
-        if (err instanceof Error && err.message.includes("OPENROUTESERVICE_API_KEY")) {
-          setApiKeyMissing(true);
-        } else {
-          alert("Could not generate a valid route.");
-        }
+          type: "mixed",
+        });
       } finally {
         setIsSuggesting(false);
       }
@@ -327,7 +341,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     [suggestDistance, avoidFamiliar]
   );
 
-  return { suggestedRoute, isSuggesting, apiKeyMissing, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
+  return { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 
@@ -378,7 +392,6 @@ export function useUserProfile(userId: string | null) {
       } else {
         await updateDoc(doc(db, "userProfiles", snap.docs[0].id), updated);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (setProfile as (v: import("@/app/types").UserProfile | null) => void)(updated);
     } catch (e) { console.error("[useUserProfile] save failed", e); throw e; }
     finally { setLoading(false); }
@@ -479,4 +492,125 @@ export function useAccountDeletion() {
   }, []);
 
   return { deleteAccount, isDeleting, error };
+}
+
+// ─── useWishlist ───────────────────────────────────────────────────────────────
+
+export function useWishlist(userId: string | null) {
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Load wishlist from Firestore on mount or when userId changes
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setWishlist(data.wishlisted || []);
+        }
+      } catch (e) { console.error("[useWishlist] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...wishlist, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] add", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const removeFromWishlist = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = wishlist.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { wishlisted: updated });
+      setWishlist(updated);
+    } catch (e) { console.error("[useWishlist] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, wishlist]);
+
+  const toggleWishlist = useCallback(async (routeId: string) => {
+    if (wishlist.includes(routeId)) {
+      await removeFromWishlist(routeId);
+    } else {
+      await addToWishlist(routeId);
+    }
+  }, [wishlist, addToWishlist, removeFromWishlist]);
+
+  return { wishlist, toggleWishlist, loading };
+}
+
+// ─── useFavorites ──────────────────────────────────────────────────────────────
+
+export function useFavorites(userId: string | null) {
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      try {
+        const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setFavorites(data.favorites || []);
+        }
+      } catch (e) { console.error("[useFavorites] load", e); }
+    };
+    load();
+  }, [userId]);
+
+  const addToFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = [...favorites, routeId];
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] add", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const removeFromFavorites = useCallback(async (routeId: string) => {
+    if (!db || !userId) return;
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
+      if (snap.empty) return;
+      const docId = snap.docs[0].id;
+      const updated = favorites.filter(id => id !== routeId);
+      await updateDoc(doc(db, "userProfiles", docId), { favorites: updated });
+      setFavorites(updated);
+    } catch (e) { console.error("[useFavorites] remove", e); }
+    finally { setLoading(false); }
+  }, [userId, favorites]);
+
+  const toggleFavorite = useCallback(async (routeId: string) => {
+    if (favorites.includes(routeId)) {
+      await removeFromFavorites(routeId);
+    } else {
+      await addToFavorites(routeId);
+    }
+  }, [favorites, addToFavorites, removeFromFavorites]);
+
+  return { favorites, toggleFavorite, loading };
 }

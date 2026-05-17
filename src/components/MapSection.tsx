@@ -18,14 +18,18 @@ interface MapSectionProps {
   selectedRoute: GPXRoute | null;
   suggestedRoute: GPXRoute | null;
   showHeatmap: boolean;
+  showPersonalHeatmap: boolean;
   onToggleHeatmap: () => void;
+  onTogglePersonalHeatmap: () => void;
   isLoading: boolean;
   selectedStartPoint: [number, number] | null;
   isSelectingStartPoint: boolean;
   onMapClick: (lat: number, lon: number) => void;
+  showMapControls?: boolean;
+  showPersonalHeatmapControl?: boolean;
 }
 
-function MapLegend() {
+function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
   return (
     <div className="hidden md:flex absolute bottom-4 left-4 z-20">
       <div className="bg-surface-container-lowest/90 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-4 shadow-sm">
@@ -41,6 +45,15 @@ function MapLegend() {
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
           <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Mixed</span>
         </div>
+        {showPersonalHeatmap && (
+          <div className="flex items-center gap-1.5">
+            <div
+              className="w-6 h-2.5 rounded-full"
+              style={{ background: "linear-gradient(90deg, rgb(255 190 224), rgb(255 65 164), rgb(151 17 86))" }}
+            />
+            <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Frequency</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -59,6 +72,25 @@ function HeatmapToggle({ showHeatmap, onToggleHeatmap }: { showHeatmap: boolean;
       >
         <Icon name="layers" className="text-xs inline mr-1" />
         {showHeatmap ? "Hide routes" : "Show routes"}
+      </button>
+    </div>
+  );
+}
+
+function PersonalHeatmapToggle({ showPersonalHeatmap, onToggle }: { showPersonalHeatmap: boolean; onToggle: () => void }) {
+  return (
+    <div className="hidden md:block absolute top-[88px] right-4 z-20">
+      <button
+        onClick={onToggle}
+        className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
+          showPersonalHeatmap
+            ? "bg-primary text-on-primary"
+            : "bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container"
+        }`}
+        title="Personal heatmap — repeated sections use stronger route colours"
+      >
+        <Icon name="whatshot" className="text-xs inline mr-1" />
+        {showPersonalHeatmap ? "Heatmap on" : "My heatmap"}
       </button>
     </div>
   );
@@ -89,10 +121,11 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
 }
 
 export function MapSection({
-  routes, selectedRoute, suggestedRoute, showHeatmap,
-  onToggleHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
+  routes, selectedRoute, suggestedRoute, showHeatmap, showPersonalHeatmap,
+  onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
+  showMapControls = true,
+  showPersonalHeatmapControl = true,
 }: MapSectionProps) {
-  // Routes with coordinates for display
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
   );
@@ -103,6 +136,7 @@ export function MapSection({
         routes={displayRoutes}
         selectedRoute={selectedRoute}
         showHeatmap={showHeatmap}
+        showPersonalHeatmap={showPersonalHeatmap}
         suggestedRoute={suggestedRoute ?? undefined}
         selectedStartPoint={selectedStartPoint}
         isSelectingStartPoint={isSelectingStartPoint}
@@ -110,8 +144,15 @@ export function MapSection({
         darkMode={false}
       />
 
-      <MapLegend />
-      <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
+      <MapLegend showPersonalHeatmap={showPersonalHeatmap} />
+      {showMapControls && (
+        <>
+          <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
+          {showPersonalHeatmapControl && (
+            <PersonalHeatmapToggle showPersonalHeatmap={showPersonalHeatmap} onToggle={onTogglePersonalHeatmap} />
+          )}
+        </>
+      )}
       <LoadingOverlay isLoading={isLoading} />
       <StartPointHint isSelectingStartPoint={isSelectingStartPoint} />
     </div>
