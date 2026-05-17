@@ -1,28 +1,26 @@
 /**
- * Personal Heatmap utilities
+ * Personal heatmap utilities.
  *
- * Builds a per-segment intensity map from the user's route history.
- * Each route is split into fixed-size cells (use ~50m resolution).
- * Cells with more overlapping routes get higher intensity → rendered as thicker lines.
+ * The overlay is drawn from the full uploaded route geometry. Frequency is
+ * measured with small sampled cells, but rendering keeps continuous polyline
+ * coverage so the heatmap does not collapse into dots or short dashes.
  */
 
-import { LatLng } from "@/types";
+const CELL_SIZE_M = 22;
+const SAMPLE_STEP_M = 10;
+const RENDER_STEP_M = 18;
 
-const CELL_SIZE_M = 50; // metres per grid cell
-
-/** Quantize a coordinate to the nearest cell centre (in metres). */
-function cellKey(lat: number, lng: number): string {
-  const latScale = 111320; // metres per degree latitude
-  const lngScale = 111320 * Math.cos((lat * Math.PI) / 180);
-  const latCell = Math.round((lat * latScale) / CELL_SIZE_M) * CELL_SIZE_M;
-  const lngCell = Math.round((lng * lngScale) / CELL_SIZE_M) * CELL_SIZE_M;
-  return `${latCell},${lngCell}`;
-}
+type RouteForHeatmap = {
+  coordinates: [number, number][];
+  color?: string;
+  type?: string;
+  id: string;
+};
 
 export interface HeatmapSegment {
-  positions: [number, number][]; // polyline for this segment [lon, lat]
-  weight: number;               // 2–8, based on run count
-  count: number;                // raw overlap count
+  positions: [number, number][]; // [lon, lat]
+  weight: number;
+  count: number;
   color: string;
   opacity: number;
 }
@@ -35,6 +33,45 @@ const TYPE_COLORS: Record<string, string> = {
 
 function baseRouteColor(route: { color?: string; type?: string }): string {
   return route.color || (route.type ? TYPE_COLORS[route.type] : undefined) || TYPE_COLORS.road;
+}
+
+function haversineMeters(a: [number, number], b: [number, number]): number {
+  const radius = 6371000;
+  const lat1 = (a[1] * Math.PI) / 180;
+  const lat2 = (b[1] * Math.PI) / 180;
+  const dLat = lat2 - lat1;
+  const dLon = ((b[0] - a[0]) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return radius * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function interpolate(a: [number, number], b: [number, number], fraction: number): [number, number] {
+  return [
+    a[0] + (b[0] - a[0]) * fraction,
+    a[1] + (b[1] - a[1]) * fraction,
+  ];
+}
+
+function cellKey([lng, lat]: [number, number]): string {
+  const latScale = 111320;
+  const lngScale = Math.max(1, 111320 * Math.cos((lat * Math.PI) / 180));
+  const latCell = Math.round((lat * latScale) / CELL_SIZE_M);
+  const lngCell = Math.round((lng * lngScale) / CELL_SIZE_M);
+  return `${latCell},${lngCell}`;
+}
+
+function sampledCellsForSegment(a: [number, number], b: [number, number], stepMeters: number): string[] {
+  const distance = haversineMeters(a, b);
+  const steps = Math.max(1, Math.ceil(distance / stepMeters));
+  const cells: string[] = [];
+
+  for (let i = 0; i <= steps; i += 1) {
+    cells.push(cellKey(interpolate(a, b, i / steps)));
+  }
+
+  return cells;
 }
 
 function parseRgb(color: string): [number, number, number] | null {
@@ -63,65 +100,74 @@ function heatColor(baseColor: string, intensity: number): string {
   const rgb = parseRgb(baseColor);
   if (!rgb) return baseColor;
 
-  // Low-frequency segments are pale versions of the route colour; repeated
-  // sections move toward the original colour and then a slightly darker shade.
-  const lighten = Math.max(0, 0.58 - intensity * 0.5);
-  const darken = Math.max(0, intensity - 0.72) * 0.45;
+  const lighten = Math.max(0, 0.38 - intensity * 0.34);
+  const darken = Math.max(0, intensity - 0.68) * 0.5;
   const lightened = rgb.map((c) => mixChannel(c, 255, lighten));
   const intensified = lightened.map((c) => mixChannel(c, 0, darken));
   return `rgb(${intensified[0]} ${intensified[1]} ${intensified[2]})`;
 }
 
-/**
- * Build heatmap segments from a list of routes.
- * Routes typed as 'road'/'trail'/'mixed' can use different heatmap colours.
- */
+function scaleCount(count: number, maxCount: number, min: number, max: number): number {
+  if (maxCount <= 1) return min;
+  const intensity = (count - 1) / (maxCount - 1);
+  return min + intensity * (max - min);
+}
+
+function countForRenderedChunk(a: [number, number], b: [number, number], cellCounts: Map<string, number>): number {
+  const cells = sampledCellsForSegment(a, b, SAMPLE_STEP_M);
+  return Math.max(1, ...cells.map((key) => cellCounts.get(key) ?? 1));
+}
+
 export function buildPersonalHeatmap(
-  routes: { coordinates: [number, number][]; color?: string; type?: string; id: string }[],
-  minWeight = 2,
-  maxWeight = 8,
+  routes: RouteForHeatmap[],
+  minWeight = 2.5,
+  maxWeight = 9.5,
 ): HeatmapSegment[] {
   if (routes.length === 0) return [];
 
-  // 1. Count overlaps per cell across all routes
   const cellCounts = new Map<string, number>();
+
   for (const route of routes) {
-    const seen = new Set<string>();
-    for (const [lng, lat] of route.coordinates) {
-      const key = cellKey(lat, lng);
-      if (!seen.has(key)) {
-        seen.add(key);
-        cellCounts.set(key, (cellCounts.get(key) ?? 0) + 1);
+    const routeCells = new Set<string>();
+    const coords = route.coordinates;
+
+    for (let i = 1; i < coords.length; i += 1) {
+      for (const key of sampledCellsForSegment(coords[i - 1], coords[i], SAMPLE_STEP_M)) {
+        routeCells.add(key);
       }
+    }
+
+    for (const key of routeCells) {
+      cellCounts.set(key, (cellCounts.get(key) ?? 0) + 1);
     }
   }
 
-  // 2. Normalise weights across all routes (max count → maxWeight)
-  const maxCount = Math.max(...cellCounts.values(), 1);
-  const weightScale = (count: number) => {
-    if (maxCount <= 1) return minWeight;
-    return Math.round(minWeight + ((count - 1) / (maxCount - 1)) * (maxWeight - minWeight));
-  };
-
-  // 3. Build per-route segments with weights
+  const maxCount = Math.max(1, ...cellCounts.values());
   const segments: HeatmapSegment[] = [];
+
   for (const route of routes) {
-    const seen = new Set<string>();
+    const routeColor = baseRouteColor(route);
     const coords = route.coordinates;
-    for (let i = 1; i < coords.length; i++) {
-      const [lng1, lat1] = coords[i - 1];
-      const [lng2, lat2] = coords[i];
-      const key = cellKey((lat1 + lat2) / 2, (lng1 + lng2) / 2);
-      if (!seen.has(key)) {
-        seen.add(key);
-        const count = cellCounts.get(key) ?? 1;
+
+    for (let i = 1; i < coords.length; i += 1) {
+      const from = coords[i - 1];
+      const to = coords[i];
+      const distance = haversineMeters(from, to);
+      if (distance < 0.5) continue;
+
+      const chunks = Math.max(1, Math.ceil(distance / RENDER_STEP_M));
+      for (let chunk = 0; chunk < chunks; chunk += 1) {
+        const a = interpolate(from, to, chunk / chunks);
+        const b = interpolate(from, to, (chunk + 1) / chunks);
+        const count = countForRenderedChunk(a, b, cellCounts);
         const intensity = maxCount <= 1 ? 0 : (count - 1) / (maxCount - 1);
+
         segments.push({
-          positions: [[lng1, lat1], [lng2, lat2]],
-          weight: weightScale(count),
+          positions: [a, b],
+          weight: scaleCount(count, maxCount, minWeight, maxWeight),
           count,
-          color: heatColor(baseRouteColor(route), intensity),
-          opacity: 0.4 + intensity * 0.55,
+          color: heatColor(routeColor, intensity),
+          opacity: 0.5 + intensity * 0.45,
         });
       }
     }
@@ -130,7 +176,6 @@ export function buildPersonalHeatmap(
   return segments;
 }
 
-/** Simple per-route weight based on how many times this exact route has been run. */
 export function routeRunCountWeight(runCount: number): number {
   if (runCount <= 1) return 3;
   if (runCount === 2) return 4;

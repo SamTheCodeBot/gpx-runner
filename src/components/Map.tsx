@@ -258,19 +258,6 @@ export default function Map({
         </Marker>
       ))}
 
-      {/* Personal heatmap — thick gold lines showing run frequency */}
-      {personalHeatmapSegments.map((seg, idx) => (
-        <Polyline
-          key={`personal-heatmap-${idx}`}
-          positions={seg.positions.map(([lon, lat]) => [lat, lon] as [number, number])}
-          pathOptions={{
-            color: seg.color,
-            weight: seg.weight,
-            opacity: seg.opacity,
-          }}
-        />
-      ))}
-
       {/* Suggested route */}
       {suggestedRoute && suggestedRoute.coordinates.length > 0 && (
         <Polyline
@@ -285,6 +272,21 @@ export default function Map({
           key={`heatmap-${index}`}
           positions={route.positions}
           pathOptions={{ color: route.color, weight: route.weight, opacity: route.opacity }}
+        />
+      ))}
+
+      {/* Personal heatmap overlay — continuous route geometry with frequency styling */}
+      {personalHeatmapSegments.map((seg, idx) => (
+        <Polyline
+          key={`personal-heatmap-${idx}`}
+          positions={seg.positions.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{
+            color: seg.color,
+            weight: seg.weight,
+            opacity: seg.opacity,
+            lineCap: "round",
+            lineJoin: "round",
+          }}
         />
       ))}
     </MapContainer>
