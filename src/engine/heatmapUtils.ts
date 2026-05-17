@@ -31,6 +31,24 @@ const TYPE_COLORS: Record<string, string> = {
   mixed: "rgb(197 45 255)",
 };
 
+const TYPE_HEAT_RAMPS: Record<string, [[number, number, number], [number, number, number], [number, number, number]]> = {
+  road: [
+    [255, 185, 215],
+    [255, 65, 164],
+    [242, 4, 132],
+  ],
+  trail: [
+    [188, 248, 255],
+    [18, 221, 251],
+    [0, 150, 204],
+  ],
+  mixed: [
+    [231, 190, 255],
+    [197, 45, 255],
+    [132, 0, 208],
+  ],
+};
+
 function baseRouteColor(route: { color?: string; type?: string }): string {
   return route.color || (route.type ? TYPE_COLORS[route.type] : undefined) || TYPE_COLORS.road;
 }
@@ -96,7 +114,29 @@ function mixChannel(a: number, b: number, amount: number): number {
   return Math.round(a + (b - a) * amount);
 }
 
-function heatColor(baseColor: string, intensity: number): string {
+function interpolateRgb(
+  from: [number, number, number],
+  to: [number, number, number],
+  amount: number,
+): [number, number, number] {
+  return [
+    mixChannel(from[0], to[0], amount),
+    mixChannel(from[1], to[1], amount),
+    mixChannel(from[2], to[2], amount),
+  ];
+}
+
+function heatColor(route: { color?: string; type?: string }, intensity: number): string {
+  const ramp = route.type ? TYPE_HEAT_RAMPS[route.type] : undefined;
+  if (ramp) {
+    const [low, base, high] = ramp;
+    const rgb = intensity <= 0.55
+      ? interpolateRgb(low, base, intensity / 0.55)
+      : interpolateRgb(base, high, (intensity - 0.55) / 0.45);
+    return `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
+  }
+
+  const baseColor = baseRouteColor(route);
   const rgb = parseRgb(baseColor);
   if (!rgb) return baseColor;
 
@@ -146,7 +186,6 @@ export function buildPersonalHeatmap(
   const segments: HeatmapSegment[] = [];
 
   for (const route of routes) {
-    const routeColor = baseRouteColor(route);
     const coords = route.coordinates;
 
     for (let i = 1; i < coords.length; i += 1) {
@@ -166,7 +205,7 @@ export function buildPersonalHeatmap(
           positions: [a, b],
           weight: scaleCount(count, maxCount, minWeight, maxWeight),
           count,
-          color: heatColor(routeColor, intensity),
+          color: heatColor(route, intensity),
           opacity: 0.5 + intensity * 0.45,
         });
       }
