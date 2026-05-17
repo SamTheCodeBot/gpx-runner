@@ -22,6 +22,12 @@ export interface RouteStats {
 }
 
 export function useGPXRoutes(userId: string | null) {
+  const isStorageObjectNotFound = (error: unknown) => {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const message = error instanceof Error ? error.message : "";
+    return code === "storage/object-not-found" || message.includes("does not exist");
+  };
+
   const stripRouteCache = useCallback((route: GPXRoute): GPXRoute => ({
     ...route,
     samples: undefined,
@@ -242,9 +248,11 @@ export function useGPXRoutes(userId: string | null) {
       if (storage && userId) {
         await Promise.all([
           deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`)).catch((e) => {
+            if (isStorageObjectNotFound(e)) return;
             console.error("Failed to delete GPX from Firebase Storage", e);
           }),
           deleteObject(ref(storage, `gpx-files/${userId}/${id}.tcx`)).catch((e) => {
+            if (isStorageObjectNotFound(e)) return;
             console.error("Failed to delete TCX from Firebase Storage", e);
           }),
         ]);
