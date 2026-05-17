@@ -37,6 +37,7 @@ export interface RouteFilter {
   minDistance?: number; // km
   maxDistance?: number; // km
   type?: 'road' | 'trail' | 'mixed' | 'all'; // Filter by route type
+  country?: string;
 }
 
 export interface RouteSuggestionRequest {

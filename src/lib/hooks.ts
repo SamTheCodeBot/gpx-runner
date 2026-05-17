@@ -5,11 +5,13 @@ import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } 
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
+import { routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 export interface RouteFilter {
   month?: string;
   type?: string;
+  country?: string;
   minDistance?: number;
   maxDistance?: number;
 }
@@ -344,6 +346,8 @@ export function useRouteFilter(
       out = out.filter((r) => r.distance / 1000 <= baseFilter.maxDistance!);
     if (baseFilter.type && baseFilter.type !== "all")
       out = out.filter((r) => r.type === baseFilter.type);
+    if (baseFilter.country)
+      out = out.filter((r) => routeHasCountry(r, baseFilter.country!));
     if (searchQuery)
       out = out.filter((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
     setFiltered(out);

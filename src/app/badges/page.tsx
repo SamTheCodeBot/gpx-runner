@@ -6,6 +6,7 @@ import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
 import { BADGE_DEFINITIONS, BadgeContext } from "@/lib/badges";
+import { routeCountryNames } from "@/lib/countries";
 import type { GPXRoute } from "@/app/types";
 import Link from "next/link";
 
@@ -15,19 +16,6 @@ const TIER_CONFIG = {
   gold:     { label: "Gold",     color: "#ffd700", bg: "bg-[#ffd700]/10", border: "border-[#ffd700]/30", text: "text-[#ffd700]", icon: "★" },
   platinum: { label: "Platinum", color: "#e5e4e2", bg: "bg-[#e5e4e2]/10", border: "border-[#e5e4e2]/30", text: "text-[#e5e4e2]", icon: "✦" },
 } as const;
-
-function countryForPoint(lat: number, lng: number): string | null {
-  // Lightweight country detection for current badge logic. This intentionally
-  // covers the app's Nordic use case without adding a geocoder dependency.
-  if (lat >= 55.2 && lat <= 56.2 && lng >= 12.75 && lng <= 13.4) return "Sweden";
-  if (lat >= 54.45 && lat <= 57.9 && lng >= 8.0 && lng <= 12.75) return "Denmark";
-  if (lat >= 55.0 && lat <= 69.2 && lng >= 10.5 && lng <= 24.5) return "Sweden";
-  if (lat >= 57.8 && lat <= 71.4 && lng >= 4.0 && lng <= 31.5) return "Norway";
-  if (lat >= 59.6 && lat <= 70.2 && lng >= 19.0 && lng <= 31.7) return "Finland";
-  if (lat >= 47.2 && lat <= 55.1 && lng >= 5.5 && lng <= 15.5) return "Germany";
-  if (lat >= 24.4 && lat <= 49.4 && lng >= -125.0 && lng <= -66.9) return "United States";
-  return null;
-}
 
 function routeRepeatFingerprint(route: GPXRoute): string {
   if (route.coordinates.length < 2) return route.name.trim().toLowerCase();
@@ -51,14 +39,8 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
   const totalCountries = new Set<string>();
   const routeCountries = new Map<string, Set<string>>();
   for (const r of routes) {
-    const countries = new Set<string>();
-    for (const [lng, lat] of r.coordinates) {
-      const country = countryForPoint(lat, lng);
-      if (country) {
-        countries.add(country);
-        totalCountries.add(country);
-      }
-    }
+    const countries = new Set(routeCountryNames(r));
+    countries.forEach((country) => totalCountries.add(country));
     routeCountries.set(r.id, countries);
   }
 

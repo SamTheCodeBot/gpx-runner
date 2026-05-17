@@ -11,10 +11,11 @@ interface RouteListProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showFilters: boolean;
-  filter: { month?: string; type?: string; list?: "all" | "favorites" | "wishlist" };
-  setFilter: (f: { month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }) => void;
+  filter: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" };
+  setFilter: (f: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }) => void;
   setShowFilters: (v: boolean) => void;
   getMonthOptions: () => string[];
+  countryOptions: string[];
   onSelectRoute: (r: GPXRoute | null) => void;
   onDeleteRoute: (id: string) => void;
   onDownloadRoute: (r: GPXRoute) => void;
@@ -31,10 +32,11 @@ interface RouteListProps {
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
   showFilters, filter, setFilter, setShowFilters, getMonthOptions,
+  countryOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
   fileInputRef, onFileUpload, onRouteUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
 }: RouteListProps) {
-  const hasActiveFilters = !!(filter.month || filter.type || filter.list);
+  const hasActiveFilters = !!(filter.month || filter.type || filter.country || filter.list);
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
 
   return (
@@ -103,7 +105,7 @@ export function RouteList({
             )}
           </div>
         ) : null}
-        {(filter.month || filter.type || filter.list) && (
+        {(filter.month || filter.type || filter.country || filter.list) && (
           <button
             onClick={() => setFilter({})}
             className="text-xs text-error font-medium hover:underline"
@@ -134,6 +136,16 @@ export function RouteList({
             <option value="trail">Trail</option>
             <option value="mixed">Mixed</option>
           </select>
+          {countryOptions.length > 1 && (
+            <select
+              value={filter.country || ""}
+              onChange={(e) => setFilter({ ...filter, country: e.target.value || undefined })}
+              className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+            >
+              <option value="">All countries</option>
+              {countryOptions.map((country) => <option key={country} value={country}>{country}</option>)}
+            </select>
+          )}
         </div>
       )}
 

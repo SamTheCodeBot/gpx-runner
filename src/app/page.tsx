@@ -3,6 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
+import { routeCountryNames } from "@/lib/countries";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
@@ -37,7 +38,7 @@ export default function Home() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }>({});
+  const [filter, setFilter]                = useState<{ month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -58,6 +59,9 @@ export default function Home() {
 
   const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
+  const countryOptions = useMemo(() => (
+    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [routes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -245,6 +249,7 @@ export default function Home() {
               setFilter={setFilter}
               setShowFilters={setShowFilters}
               getMonthOptions={getMonthOptions}
+              countryOptions={countryOptions}
               onSelectRoute={setSelectedRoute}
               onDeleteRoute={handleDeleteRoute}
               onDownloadRoute={handleDownload}
