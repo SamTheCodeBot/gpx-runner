@@ -150,7 +150,8 @@ function BadgeCard({ badge, earned, progress }: { badge: (typeof BADGE_DEFINITIO
 export default function BadgesPage() {
   const { user, loading: authLoading } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingUpload, setPendingUpload] = useState<GPXRoute | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
 
   const { routes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
   const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
@@ -186,14 +187,14 @@ export default function BadgesPage() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
-    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
     if (!gpxFiles.length) return;
     const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
-    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -201,7 +202,7 @@ export default function BadgesPage() {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
       const { doc, updateDoc } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
@@ -313,7 +314,7 @@ export default function BadgesPage() {
         <UploadModal
           route={pendingUpload}
           onAccept={acceptUpload}
-          onCancel={() => setPendingUpload(null)}
+          onCancel={() => setPendingUploads((pending) => pending.slice(1))}
         />
       )}
     </div>

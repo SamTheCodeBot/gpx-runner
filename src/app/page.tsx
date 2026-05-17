@@ -31,7 +31,8 @@ export default function Home() {
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
-  const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
   const [showDrawer, setShowDrawer]          = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
@@ -104,7 +105,7 @@ export default function Home() {
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
     if (newRoutes.length > 0) {
-      setPendingUpload(newRoutes[0]);
+      setPendingUploads(newRoutes);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -116,7 +117,7 @@ export default function Home() {
     }
     const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
     if (newRoutes.length > 0) {
-      setPendingUpload(newRoutes[0]);
+      setPendingUploads(newRoutes);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -126,7 +127,7 @@ export default function Home() {
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
       const { doc, updateDoc } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
@@ -135,7 +136,7 @@ export default function Home() {
   };
 
   const cancelUpload = () => {
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
   };
 
   const handleDeleteRoute = (id: string) => {

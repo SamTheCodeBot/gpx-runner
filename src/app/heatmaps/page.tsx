@@ -36,7 +36,8 @@ export default function PersonalHeatmapsPage() {
   const [username, setUsername] = useState("");
 
   const [showDrawer, setShowDrawer] = useState(false);
-  const [pendingUpload, setPendingUpload] = useState<GPXRoute | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
   const [routeType, setRouteType] = useState<RouteTypeFilter>("all");
   const [activeHeatmap, setActiveHeatmap] = useState<HeatmapMode>("frequency");
 
@@ -110,7 +111,7 @@ export default function PersonalHeatmapsPage() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
-    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -120,7 +121,7 @@ export default function PersonalHeatmapsPage() {
       console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
     }
     const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
-    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -128,7 +129,7 @@ export default function PersonalHeatmapsPage() {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
       const { doc, updateDoc } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
@@ -318,7 +319,7 @@ export default function PersonalHeatmapsPage() {
         <UploadModal
           route={pendingUpload}
           onAccept={acceptUpload}
-          onCancel={() => setPendingUpload(null)}
+          onCancel={() => setPendingUploads((pending) => pending.slice(1))}
         />
       )}
     </div>

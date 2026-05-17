@@ -22,14 +22,33 @@ export interface RouteStats {
 }
 
 export function useGPXRoutes(userId: string | null) {
-  const serializeRoute = useCallback((route: GPXRoute) => ({
-    ...route,
-    coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
-    samples: route.samples?.map((sample) => ({
-      ...sample,
-      coordinate: { lon: sample.coordinate[0], lat: sample.coordinate[1] },
-    })),
-  }), []);
+  const serializeRoute = useCallback((route: GPXRoute) => {
+    const payload: any = {
+      ...route,
+      coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+    };
+
+    if (route.samples?.length) {
+      payload.samples = route.samples.map((sample) => {
+        const serialized: any = {
+          coordinate: { lon: sample.coordinate[0], lat: sample.coordinate[1] },
+        };
+        if (sample.elevation !== undefined) serialized.elevation = sample.elevation;
+        if (sample.time !== undefined) serialized.time = sample.time;
+        if (sample.heartRate !== undefined) serialized.heartRate = sample.heartRate;
+        if (sample.paceMinPerKm !== undefined) serialized.paceMinPerKm = sample.paceMinPerKm;
+        return serialized;
+      });
+    } else {
+      delete payload.samples;
+    }
+
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined) delete payload[key];
+    });
+
+    return payload;
+  }, []);
 
   const deserializeRoute = useCallback((id: string, data: any): GPXRoute => ({
     ...data,
