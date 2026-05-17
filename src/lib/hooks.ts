@@ -5,7 +5,7 @@ import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } 
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
-import { parseGPXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 export interface RouteFilter {
   month?: string;
@@ -22,6 +22,63 @@ export interface RouteStats {
 }
 
 export function useGPXRoutes(userId: string | null) {
+  const serializeRoute = useCallback((route: GPXRoute) => ({
+    ...route,
+    coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+    samples: route.samples?.map((sample) => ({
+      ...sample,
+      coordinate: { lon: sample.coordinate[0], lat: sample.coordinate[1] },
+    })),
+  }), []);
+
+  const deserializeRoute = useCallback((id: string, data: any): GPXRoute => ({
+    ...data,
+    id,
+    coordinates: data.coordinates.map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]),
+    samples: Array.isArray(data.samples)
+      ? data.samples.map((sample: any) => ({
+          ...sample,
+          coordinate: Array.isArray(sample.coordinate)
+            ? sample.coordinate
+            : [sample.coordinate.lon, sample.coordinate.lat],
+        }))
+      : undefined,
+  } as GPXRoute), []);
+
+  const mergeMetricSamples = useCallback((parsed: ReturnType<typeof parseGPXFile>, tcxText?: string): GPXRoute["samples"] => {
+    const samples = parsed.samples.map((sample) => ({
+      coordinate: sample.coordinate,
+      elevation: sample.elevation,
+      time: sample.time,
+    }));
+
+    if (!tcxText) return samples;
+
+    const tcxSamples = parseTCXFile(tcxText);
+    if (!tcxSamples.length) return samples;
+
+    return samples.map((sample) => {
+      let best = tcxSamples[0];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const tcxSample of tcxSamples) {
+        const distance = haversine(sample.coordinate[1], sample.coordinate[0], tcxSample.coordinate[1], tcxSample.coordinate[0]);
+        if (distance < bestDistance) {
+          best = tcxSample;
+          bestDistance = distance;
+        }
+      }
+
+      if (bestDistance > 250) return sample;
+
+      return {
+        ...sample,
+        elevation: sample.elevation ?? best.elevation,
+        heartRate: best.heartRate,
+        paceMinPerKm: best.paceMinPerKm,
+      };
+    });
+  }, []);
+
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -52,11 +109,7 @@ export function useGPXRoutes(userId: string | null) {
         snap.forEach((d) => {
           const data = d.data();
           if (data.coordinates && Array.isArray(data.coordinates)) {
-            firestoreRoutes.push({
-              ...data,
-              id: d.id,
-              coordinates: data.coordinates.map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]),
-            } as GPXRoute);
+            firestoreRoutes.push(deserializeRoute(d.id, data));
           }
         });
         firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
@@ -67,7 +120,7 @@ export function useGPXRoutes(userId: string | null) {
       }
     };
     load();
-  }, [userId]);
+  }, [userId, deserializeRoute]);
 
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
     localStorage.setItem("gpx-routes", JSON.stringify(newRoutes));
@@ -75,7 +128,7 @@ export function useGPXRoutes(userId: string | null) {
   }, []);
 
   const uploadFiles = useCallback(
-    async (files: File[], currentRoutes: GPXRoute[]): Promise<GPXRoute[]> => {
+    async (files: File[], currentRoutes: GPXRoute[], tcxFiles: File[] = []): Promise<GPXRoute[]> => {
       setLoading(true);
       const newRoutes: GPXRoute[] = [];
       try {
@@ -83,6 +136,7 @@ export function useGPXRoutes(userId: string | null) {
           const file = files[i];
           const id = `route-${Date.now()}-${i}`;
           const text = await file.text();
+          const tcxText = tcxFiles[i] ? await tcxFiles[i].text() : undefined;
           const parsed = parseGPXFile(text, file.name.replace(".gpx", ""));
 
           // Check for duplicates
@@ -101,6 +155,7 @@ export function useGPXRoutes(userId: string | null) {
             coordinates: parsed.coordinates,
             distance: parsed.distance,
             elevationGain: parsed.elevationGain,
+            samples: mergeMetricSamples(parsed, tcxText),
             color: nextColor(),
             type: "road" as const,
             userId: userId || undefined,
@@ -119,8 +174,7 @@ export function useGPXRoutes(userId: string | null) {
           if (db && userId) {
             try {
               await setDoc(doc(db, "routes", id), {
-                ...route,
-                coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+                ...serializeRoute(route),
               });
             } catch (e) {
               console.error("Firestore save error", e);
@@ -134,7 +188,7 @@ export function useGPXRoutes(userId: string | null) {
         setLoading(false);
       }
     },
-    [userId]
+    [userId, mergeMetricSamples, serializeRoute]
   );
 
   const deleteRoute = useCallback(

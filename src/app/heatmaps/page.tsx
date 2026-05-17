@@ -15,13 +15,12 @@ const HEATMAP_OPTIONS: Array<{
   id: HeatmapMode;
   label: string;
   icon: string;
-  enabled: boolean;
   detail: string;
 }> = [
-  { id: "frequency", label: "Frequency", icon: "whatshot", enabled: true, detail: "Repeated paths" },
-  { id: "pace", label: "Pace", icon: "speed", enabled: false, detail: "Pace samples needed" },
-  { id: "heart-rate", label: "Heart rate", icon: "monitor_heart", enabled: false, detail: "Heart rate samples needed" },
-  { id: "elevation", label: "Elevation", icon: "terrain", enabled: false, detail: "Point elevation needed" },
+  { id: "frequency", label: "Frequency", icon: "whatshot", detail: "Repeated paths" },
+  { id: "pace", label: "Pace", icon: "speed", detail: "Fast sections are thicker" },
+  { id: "heart-rate", label: "Heart rate", icon: "monitor_heart", detail: "Higher heart rate is thicker" },
+  { id: "elevation", label: "Elevation", icon: "terrain", detail: "Higher elevation is thicker" },
 ];
 
 export default function PersonalHeatmapsPage() {
@@ -59,6 +58,13 @@ export default function PersonalHeatmapsPage() {
       totalElevation: Math.round(totalElevation),
     };
   }, [filteredRoutes]);
+
+  const availableHeatmaps = useMemo(() => ({
+    frequency: true,
+    pace: filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.paceMinPerKm === "number")),
+    "heart-rate": filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.heartRate === "number")),
+    elevation: filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.elevation === "number")),
+  }), [filteredRoutes]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +119,7 @@ export default function PersonalHeatmapsPage() {
     if (tcxFiles.length > 0) {
       console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
     }
-    const newRoutes = await uploadFiles(gpxFiles, routes);
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
     if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -233,17 +239,18 @@ export default function PersonalHeatmapsPage() {
               <div className="space-y-2">
                 {HEATMAP_OPTIONS.map((option) => {
                   const active = activeHeatmap === option.id;
+                  const enabled = availableHeatmaps[option.id];
                   return (
                     <button
                       key={option.id}
-                      disabled={!option.enabled}
+                      disabled={!enabled}
                       onClick={() => setActiveHeatmap(option.id)}
                       className={
                         "w-full px-4 py-3 rounded-2xl border text-left transition-colors " +
                         (active
                           ? "bg-primary-container/40 border-primary-container text-on-surface"
                           : "bg-surface-container border-outline-variant/30 text-on-surface hover:bg-surface-container-high") +
-                        (!option.enabled ? " opacity-55 cursor-not-allowed" : "")
+                        (!enabled ? " opacity-55 cursor-not-allowed" : "")
                       }
                     >
                       <div className="flex items-center gap-3">
@@ -258,7 +265,7 @@ export default function PersonalHeatmapsPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold">{option.label}</span>
-                            {!option.enabled && (
+                            {!enabled && (
                               <span className="text-[9px] font-extrabold uppercase tracking-wider text-on-surface-variant">Soon</span>
                             )}
                           </div>
@@ -280,7 +287,8 @@ export default function PersonalHeatmapsPage() {
                 selectedRoute={null}
                 suggestedRoute={null}
                 showHeatmap={false}
-                showPersonalHeatmap={activeHeatmap === "frequency"}
+                showPersonalHeatmap={availableHeatmaps[activeHeatmap]}
+                personalHeatmapMode={activeHeatmap}
                 onToggleHeatmap={() => {}}
                 onTogglePersonalHeatmap={() => {}}
                 isLoading={isUploading}

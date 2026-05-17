@@ -1,3 +1,11 @@
+export interface RouteMetricSample {
+  coordinate: [number, number]; // [lon, lat]
+  elevation?: number;
+  time?: string;
+  heartRate?: number;
+  paceMinPerKm?: number;
+}
+
 export interface GPXRoute {
   id: string;
   name: string;
@@ -13,6 +21,7 @@ export interface GPXRoute {
   isFavorite?: boolean;
   isRoundTrip?: boolean;
   startPoint?: [number, number];
+  samples?: RouteMetricSample[];
 }
 
 export interface RouteStats {

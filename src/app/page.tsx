@@ -114,7 +114,7 @@ export default function Home() {
     if (tcxFiles.length > 0) {
       console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
     }
-    const newRoutes = await uploadFiles(gpxFiles, routes);
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
     if (newRoutes.length > 0) {
       setPendingUpload(newRoutes[0]);
     }

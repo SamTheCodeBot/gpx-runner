@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
-import { useAuth } from "@/lib/auth";
+import { useMemo, useRef, useState } from "react";
+import { useAuth, logout } from "@/lib/auth";
 import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
-import { Icon, LoginScreen } from "@/components/ui";
+import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
 import { BADGE_DEFINITIONS, BadgeContext } from "@/lib/badges";
 import type { GPXRoute } from "@/app/types";
@@ -149,8 +149,10 @@ function BadgeCard({ badge, earned, progress }: { badge: (typeof BADGE_DEFINITIO
 
 export default function BadgesPage() {
   const { user, loading: authLoading } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingUpload, setPendingUpload] = useState<GPXRoute | null>(null);
 
-  const { routes } = useGPXRoutes(user?.uid ?? null);
+  const { routes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
   const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
 
   const ctx = useMemo(() => computeBadgeContext(routes, []), [routes]);
@@ -174,6 +176,38 @@ export default function BadgesPage() {
 
   const totalEarned = earnedIds.size;
   const totalBadges = BADGE_DEFINITIONS.length;
+
+  const handleLogout = async () => {
+    await logout();
+    saveRoutes([]);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const newRoutes = await uploadFiles(files, routes);
+    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
+    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const acceptUpload = async (name: string, type: string) => {
+    if (!pendingUpload) return;
+    const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
+    saveRoutes([...routes, named]);
+    setPendingUpload(null);
+    if (named.id && user?.uid) {
+      const { doc, updateDoc } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
+      if (db) updateDoc(doc(db, "routes", named.id), { name, type }).catch(console.error);
+    }
+  };
 
   if (authLoading) {
     return (
@@ -203,9 +237,10 @@ export default function BadgesPage() {
         user={user}
         profile={profile}
         profileLoading={profileLoading}
-        onLogout={async () => {}}
-        fileInputRef={{ current: null } as React.RefObject<HTMLInputElement>}
-        onFileUpload={() => {}}
+        onLogout={handleLogout}
+        fileInputRef={fileInputRef}
+        onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -274,6 +309,13 @@ export default function BadgesPage() {
           })}
         </div>
       </main>
+      {pendingUpload && (
+        <UploadModal
+          route={pendingUpload}
+          onAccept={acceptUpload}
+          onCancel={() => setPendingUpload(null)}
+        />
+      )}
     </div>
   );
 }
