@@ -22,6 +22,7 @@ export interface BadgeContext {
   routeCountries: Map<string, Set<string>>; // routeId → Set of countries
   clubMemberships: string[];
   hasRunClub: boolean;
+  routeTypes: Set<string>;
   maxRunsOnSingleRoute: number;
   longestRunKm: number;
   totalCountries: Set<string>; // unique countries across all routes
@@ -278,35 +279,6 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
   },
 
-  // ── Club badges ─────────────────────────────────────────────────────
-  {
-    id: "club-join",
-    name: "Social Strider",
-    description: "Join a run club",
-    icon: "groups",
-    tier: "bronze",
-    check: (c) => c.clubMemberships.length >= 1,
-    progress: (c) => `${c.clubMemberships.length} / 1 club`,
-  },
-  {
-    id: "club-3",
-    name: "Club Collector",
-    description: "Join 3 different run clubs",
-    icon: "groups",
-    tier: "silver",
-    check: (c) => c.clubMemberships.length >= 3,
-    progress: (c) => `${c.clubMemberships.length} / 3 clubs`,
-  },
-  {
-    id: "club-lead",
-    name: "Club Captain",
-    description: "Create or lead a run club",
-    icon: "military_tech",
-    tier: "gold",
-    check: (c) => c.hasRunClub,
-    progress: () => "Lead a run club",
-  },
-
   // ── Variety badges ─────────────────────────────────────────────────
   {
     id: "type-road",
@@ -314,7 +286,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log your first road run",
     icon: "directions_bike",
     tier: "bronze",
-    check: () => false, // Requires type tracking — stub
+    check: (c) => c.routeTypes.has("road"),
     progress: () => "Log a road run",
   },
   {
@@ -323,7 +295,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log your first trail run",
     icon: "hiking",
     tier: "bronze",
-    check: () => false,
+    check: (c) => c.routeTypes.has("trail"),
     progress: () => "Log a trail run",
   },
   {
@@ -332,7 +304,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log a mixed road/trail run",
     icon: "terrain",
     tier: "bronze",
-    check: () => false,
+    check: (c) => c.routeTypes.has("mixed"),
     progress: () => "Log a mixed run",
   },
 ];

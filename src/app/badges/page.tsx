@@ -25,7 +25,20 @@ function countryForPoint(lat: number, lng: number): string | null {
   if (lat >= 57.8 && lat <= 71.4 && lng >= 4.0 && lng <= 31.5) return "Norway";
   if (lat >= 59.6 && lat <= 70.2 && lng >= 19.0 && lng <= 31.7) return "Finland";
   if (lat >= 47.2 && lat <= 55.1 && lng >= 5.5 && lng <= 15.5) return "Germany";
+  if (lat >= 24.4 && lat <= 49.4 && lng >= -125.0 && lng <= -66.9) return "United States";
   return null;
+}
+
+function routeRepeatFingerprint(route: GPXRoute): string {
+  if (route.coordinates.length < 2) return route.name.trim().toLowerCase();
+
+  const roundCoord = ([lng, lat]: [number, number]) => `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  const first = route.coordinates[0];
+  const middle = route.coordinates[Math.floor(route.coordinates.length / 2)];
+  const last = route.coordinates[route.coordinates.length - 1];
+  const distanceBucketKm = Math.round((route.distance || 0) / 500) / 2;
+
+  return [roundCoord(first), roundCoord(middle), roundCoord(last), distanceBucketKm].join("|");
 }
 
 function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []): BadgeContext {
@@ -33,6 +46,7 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
   const totalDistanceKm = routes.reduce((s, r) => s + (r.distance || 0) / 1000, 0);
   const totalElevationM = routes.reduce((s, r) => s + (r.elevationGain || 0), 0);
   const longestRunKm = routes.reduce((best, r) => Math.max(best, (r.distance || 0) / 1000), 0);
+  const routeTypes = new Set(routes.map((r) => r.type).filter(Boolean) as string[]);
 
   const totalCountries = new Set<string>();
   const routeCountries = new Map<string, Set<string>>();
@@ -49,36 +63,39 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
   }
 
   // Streak
-  const dates = routes
+  const dateDays = Array.from(new Set(routes
     .map((r) => (r.date?.split("T")[0] ?? r.date) as string)
-    .filter(Boolean)
-    .map((d) => new Date(d).valueOf())
+    .filter(Boolean)))
+    .map((d) => new Date(`${d}T00:00:00`).valueOf())
     .sort((a, b) => b - a);
 
   let currentStreak = 0;
   let longestStreak = 0;
-  let streak = 1;
-  for (let i = 0; i < dates.length - 1; i++) {
-    const diff = dates[i] - dates[i + 1];
+  let streak = dateDays.length > 0 ? 1 : 0;
+  let latestStreak = dateDays.length > 0 ? 1 : 0;
+  for (let i = 0; i < dateDays.length - 1; i++) {
+    const diff = dateDays[i] - dateDays[i + 1];
     const ONE_DAY = 86_400_000;
     if (diff >= ONE_DAY - 60_000 && diff <= ONE_DAY + 60_000) {
       streak++;
     } else {
+      if (i === streak - 1) latestStreak = streak;
       longestStreak = Math.max(longestStreak, streak);
       streak = 1;
     }
   }
   longestStreak = Math.max(longestStreak, streak);
+  if (dateDays.length > 0 && latestStreak === 1 && streak === dateDays.length) latestStreak = streak;
   const now = Date.now();
   const ONE_DAY = 86_400_000;
-  if (dates.length > 0 && now - dates[0] <= ONE_DAY + 60_000) {
-    currentStreak = streak;
+  if (dateDays.length > 0 && now - dateDays[0] <= ONE_DAY + 60_000) {
+    currentStreak = latestStreak;
   }
 
   // Repeat runs on same route
   const routeFingerprints = new Map<string, number>();
   for (const r of routes) {
-    const fp = `${r.name}::${(r.date?.split("T")[0] ?? r.date) as string}`;
+    const fp = routeRepeatFingerprint(r);
     routeFingerprints.set(fp, (routeFingerprints.get(fp) ?? 0) + 1);
   }
   const maxRunsOnSingleRoute = Math.max(...routeFingerprints.values(), 1);
@@ -91,6 +108,7 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
     routeCountries,
     clubMemberships: [],
     hasRunClub: false,
+    routeTypes,
     maxRunsOnSingleRoute,
     longestRunKm,
     totalCountries,
