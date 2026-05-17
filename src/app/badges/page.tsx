@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
-import { useAuth } from "@/lib/auth";
+import { useMemo, useRef, useState } from "react";
+import { useAuth, logout } from "@/lib/auth";
 import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
-import { Icon, LoginScreen } from "@/components/ui";
+import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
 import { BADGE_DEFINITIONS, BadgeContext } from "@/lib/badges";
+import { routeCountryNames } from "@/lib/countries";
 import type { GPXRoute } from "@/app/types";
 import Link from "next/link";
 
@@ -16,17 +17,16 @@ const TIER_CONFIG = {
   platinum: { label: "Platinum", color: "#e5e4e2", bg: "bg-[#e5e4e2]/10", border: "border-[#e5e4e2]/30", text: "text-[#e5e4e2]", icon: "✦" },
 } as const;
 
-function countryForPoint(lat: number, lng: number): string | null {
-  // Lightweight country detection for current badge logic. This intentionally
-  // covers the app's Nordic use case without adding a geocoder dependency.
-  if (lat >= 55.2 && lat <= 56.2 && lng >= 12.75 && lng <= 13.4) return "Sweden";
-  if (lat >= 54.45 && lat <= 57.9 && lng >= 8.0 && lng <= 12.75) return "Denmark";
-  if (lat >= 55.0 && lat <= 69.2 && lng >= 10.5 && lng <= 24.5) return "Sweden";
-  if (lat >= 57.8 && lat <= 71.4 && lng >= 4.0 && lng <= 31.5) return "Norway";
-  if (lat >= 59.6 && lat <= 70.2 && lng >= 19.0 && lng <= 31.7) return "Finland";
-  if (lat >= 47.2 && lat <= 55.1 && lng >= 5.5 && lng <= 15.5) return "Germany";
-  if (lat >= 24.4 && lat <= 49.4 && lng >= -125.0 && lng <= -66.9) return "United States";
-  return null;
+function routeRepeatFingerprint(route: GPXRoute): string {
+  if (route.coordinates.length < 2) return route.name.trim().toLowerCase();
+
+  const roundCoord = ([lng, lat]: [number, number]) => `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  const first = route.coordinates[0];
+  const middle = route.coordinates[Math.floor(route.coordinates.length / 2)];
+  const last = route.coordinates[route.coordinates.length - 1];
+  const distanceBucketKm = Math.round((route.distance || 0) / 500) / 2;
+
+  return [roundCoord(first), roundCoord(middle), roundCoord(last), distanceBucketKm].join("|");
 }
 
 function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []): BadgeContext {
@@ -34,52 +34,50 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
   const totalDistanceKm = routes.reduce((s, r) => s + (r.distance || 0) / 1000, 0);
   const totalElevationM = routes.reduce((s, r) => s + (r.elevationGain || 0), 0);
   const longestRunKm = routes.reduce((best, r) => Math.max(best, (r.distance || 0) / 1000), 0);
+  const routeTypes = new Set(routes.map((r) => r.type).filter(Boolean) as string[]);
 
   const totalCountries = new Set<string>();
   const routeCountries = new Map<string, Set<string>>();
   for (const r of routes) {
-    const countries = new Set<string>();
-    for (const [lng, lat] of r.coordinates) {
-      const country = countryForPoint(lat, lng);
-      if (country) {
-        countries.add(country);
-        totalCountries.add(country);
-      }
-    }
+    const countries = new Set(routeCountryNames(r));
+    countries.forEach((country) => totalCountries.add(country));
     routeCountries.set(r.id, countries);
   }
 
   // Streak
-  const dates = routes
+  const dateDays = Array.from(new Set(routes
     .map((r) => (r.date?.split("T")[0] ?? r.date) as string)
-    .filter(Boolean)
-    .map((d) => new Date(d).valueOf())
+    .filter(Boolean)))
+    .map((d) => new Date(`${d}T00:00:00`).valueOf())
     .sort((a, b) => b - a);
 
   let currentStreak = 0;
   let longestStreak = 0;
-  let streak = 1;
-  for (let i = 0; i < dates.length - 1; i++) {
-    const diff = dates[i] - dates[i + 1];
+  let streak = dateDays.length > 0 ? 1 : 0;
+  let latestStreak = dateDays.length > 0 ? 1 : 0;
+  for (let i = 0; i < dateDays.length - 1; i++) {
+    const diff = dateDays[i] - dateDays[i + 1];
     const ONE_DAY = 86_400_000;
     if (diff >= ONE_DAY - 60_000 && diff <= ONE_DAY + 60_000) {
       streak++;
     } else {
+      if (i === streak - 1) latestStreak = streak;
       longestStreak = Math.max(longestStreak, streak);
       streak = 1;
     }
   }
   longestStreak = Math.max(longestStreak, streak);
+  if (dateDays.length > 0 && latestStreak === 1 && streak === dateDays.length) latestStreak = streak;
   const now = Date.now();
   const ONE_DAY = 86_400_000;
-  if (dates.length > 0 && now - dates[0] <= ONE_DAY + 60_000) {
-    currentStreak = streak;
+  if (dateDays.length > 0 && now - dateDays[0] <= ONE_DAY + 60_000) {
+    currentStreak = latestStreak;
   }
 
   // Repeat runs on same route
   const routeFingerprints = new Map<string, number>();
   for (const r of routes) {
-    const fp = `${r.name}::${(r.date?.split("T")[0] ?? r.date) as string}`;
+    const fp = routeRepeatFingerprint(r);
     routeFingerprints.set(fp, (routeFingerprints.get(fp) ?? 0) + 1);
   }
   const maxRunsOnSingleRoute = Math.max(...routeFingerprints.values(), 1);
@@ -92,6 +90,7 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
     routeCountries,
     clubMemberships: [],
     hasRunClub: false,
+    routeTypes,
     maxRunsOnSingleRoute,
     longestRunKm,
     totalCountries,
@@ -132,8 +131,11 @@ function BadgeCard({ badge, earned, progress }: { badge: (typeof BADGE_DEFINITIO
 
 export default function BadgesPage() {
   const { user, loading: authLoading } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
 
-  const { routes } = useGPXRoutes(user?.uid ?? null);
+  const { routes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
   const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
 
   const ctx = useMemo(() => computeBadgeContext(routes, []), [routes]);
@@ -157,6 +159,38 @@ export default function BadgesPage() {
 
   const totalEarned = earnedIds.size;
   const totalBadges = BADGE_DEFINITIONS.length;
+
+  const handleLogout = async () => {
+    await logout();
+    saveRoutes([]);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const newRoutes = await uploadFiles(files, routes);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
+    if (newRoutes.length > 0) setPendingUploads(newRoutes);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const acceptUpload = async (name: string, type: string) => {
+    if (!pendingUpload) return;
+    const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
+    saveRoutes([...routes, named]);
+    setPendingUploads((pending) => pending.slice(1));
+    if (named.id && user?.uid) {
+      const { doc, updateDoc } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
+      if (db) updateDoc(doc(db, "routes", named.id), { name, type }).catch(console.error);
+    }
+  };
 
   if (authLoading) {
     return (
@@ -186,9 +220,10 @@ export default function BadgesPage() {
         user={user}
         profile={profile}
         profileLoading={profileLoading}
-        onLogout={async () => {}}
-        fileInputRef={{ current: null } as React.RefObject<HTMLInputElement>}
-        onFileUpload={() => {}}
+        onLogout={handleLogout}
+        fileInputRef={fileInputRef}
+        onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -257,6 +292,14 @@ export default function BadgesPage() {
           })}
         </div>
       </main>
+      {pendingUpload && (
+        <UploadModal
+          key={pendingUpload.id}
+          route={pendingUpload}
+          onAccept={acceptUpload}
+          onCancel={() => setPendingUploads((pending) => pending.slice(1))}
+        />
+      )}
     </div>
   );
 }

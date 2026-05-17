@@ -17,7 +17,7 @@ interface SidebarProps {
   onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
 }
 
-function UploadRoutePrompt({
+export function UploadRoutePrompt({
   onClose,
   onUpload,
 }: {

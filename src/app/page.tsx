@@ -3,6 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
+import { routeCountryNames } from "@/lib/countries";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
@@ -31,12 +32,13 @@ export default function Home() {
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
-  const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
   const [showDrawer, setShowDrawer]          = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }>({});
+  const [filter, setFilter]                = useState<{ month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -57,6 +59,9 @@ export default function Home() {
 
   const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
+  const countryOptions = useMemo(() => (
+    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [routes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -104,7 +109,7 @@ export default function Home() {
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
     if (newRoutes.length > 0) {
-      setPendingUpload(newRoutes[0]);
+      setPendingUploads(newRoutes);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -114,9 +119,9 @@ export default function Home() {
     if (tcxFiles.length > 0) {
       console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
     }
-    const newRoutes = await uploadFiles(gpxFiles, routes);
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
     if (newRoutes.length > 0) {
-      setPendingUpload(newRoutes[0]);
+      setPendingUploads(newRoutes);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -126,7 +131,7 @@ export default function Home() {
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
       const { doc, updateDoc } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
@@ -135,7 +140,7 @@ export default function Home() {
   };
 
   const cancelUpload = () => {
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
   };
 
   const handleDeleteRoute = (id: string) => {
@@ -244,12 +249,14 @@ export default function Home() {
               setFilter={setFilter}
               setShowFilters={setShowFilters}
               getMonthOptions={getMonthOptions}
+              countryOptions={countryOptions}
               onSelectRoute={setSelectedRoute}
               onDeleteRoute={handleDeleteRoute}
               onDownloadRoute={handleDownload}
               onEditRoute={setEditingRoute}
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
+              onRouteUpload={handleRouteUpload}
               wishlist={wishlist}
               favorites={favorites}
               onToggleWishlist={handleSaveToWishlist}
@@ -377,6 +384,7 @@ export default function Home() {
       {/* Post-upload naming modal */}
       {pendingUpload && (
         <UploadModal
+          key={pendingUpload.id}
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={cancelUpload}

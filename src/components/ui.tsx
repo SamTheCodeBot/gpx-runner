@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface IconProps {
   name: string;
@@ -131,6 +131,16 @@ export function RouteRow({
         >
           <Icon name="download" className="text-sm" />
         </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm(`Delete "${route.name}" permanently?\nThis cannot be undone.`)) onDelete();
+          }}
+          className="p-1.5 rounded-lg hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
+          title="Delete route"
+        >
+          <Icon name="delete" className="text-sm" />
+        </button>
       </div>
     </div>
   );
@@ -147,6 +157,11 @@ interface UploadModalProps {
 export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
   const [name, setName] = useState(route.name || "");
   const [type, setType] = useState<string>("road");
+
+  useEffect(() => {
+    setName(route.name || "");
+    setType(route.type || "road");
+  }, [route.id, route.name, route.type]);
 
   const accept = () => {
     if (!name.trim()) return;
@@ -189,10 +204,10 @@ export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
           </div>
         </div>
         <div className="flex gap-2 mt-5">
-          <button onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+          <button type="button" onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             Save
           </button>
         </div>
@@ -226,7 +241,7 @@ export function EditModal({ route, onSave, onClose, onDelete }: EditModalProps) 
       <div className="relative bg-surface-container-lowest rounded-3xl shadow-xl w-full max-w-sm p-6 animate-fade-in">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-extrabold text-primary font-headline">Edit Route</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
             <Icon name="close" className="text-on-surface-variant text-sm" />
           </button>
         </div>
@@ -253,14 +268,15 @@ export function EditModal({ route, onSave, onClose, onDelete }: EditModalProps) 
           </div>
         </div>
         <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={save} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity">
+          <button type="button" onClick={save} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             Save
           </button>
         </div>
         <button
+          type="button"
           onClick={() => { if (confirm("Delete this route permanently?\nThis cannot be undone.")) { onDelete(); onClose(); } }}
           className="w-full mt-3 py-2 border border-error/40 text-error/70 rounded-xl text-xs font-medium hover:bg-error-container hover:border-error/60 hover:text-error transition-colors"
         >

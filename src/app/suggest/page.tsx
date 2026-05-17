@@ -82,7 +82,7 @@ export default function SuggestPage() {
     if (tcxFiles.length > 0) {
       console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
     }
-    await uploadFiles(gpxFiles, routes);
+    await uploadFiles(gpxFiles, routes, tcxFiles);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 

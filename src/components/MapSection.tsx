@@ -19,6 +19,7 @@ interface MapSectionProps {
   suggestedRoute: GPXRoute | null;
   showHeatmap: boolean;
   showPersonalHeatmap: boolean;
+  personalHeatmapMode?: "frequency" | "pace" | "heart-rate" | "elevation";
   onToggleHeatmap: () => void;
   onTogglePersonalHeatmap: () => void;
   isLoading: boolean;
@@ -122,6 +123,7 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
 
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap, showPersonalHeatmap,
+  personalHeatmapMode = "frequency",
   onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
   showMapControls = true,
   showPersonalHeatmapControl = true,
@@ -137,6 +139,7 @@ export function MapSection({
         selectedRoute={selectedRoute}
         showHeatmap={showHeatmap}
         showPersonalHeatmap={showPersonalHeatmap}
+        personalHeatmapMode={personalHeatmapMode}
         suggestedRoute={suggestedRoute ?? undefined}
         selectedStartPoint={selectedStartPoint}
         isSelectingStartPoint={isSelectingStartPoint}

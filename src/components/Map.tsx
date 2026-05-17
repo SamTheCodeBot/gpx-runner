@@ -10,6 +10,7 @@ interface MapProps {
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
   showPersonalHeatmap?: boolean;
+  personalHeatmapMode?: "frequency" | "pace" | "heart-rate" | "elevation";
   suggestedRoute?: RouteSuggestion | null;
   selectedStartPoint?: [number, number] | null;
   onMapClick?: (lat: number, lon: number) => void;
@@ -176,6 +177,103 @@ function typeFromIndex(index: number): "road" | "trail" | "mixed" {
   return "road";
 }
 
+function sampleMetric(sample: NonNullable<GPXRoute["samples"]>[number], mode: "pace" | "heart-rate" | "elevation"): number | null {
+  if (mode === "heart-rate") return typeof sample.heartRate === "number" ? sample.heartRate : null;
+  if (mode === "elevation") return typeof sample.elevation === "number" ? sample.elevation : null;
+  if (typeof sample.paceMinPerKm !== "number") return null;
+  return sample.paceMinPerKm > 0 ? 1 / sample.paceMinPerKm : null;
+}
+
+function PersonalMetricHeatmapCanvas({
+  routes,
+  enabled,
+  mode,
+}: {
+  routes: GPXRoute[];
+  enabled: boolean;
+  mode: "pace" | "heart-rate" | "elevation";
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!enabled || routes.length === 0) return;
+
+    const values = routes
+      .flatMap((route) => route.samples || [])
+      .map((sample) => sampleMetric(sample, mode))
+      .filter((value): value is number => value !== null);
+    if (values.length === 0) return;
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const canvas = L.DomUtil.create("canvas", "leaflet-heatmap-canvas") as HTMLCanvasElement;
+    canvas.style.position = "absolute";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "450";
+    map.getPanes().overlayPane.appendChild(canvas);
+
+    let frame = 0;
+
+    const draw = () => {
+      const size = map.getSize();
+      const scale = Math.min(window.devicePixelRatio || 1, 1.5);
+      const topLeft = map.containerPointToLayerPoint([0, 0]);
+
+      L.DomUtil.setPosition(canvas, topLeft);
+      canvas.style.width = `${size.x}px`;
+      canvas.style.height = `${size.y}px`;
+      canvas.width = Math.max(1, Math.round(size.x * scale));
+      canvas.height = Math.max(1, Math.round(size.y * scale));
+
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.lineCap = "round";
+      context.lineJoin = "round";
+
+      for (const route of routes) {
+        const samples = route.samples;
+        if (!samples || samples.length < 2) continue;
+
+        for (let i = 1; i < samples.length; i += 1) {
+          const previousValue = sampleMetric(samples[i - 1], mode);
+          const currentValue = sampleMetric(samples[i], mode);
+          if (previousValue === null && currentValue === null) continue;
+
+          const value = currentValue ?? previousValue ?? min;
+          const intensity = max === min ? 0.65 : Math.max(0, Math.min(1, (value - min) / (max - min)));
+          const [r, g, b] = rampColor(route.type, intensity);
+          const previous = map.latLngToContainerPoint([samples[i - 1].coordinate[1], samples[i - 1].coordinate[0]]);
+          const current = map.latLngToContainerPoint([samples[i].coordinate[1], samples[i].coordinate[0]]);
+
+          context.beginPath();
+          context.moveTo(previous.x * scale, previous.y * scale);
+          context.lineTo(current.x * scale, current.y * scale);
+          context.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.45 + intensity * 0.5})`;
+          context.lineWidth = (2.5 + intensity * 8) * scale;
+          context.stroke();
+        }
+      }
+    };
+
+    const scheduleDraw = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(draw);
+    };
+
+    scheduleDraw();
+    map.on("moveend zoomend resize", scheduleDraw);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      map.off("moveend zoomend resize", scheduleDraw);
+      canvas.remove();
+    };
+  }, [enabled, map, mode, routes]);
+
+  return null;
+}
+
 function PersonalHeatmapCanvas({ routes, enabled }: { routes: GPXRoute[]; enabled: boolean }) {
   const map = useMap();
 
@@ -299,6 +397,7 @@ export default function Map({
   selectedRoute,
   showHeatmap,
   showPersonalHeatmap = false,
+  personalHeatmapMode = "frequency",
   suggestedRoute,
   selectedStartPoint,
   onMapClick,
@@ -403,7 +502,15 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
       <MapEvents onMapClick={onMapClick} />
-      <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
+      {personalHeatmapMode === "frequency" ? (
+        <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
+      ) : (
+        <PersonalMetricHeatmapCanvas
+          routes={routes}
+          enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute}
+          mode={personalHeatmapMode}
+        />
+      )}
 
       {selectedStartPoint && (
         <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>

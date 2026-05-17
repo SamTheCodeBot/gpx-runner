@@ -1,3 +1,11 @@
+export interface RouteMetricSample {
+  coordinate: [number, number]; // [lon, lat]
+  elevation?: number;
+  time?: string;
+  heartRate?: number;
+  paceMinPerKm?: number;
+}
+
 export interface GPXRoute {
   id: string;
   name: string;
@@ -13,6 +21,8 @@ export interface GPXRoute {
   isFavorite?: boolean;
   isRoundTrip?: boolean;
   startPoint?: [number, number];
+  samples?: RouteMetricSample[];
+  hasTcx?: boolean;
 }
 
 export interface RouteStats {
@@ -27,6 +37,7 @@ export interface RouteFilter {
   minDistance?: number; // km
   maxDistance?: number; // km
   type?: 'road' | 'trail' | 'mixed' | 'all'; // Filter by route type
+  country?: string;
 }
 
 export interface RouteSuggestionRequest {

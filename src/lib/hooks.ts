@@ -5,11 +5,13 @@ import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } 
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
-import { parseGPXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+import { routeHasCountry } from "@/lib/countries";
+import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 export interface RouteFilter {
   month?: string;
   type?: string;
+  country?: string;
   minDistance?: number;
   maxDistance?: number;
 }
@@ -22,6 +24,109 @@ export interface RouteStats {
 }
 
 export function useGPXRoutes(userId: string | null) {
+  const isStorageObjectNotFound = (error: unknown) => {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const message = error instanceof Error ? error.message : "";
+    return code === "storage/object-not-found" || message.includes("does not exist");
+  };
+
+  const stripRouteCache = useCallback((route: GPXRoute): GPXRoute => ({
+    ...route,
+    samples: undefined,
+  }), []);
+
+  const cacheRoutes = useCallback((routesToCache: GPXRoute[]) => {
+    try {
+      localStorage.setItem("gpx-routes", JSON.stringify(routesToCache.map(stripRouteCache)));
+    } catch (e) {
+      console.warn("Route cache exceeded localStorage quota; clearing cached routes.", e);
+      localStorage.removeItem("gpx-routes");
+    }
+  }, [stripRouteCache]);
+
+  const serializeRoute = useCallback((route: GPXRoute) => {
+    const payload: any = {
+      ...route,
+      coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+    };
+
+    if (route.samples?.length) {
+      payload.samples = route.samples.map((sample) => {
+        const serialized: any = {
+          coordinate: { lon: sample.coordinate[0], lat: sample.coordinate[1] },
+        };
+        if (sample.elevation !== undefined) serialized.elevation = sample.elevation;
+        if (sample.time !== undefined) serialized.time = sample.time;
+        if (sample.heartRate !== undefined) serialized.heartRate = sample.heartRate;
+        if (sample.paceMinPerKm !== undefined) serialized.paceMinPerKm = sample.paceMinPerKm;
+        return serialized;
+      });
+    } else {
+      delete payload.samples;
+    }
+
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined) delete payload[key];
+    });
+
+    return payload;
+  }, []);
+
+  const deserializeRoute = useCallback((id: string, data: any): GPXRoute => ({
+    ...data,
+    id,
+    coordinates: data.coordinates.map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]),
+    samples: Array.isArray(data.samples)
+      ? data.samples.map((sample: any) => ({
+          ...sample,
+          coordinate: Array.isArray(sample.coordinate)
+            ? sample.coordinate
+            : [sample.coordinate.lon, sample.coordinate.lat],
+        }))
+      : undefined,
+  } as GPXRoute), []);
+
+  const mergeMetricSamples = useCallback((parsed: ReturnType<typeof parseGPXFile>, tcxText?: string): GPXRoute["samples"] => {
+    const samples = parsed.samples.map((sample) => ({
+      coordinate: sample.coordinate,
+      elevation: sample.elevation,
+      time: sample.time,
+    }));
+
+    const downsample = (metricSamples: NonNullable<GPXRoute["samples"]>) => {
+      const maxSamples = 900;
+      if (metricSamples.length <= maxSamples) return metricSamples;
+      const step = Math.ceil(metricSamples.length / maxSamples);
+      return metricSamples.filter((_, index) => index % step === 0 || index === metricSamples.length - 1);
+    };
+
+    if (!tcxText) return downsample(samples);
+
+    const tcxSamples = parseTCXFile(tcxText);
+    if (!tcxSamples.length) return samples;
+
+    return downsample(samples.map((sample) => {
+      let best = tcxSamples[0];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const tcxSample of tcxSamples) {
+        const distance = haversine(sample.coordinate[1], sample.coordinate[0], tcxSample.coordinate[1], tcxSample.coordinate[0]);
+        if (distance < bestDistance) {
+          best = tcxSample;
+          bestDistance = distance;
+        }
+      }
+
+      if (bestDistance > 250) return sample;
+
+      return {
+        ...sample,
+        elevation: sample.elevation ?? best.elevation,
+        heartRate: best.heartRate,
+        paceMinPerKm: best.paceMinPerKm,
+      };
+    }));
+  }, []);
+
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -52,30 +157,26 @@ export function useGPXRoutes(userId: string | null) {
         snap.forEach((d) => {
           const data = d.data();
           if (data.coordinates && Array.isArray(data.coordinates)) {
-            firestoreRoutes.push({
-              ...data,
-              id: d.id,
-              coordinates: data.coordinates.map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]),
-            } as GPXRoute);
+            firestoreRoutes.push(deserializeRoute(d.id, data));
           }
         });
         firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
         setRoutes(firestoreRoutes);
-        localStorage.setItem("gpx-routes", JSON.stringify(firestoreRoutes));
+        cacheRoutes(firestoreRoutes);
       } catch (e) {
         console.error("Firestore load error", e);
       }
     };
     load();
-  }, [userId]);
+  }, [userId, deserializeRoute, cacheRoutes]);
 
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
-    localStorage.setItem("gpx-routes", JSON.stringify(newRoutes));
+    cacheRoutes(newRoutes);
     setRoutes(newRoutes);
-  }, []);
+  }, [cacheRoutes]);
 
   const uploadFiles = useCallback(
-    async (files: File[], currentRoutes: GPXRoute[]): Promise<GPXRoute[]> => {
+    async (files: File[], currentRoutes: GPXRoute[], tcxFiles: File[] = []): Promise<GPXRoute[]> => {
       setLoading(true);
       const newRoutes: GPXRoute[] = [];
       try {
@@ -83,6 +184,7 @@ export function useGPXRoutes(userId: string | null) {
           const file = files[i];
           const id = `route-${Date.now()}-${i}`;
           const text = await file.text();
+          const tcxText = tcxFiles[i] ? await tcxFiles[i].text() : undefined;
           const parsed = parseGPXFile(text, file.name.replace(".gpx", ""));
 
           // Check for duplicates
@@ -101,15 +203,20 @@ export function useGPXRoutes(userId: string | null) {
             coordinates: parsed.coordinates,
             distance: parsed.distance,
             elevationGain: parsed.elevationGain,
+            samples: mergeMetricSamples(parsed, tcxText),
+            hasTcx: Boolean(tcxText),
             color: nextColor(),
             type: "road" as const,
             userId: userId || undefined,
           };
 
-          // Upload GPX to Firebase Storage
+          // Upload GPX/TCX to Firebase Storage
           if (storage && userId) {
             try {
               await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.gpx`), file);
+              if (tcxFiles[i]) {
+                await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.tcx`), tcxFiles[i]);
+              }
             } catch (e) {
               console.error("Storage upload error", e);
             }
@@ -119,8 +226,7 @@ export function useGPXRoutes(userId: string | null) {
           if (db && userId) {
             try {
               await setDoc(doc(db, "routes", id), {
-                ...route,
-                coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+                ...serializeRoute(route),
               });
             } catch (e) {
               console.error("Firestore save error", e);
@@ -134,22 +240,24 @@ export function useGPXRoutes(userId: string | null) {
         setLoading(false);
       }
     },
-    [userId]
+    [userId, mergeMetricSamples, serializeRoute]
   );
 
   const deleteRoute = useCallback(
     async (id: string, currentRoutes: GPXRoute[]) => {
-      const route = currentRoutes.find((r) => r.id === id);
-      if (!route) return;
-      if (!confirm(`Delete "${route.name}"? This cannot be undone.`)) return;
       const updated = currentRoutes.filter((r) => r.id !== id);
       saveRoutes(updated);
       if (storage && userId) {
-        try {
-          await deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`));
-        } catch (e) {
-          console.error("Failed to delete from Firebase Storage", e);
-        }
+        await Promise.all([
+          deleteObject(ref(storage, `gpx-files/${userId}/${id}.gpx`)).catch((e) => {
+            if (isStorageObjectNotFound(e)) return;
+            console.error("Failed to delete GPX from Firebase Storage", e);
+          }),
+          deleteObject(ref(storage, `gpx-files/${userId}/${id}.tcx`)).catch((e) => {
+            if (isStorageObjectNotFound(e)) return;
+            console.error("Failed to delete TCX from Firebase Storage", e);
+          }),
+        ]);
       }
       if (db) {
         try {
@@ -160,28 +268,28 @@ export function useGPXRoutes(userId: string | null) {
         }
       }
     },
-    [saveRoutes]
+    [saveRoutes, userId]
   );
 
   const updateRoute = useCallback(
     async (id: string, name: string, type: string, currentRoutes: GPXRoute[]) => {
       const route = currentRoutes.find((r) => r.id === id);
-      if (!route) return;
 
-      // Find all routes with same name+date (same original upload)
-      const dupIds = currentRoutes
-        .filter((r) => r.name === route.name && r.date === route.date)
-        .map((r) => r.id);
+      const updateIds = route
+        ? currentRoutes
+            .filter((r) => r.name === route.name && r.date === route.date)
+            .map((r) => r.id)
+        : [id];
 
       const updated = currentRoutes.map((r) =>
-        dupIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | "mixed" | undefined } : r
+        updateIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | "mixed" | undefined } : r
       );
       saveRoutes(updated);
 
       if (db) {
         try {
           const { updateDoc } = await import("firebase/firestore");
-          for (const did of dupIds) {
+          for (const did of updateIds) {
             await updateDoc(doc(db, "routes", did), { name, type });
           }
         } catch (e) {
@@ -238,6 +346,8 @@ export function useRouteFilter(
       out = out.filter((r) => r.distance / 1000 <= baseFilter.maxDistance!);
     if (baseFilter.type && baseFilter.type !== "all")
       out = out.filter((r) => r.type === baseFilter.type);
+    if (baseFilter.country)
+      out = out.filter((r) => routeHasCountry(r, baseFilter.country!));
     if (searchQuery)
       out = out.filter((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()));
     setFiltered(out);
