@@ -9,6 +9,7 @@
 const CELL_SIZE_M = 22;
 const SAMPLE_STEP_M = 10;
 const RENDER_STEP_M = 18;
+const STYLE_BUCKETS = 7;
 
 type RouteForHeatmap = {
   coordinates: [number, number][];
@@ -155,7 +156,36 @@ function scaleCount(count: number, maxCount: number, min: number, max: number): 
 
 function countForRenderedChunk(a: [number, number], b: [number, number], cellCounts: Map<string, number>): number {
   const cells = sampledCellsForSegment(a, b, SAMPLE_STEP_M);
-  return Math.max(1, ...cells.map((key) => cellCounts.get(key) ?? 1));
+  const counts = cells.map((key) => cellCounts.get(key) ?? 1);
+  return counts.reduce((sum, count) => sum + count, 0) / Math.max(1, counts.length);
+}
+
+function styleBucket(count: number, maxCount: number): number {
+  if (maxCount <= 1) return 0;
+  const intensity = (count - 1) / (maxCount - 1);
+  return Math.max(0, Math.min(STYLE_BUCKETS - 1, Math.round(intensity * (STYLE_BUCKETS - 1))));
+}
+
+function bucketIntensity(bucket: number): number {
+  if (STYLE_BUCKETS <= 1) return 0;
+  return bucket / (STYLE_BUCKETS - 1);
+}
+
+function segmentStyle(
+  route: RouteForHeatmap,
+  bucket: number,
+  maxCount: number,
+  minWeight: number,
+  maxWeight: number,
+) {
+  const intensity = bucketIntensity(bucket);
+  const count = 1 + intensity * Math.max(0, maxCount - 1);
+  return {
+    weight: scaleCount(count, maxCount, minWeight, maxWeight),
+    count,
+    color: heatColor(route, intensity),
+    opacity: 0.62 + intensity * 0.33,
+  };
 }
 
 export function buildPersonalHeatmap(
@@ -187,6 +217,20 @@ export function buildPersonalHeatmap(
 
   for (const route of routes) {
     const coords = route.coordinates;
+    let activeBucket: number | null = null;
+    let activePositions: [number, number][] = [];
+
+    const flushActive = () => {
+      if (activeBucket === null || activePositions.length < 2) return;
+      const style = segmentStyle(route, activeBucket, maxCount, minWeight, maxWeight);
+      segments.push({
+        positions: activePositions,
+        weight: style.weight,
+        count: style.count,
+        color: style.color,
+        opacity: style.opacity,
+      });
+    };
 
     for (let i = 1; i < coords.length; i += 1) {
       const from = coords[i - 1];
@@ -199,17 +243,22 @@ export function buildPersonalHeatmap(
         const a = interpolate(from, to, chunk / chunks);
         const b = interpolate(from, to, (chunk + 1) / chunks);
         const count = countForRenderedChunk(a, b, cellCounts);
-        const intensity = maxCount <= 1 ? 0 : (count - 1) / (maxCount - 1);
+        const bucket = styleBucket(count, maxCount);
 
-        segments.push({
-          positions: [a, b],
-          weight: scaleCount(count, maxCount, minWeight, maxWeight),
-          count,
-          color: heatColor(route, intensity),
-          opacity: 0.5 + intensity * 0.45,
-        });
+        if (activeBucket === null) {
+          activeBucket = bucket;
+          activePositions = [a, b];
+        } else if (bucket === activeBucket) {
+          activePositions.push(b);
+        } else {
+          flushActive();
+          activeBucket = bucket;
+          activePositions = [a, b];
+        }
       }
     }
+
+    flushActive();
   }
 
   return segments;
