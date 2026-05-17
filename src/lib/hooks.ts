@@ -22,6 +22,20 @@ export interface RouteStats {
 }
 
 export function useGPXRoutes(userId: string | null) {
+  const stripRouteCache = useCallback((route: GPXRoute): GPXRoute => ({
+    ...route,
+    samples: undefined,
+  }), []);
+
+  const cacheRoutes = useCallback((routesToCache: GPXRoute[]) => {
+    try {
+      localStorage.setItem("gpx-routes", JSON.stringify(routesToCache.map(stripRouteCache)));
+    } catch (e) {
+      console.warn("Route cache exceeded localStorage quota; clearing cached routes.", e);
+      localStorage.removeItem("gpx-routes");
+    }
+  }, [stripRouteCache]);
+
   const serializeRoute = useCallback((route: GPXRoute) => {
     const payload: any = {
       ...route,
@@ -140,18 +154,18 @@ export function useGPXRoutes(userId: string | null) {
         });
         firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
         setRoutes(firestoreRoutes);
-        localStorage.setItem("gpx-routes", JSON.stringify(firestoreRoutes));
+        cacheRoutes(firestoreRoutes);
       } catch (e) {
         console.error("Firestore load error", e);
       }
     };
     load();
-  }, [userId, deserializeRoute]);
+  }, [userId, deserializeRoute, cacheRoutes]);
 
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
-    localStorage.setItem("gpx-routes", JSON.stringify(newRoutes));
+    cacheRoutes(newRoutes);
     setRoutes(newRoutes);
-  }, []);
+  }, [cacheRoutes]);
 
   const uploadFiles = useCallback(
     async (files: File[], currentRoutes: GPXRoute[], tcxFiles: File[] = []): Promise<GPXRoute[]> => {
