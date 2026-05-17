@@ -250,6 +250,7 @@ export default function Home() {
               onEditRoute={setEditingRoute}
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
+              onRouteUpload={handleRouteUpload}
               wishlist={wishlist}
               favorites={favorites}
               onToggleWishlist={handleSaveToWishlist}

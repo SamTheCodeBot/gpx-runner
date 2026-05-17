@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { Icon, RouteRow } from "./ui";
+import { UploadRoutePrompt } from "./Sidebar";
 import type { GPXRoute } from "@/app/types";
 
 interface RouteListProps {
@@ -19,6 +21,7 @@ interface RouteListProps {
   onEditRoute: (r: GPXRoute) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
   wishlist: string[];
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
@@ -29,9 +32,10 @@ export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
   showFilters, filter, setFilter, setShowFilters, getMonthOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
-  fileInputRef, onFileUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
+  fileInputRef, onFileUpload, onRouteUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
 }: RouteListProps) {
   const hasActiveFilters = !!(filter.month || filter.type || filter.list);
+  const [showUploadPrompt, setShowUploadPrompt] = useState(false);
 
   return (
     <div>
@@ -141,10 +145,20 @@ export function RouteList({
           </div>
           <h4 className="text-base font-extrabold text-on-surface mb-1">No routes yet</h4>
           <p className="text-sm text-on-surface-variant mb-4">Upload a route file to get started</p>
-          <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold cursor-pointer hover:opacity-90 transition-opacity">
-            <Icon name="upload" className="text-sm" />Upload route
-            <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
-          </label>
+          {onRouteUpload ? (
+            <button
+              type="button"
+              onClick={() => setShowUploadPrompt(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold cursor-pointer hover:opacity-90 transition-opacity"
+            >
+              <Icon name="upload" className="text-sm" />Upload route
+            </button>
+          ) : (
+            <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold cursor-pointer hover:opacity-90 transition-opacity">
+              <Icon name="upload" className="text-sm" />Upload route
+              <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
+            </label>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
@@ -163,6 +177,15 @@ export function RouteList({
             />
           ))}
         </div>
+      )}
+      {showUploadPrompt && onRouteUpload && (
+        <UploadRoutePrompt
+          onClose={() => setShowUploadPrompt(false)}
+          onUpload={(gpxFiles, tcxFiles) => {
+            onRouteUpload(gpxFiles, tcxFiles);
+            setShowUploadPrompt(false);
+          }}
+        />
       )}
     </div>
   );
