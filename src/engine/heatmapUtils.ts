@@ -24,17 +24,60 @@ export interface HeatmapSegment {
   weight: number;               // 2–8, based on run count
   count: number;                // raw overlap count
   color: string;
+  opacity: number;
 }
 
-/** Shared colour for personal heatmap (user's signature colour). */
-export const HEATMAP_COLOR = "rgb(255 215 0)"; // gold
+const TYPE_COLORS: Record<string, string> = {
+  road: "rgb(255 65 164)",
+  trail: "rgb(18 221 251)",
+  mixed: "rgb(197 45 255)",
+};
+
+function baseRouteColor(route: { color?: string; type?: string }): string {
+  return route.color || (route.type ? TYPE_COLORS[route.type] : undefined) || TYPE_COLORS.road;
+}
+
+function parseRgb(color: string): [number, number, number] | null {
+  const rgbMatch = color.match(/rgba?\((\d+)\s*,?\s+(\d+)\s*,?\s+(\d+)/i);
+  if (rgbMatch) {
+    return [Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3])];
+  }
+
+  const hexMatch = color.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (hexMatch) {
+    return [
+      parseInt(hexMatch[1], 16),
+      parseInt(hexMatch[2], 16),
+      parseInt(hexMatch[3], 16),
+    ];
+  }
+
+  return null;
+}
+
+function mixChannel(a: number, b: number, amount: number): number {
+  return Math.round(a + (b - a) * amount);
+}
+
+function heatColor(baseColor: string, intensity: number): string {
+  const rgb = parseRgb(baseColor);
+  if (!rgb) return baseColor;
+
+  // Low-frequency segments are pale versions of the route colour; repeated
+  // sections move toward the original colour and then a slightly darker shade.
+  const lighten = Math.max(0, 0.58 - intensity * 0.5);
+  const darken = Math.max(0, intensity - 0.72) * 0.45;
+  const lightened = rgb.map((c) => mixChannel(c, 255, lighten));
+  const intensified = lightened.map((c) => mixChannel(c, 0, darken));
+  return `rgb(${intensified[0]} ${intensified[1]} ${intensified[2]})`;
+}
 
 /**
  * Build heatmap segments from a list of routes.
  * Routes typed as 'road'/'trail'/'mixed' can use different heatmap colours.
  */
 export function buildPersonalHeatmap(
-  routes: { coordinates: [number, number][]; type?: string; id: string }[],
+  routes: { coordinates: [number, number][]; color?: string; type?: string; id: string }[],
   minWeight = 2,
   maxWeight = 8,
 ): HeatmapSegment[] {
@@ -55,8 +98,10 @@ export function buildPersonalHeatmap(
 
   // 2. Normalise weights across all routes (max count → maxWeight)
   const maxCount = Math.max(...cellCounts.values(), 1);
-  const weightScale = (count: number) =>
-    Math.round(minWeight + ((count - 1) / (maxCount - 1)) * (maxWeight - minWeight));
+  const weightScale = (count: number) => {
+    if (maxCount <= 1) return minWeight;
+    return Math.round(minWeight + ((count - 1) / (maxCount - 1)) * (maxWeight - minWeight));
+  };
 
   // 3. Build per-route segments with weights
   const segments: HeatmapSegment[] = [];
@@ -70,11 +115,13 @@ export function buildPersonalHeatmap(
       if (!seen.has(key)) {
         seen.add(key);
         const count = cellCounts.get(key) ?? 1;
+        const intensity = maxCount <= 1 ? 0 : (count - 1) / (maxCount - 1);
         segments.push({
           positions: [[lng1, lat1], [lng2, lat2]],
           weight: weightScale(count),
           count,
-          color: HEATMAP_COLOR,
+          color: heatColor(baseRouteColor(route), intensity),
+          opacity: 0.4 + intensity * 0.55,
         });
       }
     }

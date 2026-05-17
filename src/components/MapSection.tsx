@@ -45,8 +45,11 @@ function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
         </div>
         {showPersonalHeatmap && (
           <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgb(255 215 0)" }} />
-            <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">My Heatmap</span>
+            <div
+              className="w-6 h-2.5 rounded-full"
+              style={{ background: "linear-gradient(90deg, rgb(255 190 224), rgb(255 65 164), rgb(151 17 86))" }}
+            />
+            <span className="text-[10px] font-extrabold text-primary uppercase tracking-wider">Frequency</span>
           </div>
         )}
       </div>
@@ -79,10 +82,10 @@ function PersonalHeatmapToggle({ showPersonalHeatmap, onToggle }: { showPersonal
         onClick={onToggle}
         className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
           showPersonalHeatmap
-            ? "bg-[#ffd700] text-[#18181b]"
+            ? "bg-primary text-on-primary"
             : "bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container"
         }`}
-        title="Personal heatmap — shows how often you run each segment"
+        title="Personal heatmap — repeated sections use stronger route colours"
       >
         <Icon name="whatshot" className="text-xs inline mr-1" />
         {showPersonalHeatmap ? "Heatmap on" : "My heatmap"}

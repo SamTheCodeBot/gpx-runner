@@ -266,7 +266,7 @@ export default function Map({
           pathOptions={{
             color: seg.color,
             weight: seg.weight,
-            opacity: 0.75,
+            opacity: seg.opacity,
           }}
         />
       ))}

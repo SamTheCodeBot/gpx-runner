@@ -299,22 +299,38 @@ export default function Home() {
                 </div>
                 {showPersonalHeatmap && (
                   <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 215 0)" }} />
-                    <span className="text-[9px] text-on-surface-variant">Heat</span>
+                    <div
+                      className="w-4 h-2 rounded-full"
+                      style={{ background: "linear-gradient(90deg, rgb(255 190 224), rgb(255 65 164), rgb(151 17 86))" }}
+                    />
+                    <span className="text-[9px] text-on-surface-variant">Freq</span>
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => setShowHeatmap(!showHeatmap)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                  showHeatmap
-                    ? "bg-primary text-on-primary"
-                    : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-                }`}
-              >
-                <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                {showHeatmap ? "Hide" : "Show"}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showPersonalHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="whatshot" className="text-[10px] inline mr-0.5" />
+                  {showPersonalHeatmap ? "Freq" : "Freq"}
+                </button>
+                <button
+                  onClick={() => setShowHeatmap(!showHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
           </div>
 
