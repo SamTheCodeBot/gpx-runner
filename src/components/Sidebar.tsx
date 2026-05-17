@@ -53,13 +53,13 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
         {/* Heatmap & badges — fun extras */}
         <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
 
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/">
-          <Icon name="whatshot" className="text-base" />
+        <Link href="/heatmaps" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+          <Icon name="whatshot" filled={isActive("/heatmaps")} className="text-base" />
           <div>
-            <span className="font-semibold text-sm">Personal Heatmap</span>
-            <span className="block text-[10px] text-on-primary/50">Your running density</span>
+            <span className="font-semibold text-sm">Personal Heatmaps</span>
+            <span className="block text-[10px] text-on-primary/50">Route layers</span>
           </div>
-        </a>
+        </Link>
 
         <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/badges">
           <Icon name="emoji_events" className="text-base" />
@@ -177,13 +177,13 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
           <div className="my-3 border-t border-white/10" />
           <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
 
-          <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/">
-            <Icon name="whatshot" className="text-base" />
+          <Link href="/heatmaps" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="whatshot" filled={isActive("/heatmaps")} className="text-base" />
             <div>
-              <span className="font-semibold text-sm">Personal Heatmap</span>
-              <span className="block text-[10px] text-on-primary/50">Your running density</span>
+              <span className="font-semibold text-sm">Personal Heatmaps</span>
+              <span className="block text-[10px] text-on-primary/50">Route layers</span>
             </div>
-          </a>
+          </Link>
 
           <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/badges">
             <Icon name="emoji_events" className="text-base" />

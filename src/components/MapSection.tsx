@@ -25,6 +25,7 @@ interface MapSectionProps {
   selectedStartPoint: [number, number] | null;
   isSelectingStartPoint: boolean;
   onMapClick: (lat: number, lon: number) => void;
+  showMapControls?: boolean;
 }
 
 function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
@@ -121,6 +122,7 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap, showPersonalHeatmap,
   onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
+  showMapControls = true,
 }: MapSectionProps) {
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
@@ -141,8 +143,12 @@ export function MapSection({
       />
 
       <MapLegend showPersonalHeatmap={showPersonalHeatmap} />
-      <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
-      <PersonalHeatmapToggle showPersonalHeatmap={showPersonalHeatmap} onToggle={onTogglePersonalHeatmap} />
+      {showMapControls && (
+        <>
+          <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
+          <PersonalHeatmapToggle showPersonalHeatmap={showPersonalHeatmap} onToggle={onTogglePersonalHeatmap} />
+        </>
+      )}
       <LoadingOverlay isLoading={isLoading} />
       <StartPointHint isSelectingStartPoint={isSelectingStartPoint} />
     </div>
