@@ -29,7 +29,7 @@ export default function SuggestPage() {
   const [suggestDistance, setSuggestDistance] = useState(5);
   const [avoidFamiliar, setAvoidFamiliar] = useState(true);
   const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
-  const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("my-routes");
+  const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("both");
   const [mapboxApiKey, setMapboxApiKey] = useState(
     typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_MAPBOX_TOKEN as string) || "" : ""
   );
@@ -44,7 +44,7 @@ export default function SuggestPage() {
     return { totalRuns: routes.length, totalDistance: Math.round(totalDistance * 10) / 10, totalElevation: Math.round(totalElevation) };
   }, [routes]);
 
-  const { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion } =
+  const { suggestedRoute, isSuggesting, suggestionError, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, avoidFamiliar);
   const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
 
@@ -83,7 +83,7 @@ export default function SuggestPage() {
 
   const handleSaveSuggestedToWishlist = async () => { if (suggestedRoute) await toggleWishlist(suggestedRoute.id); };
   const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes, routeSource, mapboxApiKey);
+    getSuggestion(selectedStartPoint, routes, routeSource, selectedType, mapboxApiKey);
   };
 
   if (authLoading) {
@@ -251,6 +251,19 @@ export default function SuggestPage() {
                     : <><Icon name="sprint" className="text-sm" /> Generate Route</>}
                 </button>
               </div>
+
+              {/* Route generation error */}
+              {suggestionError && (
+                <div className="mx-4 mb-4 bg-error-container/40 border border-error/20 rounded-2xl p-4 animate-fade-in">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon name="error" className="text-error text-base" />
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-error">No runnable route found</span>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    {suggestionError}
+                  </p>
+                </div>
+              )}
 
               {/* Generated result */}
               {suggestedRoute && (
