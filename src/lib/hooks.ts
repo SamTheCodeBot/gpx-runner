@@ -221,7 +221,6 @@ export function useGPXRoutes(userId: string | null) {
     async (id: string, currentRoutes: GPXRoute[]) => {
       const route = currentRoutes.find((r) => r.id === id);
       if (!route) return;
-      if (!confirm(`Delete "${route.name}"? This cannot be undone.`)) return;
       const updated = currentRoutes.filter((r) => r.id !== id);
       saveRoutes(updated);
       if (storage && userId) {
@@ -240,7 +239,7 @@ export function useGPXRoutes(userId: string | null) {
         }
       }
     },
-    [saveRoutes]
+    [saveRoutes, userId]
   );
 
   const updateRoute = useCallback(
