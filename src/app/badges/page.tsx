@@ -16,19 +16,36 @@ const TIER_CONFIG = {
   platinum: { label: "Platinum", color: "#e5e4e2", bg: "bg-[#e5e4e2]/10", border: "border-[#e5e4e2]/30", text: "text-[#e5e4e2]", icon: "✦" },
 } as const;
 
+function countryForPoint(lat: number, lng: number): string | null {
+  // Lightweight country detection for current badge logic. This intentionally
+  // covers the app's Nordic use case without adding a geocoder dependency.
+  if (lat >= 55.2 && lat <= 56.2 && lng >= 12.75 && lng <= 13.4) return "Sweden";
+  if (lat >= 54.45 && lat <= 57.9 && lng >= 8.0 && lng <= 12.75) return "Denmark";
+  if (lat >= 55.0 && lat <= 69.2 && lng >= 10.5 && lng <= 24.5) return "Sweden";
+  if (lat >= 57.8 && lat <= 71.4 && lng >= 4.0 && lng <= 31.5) return "Norway";
+  if (lat >= 59.6 && lat <= 70.2 && lng >= 19.0 && lng <= 31.7) return "Finland";
+  if (lat >= 47.2 && lat <= 55.1 && lng >= 5.5 && lng <= 15.5) return "Germany";
+  return null;
+}
+
 function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []): BadgeContext {
   const totalRuns = routes.length;
   const totalDistanceKm = routes.reduce((s, r) => s + (r.distance || 0) / 1000, 0);
   const totalElevationM = routes.reduce((s, r) => s + (r.elevationGain || 0), 0);
   const longestRunKm = routes.reduce((best, r) => Math.max(best, (r.distance || 0) / 1000), 0);
 
-  // Country detection: rough lat/lng buckets (~country-level)
-  const countryBuckets = new Set<string>();
+  const totalCountries = new Set<string>();
+  const routeCountries = new Map<string, Set<string>>();
   for (const r of routes) {
-    if (!r.coordinates.length) continue;
-    const mid = r.coordinates[Math.floor(r.coordinates.length / 2)];
-    const [lng, lat] = mid;
-    countryBuckets.add(`${lat.toFixed(1)},${lng.toFixed(1)}`);
+    const countries = new Set<string>();
+    for (const [lng, lat] of r.coordinates) {
+      const country = countryForPoint(lat, lng);
+      if (country) {
+        countries.add(country);
+        totalCountries.add(country);
+      }
+    }
+    routeCountries.set(r.id, countries);
   }
 
   // Streak
@@ -71,12 +88,12 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
     totalDistanceKm,
     totalElevationM,
     countriesRun: new Set<string>(),
-    routeCountries: new Map<string, Set<string>>(),
+    routeCountries,
     clubMemberships: [],
     hasRunClub: false,
     maxRunsOnSingleRoute,
     longestRunKm,
-    totalCountries: countryBuckets,
+    totalCountries,
     currentStreak,
     longestStreak,
   };

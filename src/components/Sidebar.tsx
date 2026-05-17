@@ -261,11 +261,6 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
           <Icon name="route" filled={isActive("/")} className="text-base" />
           <span className="font-semibold text-sm">My Routes</span>
         </Link>
-        <Link href="/suggest" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
-          <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
-          <span className="font-semibold text-sm">Route Suggestions</span>
-        </Link>
-
         {/* Divider */}
         <div className="my-3 border-t border-white/10" />
 
@@ -285,14 +280,6 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
           <div>
             <span className="font-semibold text-sm">Badges</span>
             <span className="block text-[10px] text-on-primary/50">Collect achievements</span>
-          </div>
-        </a>
-
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/50 hover:bg-primary-container/40 transition-colors cursor-not-allowed" href="#">
-          <Icon name="groups" className="text-base" />
-          <div>
-            <span className="font-semibold text-sm">Run Clubs</span>
-            <span className="block text-[10px] text-on-primary/50">Coming soon</span>
           </div>
         </a>
 
@@ -399,11 +386,6 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             <Icon name="route" filled={isActive("/")} className="text-base" />
             <span className="font-semibold text-sm">My Routes</span>
           </Link>
-          <Link href="/suggest" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
-            <Icon name="explore" filled={isActive("/suggest")} className="text-base" />
-            <span className="font-semibold text-sm">Route Suggestions</span>
-          </Link>
-
           {/* Divider */}
           <div className="my-3 border-t border-white/10" />
           <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
@@ -424,13 +406,6 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             </div>
           </a>
 
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/40 cursor-not-allowed">
-            <Icon name="groups" className="text-base" />
-            <div>
-              <span className="font-semibold text-sm">Run Clubs</span>
-              <span className="block text-[10px] text-on-primary/50">Coming soon</span>
-            </div>
-          </div>
         </nav>
 
         {/* Upload route button */}

@@ -187,7 +187,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Run between two different countries in a single run",
     icon: "swap_horiz",
     tier: "gold",
-    check: (c) => false, // Requires route-level country detection — stub for future
+    check: (c) => Array.from(c.routeCountries.values()).some((countries) => countries.size >= 2),
     progress: () => "Run between two countries",
   },
 
