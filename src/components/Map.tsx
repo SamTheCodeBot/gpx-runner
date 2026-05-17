@@ -130,6 +130,101 @@ function getKilometerMarkers(coordinates: [number, number][]): { position: [numb
   return markers;
 }
 
+function routeCentroid(route: GPXRoute): [number, number] | null {
+  if (!route.coordinates.length) return null;
+  return [
+    route.coordinates.reduce((sum, [lon]) => sum + lon, 0) / route.coordinates.length,
+    route.coordinates.reduce((sum, [, lat]) => sum + lat, 0) / route.coordinates.length,
+  ];
+}
+
+function RouteClusterMarkers({
+  routes,
+  enabled,
+}: {
+  routes: GPXRoute[];
+  enabled: boolean;
+}) {
+  const map = useMap();
+  const [mapState, setMapState] = useState({ zoom: map.getZoom(), tick: 0 });
+
+  useEffect(() => {
+    const update = () => setMapState((state) => ({ zoom: map.getZoom(), tick: state.tick + 1 }));
+    update();
+    map.on("moveend zoomend resize", update);
+    return () => {
+      map.off("moveend zoomend resize", update);
+    };
+  }, [map]);
+
+  if (!enabled || mapState.zoom >= 9) return null;
+
+  const clusterDistancePx = mapState.zoom <= 5 ? 78 : 58;
+  const clusters: Array<{
+    routes: GPXRoute[];
+    lng: number;
+    lat: number;
+    x: number;
+    y: number;
+  }> = [];
+
+  for (const route of routes) {
+    const centroid = routeCentroid(route);
+    if (!centroid) continue;
+    const [lng, lat] = centroid;
+    const point = map.latLngToContainerPoint([lat, lng]);
+    const existing = clusters.find((cluster) => {
+      const dx = cluster.x - point.x;
+      const dy = cluster.y - point.y;
+      return Math.sqrt(dx * dx + dy * dy) <= clusterDistancePx;
+    });
+
+    if (existing) {
+      existing.routes.push(route);
+      existing.lng = existing.routes.reduce((sum, item) => sum + (routeCentroid(item)?.[0] ?? 0), 0) / existing.routes.length;
+      existing.lat = existing.routes.reduce((sum, item) => sum + (routeCentroid(item)?.[1] ?? 0), 0) / existing.routes.length;
+      const nextPoint = map.latLngToContainerPoint([existing.lat, existing.lng]);
+      existing.x = nextPoint.x;
+      existing.y = nextPoint.y;
+    } else {
+      clusters.push({ routes: [route], lng, lat, x: point.x, y: point.y });
+    }
+  }
+
+  return (
+    <>
+      {clusters.map((cluster) => {
+        const routeCount = cluster.routes.length;
+        const icon = L.divIcon({
+          html: '<div style="width:34px;height:34px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgb(255 65 164);color:white;border:3px solid white;font-size:13px;font-weight:900;box-shadow:0 4px 14px rgba(0,0,0,0.28);">' + routeCount + '</div>',
+          className: "",
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+        });
+
+        return (
+          <Marker
+            key={cluster.routes.map((route) => route.id).join("|")}
+            position={[cluster.lat, cluster.lng]}
+            icon={icon}
+            eventHandlers={{
+              click: () => {
+                const coords = cluster.routes.flatMap((route) => route.coordinates);
+                if (!coords.length) return;
+                map.fitBounds(L.latLngBounds(coords.map(([lon, lat]) => [lat, lon] as [number, number])), { padding: [70, 70] });
+              },
+            }}
+          >
+            <Popup>
+              {routeCount === 1 ? cluster.routes[0].name : routeCount + " routes in this area"}
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
+}
+
 const HEATMAP_RAMPS: Record<string, [[number, number, number], [number, number, number], [number, number, number]]> = {
   road: [
     [255, 185, 215],
@@ -502,6 +597,7 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
       <MapEvents onMapClick={onMapClick} />
+      <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       {personalHeatmapMode === "frequency" ? (
         <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
       ) : (
