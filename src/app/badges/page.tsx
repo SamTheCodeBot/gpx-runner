@@ -25,6 +25,7 @@ function countryForPoint(lat: number, lng: number): string | null {
   if (lat >= 57.8 && lat <= 71.4 && lng >= 4.0 && lng <= 31.5) return "Norway";
   if (lat >= 59.6 && lat <= 70.2 && lng >= 19.0 && lng <= 31.7) return "Finland";
   if (lat >= 47.2 && lat <= 55.1 && lng >= 5.5 && lng <= 15.5) return "Germany";
+  if (lat >= 24.4 && lat <= 49.4 && lng >= -125.0 && lng <= -66.9) return "United States";
   return null;
 }
 
