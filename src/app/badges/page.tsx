@@ -312,6 +312,7 @@ export default function BadgesPage() {
       </main>
       {pendingUpload && (
         <UploadModal
+          key={pendingUpload.id}
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={() => setPendingUploads((pending) => pending.slice(1))}

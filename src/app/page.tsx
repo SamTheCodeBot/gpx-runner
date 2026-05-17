@@ -379,6 +379,7 @@ export default function Home() {
       {/* Post-upload naming modal */}
       {pendingUpload && (
         <UploadModal
+          key={pendingUpload.id}
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={cancelUpload}

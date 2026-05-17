@@ -71,12 +71,19 @@ export function useGPXRoutes(userId: string | null) {
       time: sample.time,
     }));
 
-    if (!tcxText) return samples;
+    const downsample = (metricSamples: NonNullable<GPXRoute["samples"]>) => {
+      const maxSamples = 900;
+      if (metricSamples.length <= maxSamples) return metricSamples;
+      const step = Math.ceil(metricSamples.length / maxSamples);
+      return metricSamples.filter((_, index) => index % step === 0 || index === metricSamples.length - 1);
+    };
+
+    if (!tcxText) return downsample(samples);
 
     const tcxSamples = parseTCXFile(tcxText);
     if (!tcxSamples.length) return samples;
 
-    return samples.map((sample) => {
+    return downsample(samples.map((sample) => {
       let best = tcxSamples[0];
       let bestDistance = Number.POSITIVE_INFINITY;
       for (const tcxSample of tcxSamples) {
@@ -95,7 +102,7 @@ export function useGPXRoutes(userId: string | null) {
         heartRate: best.heartRate,
         paceMinPerKm: best.paceMinPerKm,
       };
-    });
+    }));
   }, []);
 
   const [routes, setRoutes] = useState<GPXRoute[]>([]);

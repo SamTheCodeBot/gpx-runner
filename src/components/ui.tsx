@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface IconProps {
   name: string;
@@ -148,6 +148,11 @@ export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
   const [name, setName] = useState(route.name || "");
   const [type, setType] = useState<string>("road");
 
+  useEffect(() => {
+    setName(route.name || "");
+    setType(route.type || "road");
+  }, [route.id, route.name, route.type]);
+
   const accept = () => {
     if (!name.trim()) return;
     onAccept(name.trim(), type);
@@ -189,10 +194,10 @@ export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
           </div>
         </div>
         <div className="flex gap-2 mt-5">
-          <button onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+          <button type="button" onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             Save
           </button>
         </div>
