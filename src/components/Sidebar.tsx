@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { Icon } from "./ui";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/app/types";
@@ -13,10 +14,101 @@ interface SidebarProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
 }
 
-export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: SidebarProps) {
+function UploadRoutePrompt({
+  onClose,
+  onUpload,
+}: {
+  onClose: () => void;
+  onUpload: (gpxFiles: File[], tcxFiles: File[]) => void;
+}) {
+  const [gpxFiles, setGpxFiles] = useState<File[]>([]);
+  const [tcxFiles, setTcxFiles] = useState<File[]>([]);
+
+  const submit = () => {
+    if (gpxFiles.length === 0) return;
+    onUpload(gpxFiles, tcxFiles);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/35 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-surface-container-lowest rounded-3xl shadow-xl w-full max-w-md p-6 animate-fade-in">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-base font-extrabold text-primary font-headline">Upload route</h3>
+            <p className="text-xs text-on-surface-variant mt-1">GPX is required. TCX adds pace and heart-rate data later.</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
+            <Icon name="close" className="text-on-surface-variant text-sm" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block rounded-2xl border border-outline-variant/50 bg-surface-container p-4 cursor-pointer hover:bg-surface-container-high transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center">
+                <Icon name="route" className="text-primary text-lg" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-on-surface">GPX route file</p>
+                <p className="text-xs text-on-surface-variant truncate">
+                  {gpxFiles.length > 0 ? gpxFiles.map((file) => file.name).join(", ") : "Route geometry and elevation"}
+                </p>
+              </div>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-primary">Required</span>
+            </div>
+            <input
+              type="file"
+              accept=".gpx,application/gpx+xml"
+              multiple
+              onChange={(e) => setGpxFiles(Array.from(e.target.files || []))}
+              className="hidden"
+            />
+          </label>
+
+          <label className="block rounded-2xl border border-outline-variant/50 bg-surface-container p-4 cursor-pointer hover:bg-surface-container-high transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center">
+                <Icon name="monitor_heart" className="text-on-surface-variant text-lg" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-on-surface">TCX metrics file</p>
+                <p className="text-xs text-on-surface-variant truncate">
+                  {tcxFiles.length > 0 ? tcxFiles.map((file) => file.name).join(", ") : "Optional pace and heart-rate data"}
+                </p>
+              </div>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Optional</span>
+            </div>
+            <input
+              type="file"
+              accept=".tcx,application/vnd.garmin.tcx+xml,application/xml,text/xml"
+              multiple
+              onChange={(e) => setTcxFiles(Array.from(e.target.files || []))}
+              className="hidden"
+            />
+          </label>
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={gpxFiles.length === 0} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+            Upload
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onRouteUpload }: SidebarProps) {
   const pathname = usePathname();
+  const [showUploadPrompt, setShowUploadPrompt] = useState(false);
   const isActive = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
@@ -79,13 +171,17 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
 
       </nav>
 
-      {/* Upload GPX button */}
+      {/* Upload route button */}
       <div className="px-4 mb-2">
-        <label className="w-full bg-primary-container text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer">
+        <button
+          type="button"
+          onClick={() => onRouteUpload ? setShowUploadPrompt(true) : fileInputRef.current?.click()}
+          className="w-full bg-primary-container text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer"
+        >
           <Icon name="add" className="text-sm" />
-          Add route (GPX)
-          <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
-        </label>
+          Upload route
+        </button>
+        <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
       </div>
 
       {/* User section */}
@@ -114,6 +210,12 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
           </button>
         </div>
       </div>
+      {showUploadPrompt && onRouteUpload && (
+        <UploadRoutePrompt
+          onClose={() => setShowUploadPrompt(false)}
+          onUpload={onRouteUpload}
+        />
+      )}
     </aside>
   );
 }
@@ -129,10 +231,12 @@ interface MobileDrawerProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
 }
 
-export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload }: MobileDrawerProps) {
+export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onRouteUpload }: MobileDrawerProps) {
   const pathname = usePathname();
+  const [showUploadPrompt, setShowUploadPrompt] = useState(false);
   const isActive = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
   const avatarIcon = profileLoading ? "directions_run" : (profile?.avatar || "directions_run");
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
@@ -202,13 +306,20 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
           </div>
         </nav>
 
-        {/* Upload GPX button */}
+        {/* Upload route button */}
         <div className="px-4 mb-2">
-          <label className="w-full bg-primary-container text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer">
+          <button
+            type="button"
+            onClick={() => {
+              if (onRouteUpload) setShowUploadPrompt(true);
+              else fileInputRef.current?.click();
+            }}
+            className="w-full bg-primary-container text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer"
+          >
             <Icon name="add" className="text-sm" />
-            Add route (GPX)
-            <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={(e) => { onFileUpload(e); onClose(); }} className="hidden" />
-          </label>
+            Upload route
+          </button>
+          <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={(e) => { onFileUpload(e); onClose(); }} className="hidden" />
         </div>
 
         {/* User section */}
@@ -239,6 +350,15 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
           </div>
         </div>
       </aside>
+      {showUploadPrompt && onRouteUpload && (
+        <UploadRoutePrompt
+          onClose={() => setShowUploadPrompt(false)}
+          onUpload={(gpxFiles, tcxFiles) => {
+            onRouteUpload(gpxFiles, tcxFiles);
+            onClose();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -265,7 +385,7 @@ export function MobileBottomNav({ activeTab, onTabChange, fileInputRef, onFileUp
 
       <label className={`flex-1 flex flex-col items-center gap-0.5 py-3 cursor-pointer transition-colors ${activeTab === "add" ? "text-primary" : "text-on-surface-variant"}`}>
         <Icon name="add" className="text-xl" />
-        <span className="text-[10px] font-bold">Add GPX</span>
+        <span className="text-[10px] font-bold">Upload</span>
         <input
           type="file"
           accept=".gpx"

@@ -109,6 +109,18 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    if (tcxFiles.length > 0) {
+      console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
+    }
+    const newRoutes = await uploadFiles(gpxFiles, routes);
+    if (newRoutes.length > 0) {
+      setPendingUpload(newRoutes[0]);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const acceptUpload = (name: string, type: string) => {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
@@ -188,6 +200,7 @@ export default function Home() {
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
       />
 
       {/* Main content */}
@@ -346,6 +359,7 @@ export default function Home() {
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
+          onRouteUpload={handleRouteUpload}
         />
       </main>
 

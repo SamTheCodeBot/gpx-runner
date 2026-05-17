@@ -77,6 +77,15 @@ export default function SuggestPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    if (tcxFiles.length > 0) {
+      console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
+    }
+    await uploadFiles(gpxFiles, routes);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleMapClick = (lat: number, lon: number) => {
     if (isSelectingStartPoint) { setSelectedStartPoint([lon, lat]); setIsSelectingStartPoint(false); }
   };
@@ -113,7 +122,7 @@ export default function SuggestPage() {
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar user={user} profile={profile} profileLoading={loading} onLogout={handleLogout}
-          fileInputRef={fileInputRef} onFileUpload={handleFileUpload} />
+          fileInputRef={fileInputRef} onFileUpload={handleFileUpload} onRouteUpload={handleRouteUpload} />
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Left panel: controls + generated route */}
@@ -349,6 +358,7 @@ export default function SuggestPage() {
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
       />
     </div>
   );

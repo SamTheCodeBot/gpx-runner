@@ -140,9 +140,9 @@ export function RouteList({
             <Icon name="route" className="text-on-surface-variant text-2xl" />
           </div>
           <h4 className="text-base font-extrabold text-on-surface mb-1">No routes yet</h4>
-          <p className="text-sm text-on-surface-variant mb-4">Upload a GPX file to get started</p>
+          <p className="text-sm text-on-surface-variant mb-4">Upload a route file to get started</p>
           <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold cursor-pointer hover:opacity-90 transition-opacity">
-            <Icon name="upload" className="text-sm" />Upload GPX
+            <Icon name="upload" className="text-sm" />Upload route
             <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
           </label>
         </div>

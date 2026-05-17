@@ -108,6 +108,16 @@ export default function PersonalHeatmapsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    if (tcxFiles.length > 0) {
+      console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
+    }
+    const newRoutes = await uploadFiles(gpxFiles, routes);
+    if (newRoutes.length > 0) setPendingUpload(newRoutes[0]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const acceptUpload = (name: string, type: string) => {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
@@ -152,6 +162,7 @@ export default function PersonalHeatmapsPage() {
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -291,6 +302,7 @@ export default function PersonalHeatmapsPage() {
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
+          onRouteUpload={handleRouteUpload}
         />
       </main>
 
