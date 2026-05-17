@@ -250,22 +250,22 @@ export function useGPXRoutes(userId: string | null) {
   const updateRoute = useCallback(
     async (id: string, name: string, type: string, currentRoutes: GPXRoute[]) => {
       const route = currentRoutes.find((r) => r.id === id);
-      if (!route) return;
 
-      // Find all routes with same name+date (same original upload)
-      const dupIds = currentRoutes
-        .filter((r) => r.name === route.name && r.date === route.date)
-        .map((r) => r.id);
+      const updateIds = route
+        ? currentRoutes
+            .filter((r) => r.name === route.name && r.date === route.date)
+            .map((r) => r.id)
+        : [id];
 
       const updated = currentRoutes.map((r) =>
-        dupIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | "mixed" | undefined } : r
+        updateIds.includes(r.id) ? { ...r, name, type: type as "road" | "trail" | "mixed" | undefined } : r
       );
       saveRoutes(updated);
 
       if (db) {
         try {
           const { updateDoc } = await import("firebase/firestore");
-          for (const did of dupIds) {
+          for (const did of updateIds) {
             await updateDoc(doc(db, "routes", did), { name, type });
           }
         } catch (e) {
