@@ -4,7 +4,7 @@ import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { routeCountryNames } from "@/lib/countries";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -38,17 +38,15 @@ export default function Home() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }>({});
+  const [filter, setFilter]                = useState<{ year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
   const listFilteredRoutes = useMemo(() => {
     if (filter.list === "favorites") return routes.filter((route) => favorites.includes(route.id));
-    if (filter.list === "wishlist") return routes.filter((route) => wishlist.includes(route.id));
     return routes;
-  }, [routes, filter.list, favorites, wishlist]);
+  }, [routes, filter.list, favorites]);
   const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
@@ -161,10 +159,6 @@ export default function Home() {
 
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
-  const handleSaveToWishlist = async (routeId: string) => {
-    await toggleWishlist(routeId);
-  };
-
   const handleToggleFavorite = async (routeId: string) => {
     await toggleFavorite(routeId);
   };
@@ -266,9 +260,7 @@ export default function Home() {
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
               onRouteUpload={handleRouteUpload}
-              wishlist={wishlist}
               favorites={favorites}
-              onToggleWishlist={handleSaveToWishlist}
               onToggleFavorite={handleToggleFavorite}
             />
           </div>
@@ -301,6 +293,7 @@ export default function Home() {
                 selectedRoute={selectedRoute}
                 suggestedRoute={null}
                 showHeatmap={showHeatmap}
+                fitAllRoutes={Boolean(filter.country)}
                 showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
                 onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}

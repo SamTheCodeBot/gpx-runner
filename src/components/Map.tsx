@@ -9,6 +9,7 @@ interface MapProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   showHeatmap: boolean;
+  fitAllRoutes?: boolean;
   showPersonalHeatmap?: boolean;
   personalHeatmapMode?: "frequency" | "pace" | "heart-rate" | "elevation";
   suggestedRoute?: RouteSuggestion | null;
@@ -29,10 +30,11 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => 
   return null;
 }
 
-function MapController({ routes, selectedRoute, suggestedRoute }: {
+function MapController({ routes, selectedRoute, suggestedRoute, fitAllRoutes = false }: {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
   suggestedRoute: RouteSuggestion | null;
+  fitAllRoutes?: boolean;
 }) {
   const map = useMap();
   const lastFitKeyRef = useRef<string | null>(null);
@@ -50,7 +52,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     } else if (routes.length > 0) {
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
-      fitKey = `all:${routes.map((route) => route.id).sort().join("|")}`;
+      fitKey = `all:${fitAllRoutes ? "full" : "cluster"}:${routes.map((route) => route.id).sort().join("|")}`;
     } else {
       return;
     }
@@ -58,7 +60,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     if (!fitKey || targetCoords.length === 0) return;
     if (lastFitKeyRef.current === fitKey) return;
 
-    if (fitKey.startsWith("all:")) {
+    if (fitKey.startsWith("all:") && !fitAllRoutes) {
       const toRad = (d: number) => d * Math.PI / 180;
       const R = 6371;
       const kmDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -98,7 +100,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
       map.fitBounds(bounds, { padding: [50, 50] });
     }
     lastFitKeyRef.current = fitKey;
-  }, [map, routes, selectedRoute, suggestedRoute]);
+  }, [map, routes, selectedRoute, suggestedRoute, fitAllRoutes]);
 
   return null;
 }
@@ -491,6 +493,7 @@ export default function Map({
   routes,
   selectedRoute,
   showHeatmap,
+  fitAllRoutes = false,
   showPersonalHeatmap = false,
   personalHeatmapMode = "frequency",
   suggestedRoute,
@@ -595,7 +598,7 @@ export default function Map({
         }
       />
 
-      <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} />
+      <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapEvents onMapClick={onMapClick} />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       {personalHeatmapMode === "frequency" ? (

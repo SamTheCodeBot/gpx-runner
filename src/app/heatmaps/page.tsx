@@ -352,6 +352,7 @@ export default function PersonalHeatmapsPage() {
                 selectedRoute={null}
                 suggestedRoute={null}
                 showHeatmap={false}
+                fitAllRoutes={Boolean(routeCountry)}
                 showPersonalHeatmap={availableHeatmaps[activeHeatmap]}
                 personalHeatmapMode={activeHeatmap}
                 onToggleHeatmap={() => {}}

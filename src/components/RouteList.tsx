@@ -11,8 +11,8 @@ interface RouteListProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showFilters: boolean;
-  filter: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" };
-  setFilter: (f: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }) => void;
+  filter: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" };
+  setFilter: (f: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }) => void;
   setShowFilters: (v: boolean) => void;
   getYearOptions: () => string[];
   getMonthOptions: () => string[];
@@ -24,10 +24,8 @@ interface RouteListProps {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
-  wishlist: string[];
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
-  onToggleWishlist: (routeId: string) => void;
 }
 
 export function RouteList({
@@ -35,7 +33,7 @@ export function RouteList({
   showFilters, filter, setFilter, setShowFilters, getYearOptions, getMonthOptions,
   countryOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
-  fileInputRef, onFileUpload, onRouteUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
+  fileInputRef, onFileUpload, onRouteUpload, favorites, onToggleFavorite,
 }: RouteListProps) {
   const hasActiveFilters = !!(filter.year || filter.month || filter.type || filter.country || filter.list);
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
@@ -71,10 +69,10 @@ export function RouteList({
         />
       </div>
 
-      {/* Filter bar: wishlist/favorites pills + type/month filters */}
+      {/* Filter bar: favorites pill + clear action */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        {/* List filter: All / Favorites / Wishlist */}
-        {wishlist.length > 0 || favorites.length > 0 ? (
+        {/* List filter: All / Favorites */}
+        {favorites.length > 0 ? (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container rounded-full border border-outline-variant">
             <button
               onClick={() => setFilter({ ...filter, list: "all" })}
@@ -93,16 +91,6 @@ export function RouteList({
                     : "text-on-surface-variant hover:text-yellow-500"
                 }`}
               >⭐ <span className="hidden sm:inline">Favorites</span><span className="sm:hidden">{favorites.length}</span></button>
-            )}
-            {wishlist.length > 0 && (
-              <button
-                onClick={() => setFilter({ ...filter, list: filter.list === "wishlist" ? "all" : "wishlist" })}
-                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
-                  filter.list === "wishlist"
-                    ? "bg-primary-container text-on-primary-container"
-                    : "text-on-surface-variant hover:text-primary"
-                }`}
-              ><Icon name="bookmark" className="text-xs" /><span className="hidden sm:inline">Wishlist</span><span className="sm:hidden">{wishlist.length}</span></button>
             )}
           </div>
         ) : null}
@@ -194,7 +182,6 @@ export function RouteList({
               onDownload={() => onDownloadRoute(route)}
               onEdit={() => onEditRoute(route)}
               onToggleFavorite={() => onToggleFavorite(route.id)}
-              onToggleWishlist={() => onToggleWishlist(route.id)}
             />
           ))}
         </div>
