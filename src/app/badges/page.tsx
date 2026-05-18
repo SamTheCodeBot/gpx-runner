@@ -11,10 +11,10 @@ import type { GPXRoute } from "@/app/types";
 import Link from "next/link";
 
 const TIER_CONFIG = {
-  bronze:   { label: "Bronze",   color: "#cd7f32", bg: "bg-[#cd7f32]/10", border: "border-[#cd7f32]/30", text: "text-[#cd7f32]", icon: "⬤" },
-  silver:   { label: "Silver",   color: "#c0c0c0", bg: "bg-[#c0c0c0]/10", border: "border-[#c0c0c0]/30", text: "text-[#c0c0c0]", icon: "◈" },
-  gold:     { label: "Gold",     color: "#ffd700", bg: "bg-[#ffd700]/10", border: "border-[#ffd700]/30", text: "text-[#ffd700]", icon: "★" },
-  platinum: { label: "Platinum", color: "#e5e4e2", bg: "bg-[#e5e4e2]/10", border: "border-[#e5e4e2]/30", text: "text-[#e5e4e2]", icon: "✦" },
+  bronze:   { label: "Bronze",   bg: "bg-[#fff1e6]", border: "border-[#d97706]/40", text: "text-[#9a4f00]", iconBg: "bg-[#f97316]", iconText: "text-white" },
+  silver:   { label: "Silver",   bg: "bg-[#f1f5f9]", border: "border-[#64748b]/35", text: "text-[#475569]", iconBg: "bg-[#64748b]", iconText: "text-white" },
+  gold:     { label: "Gold",     bg: "bg-[#fff7d6]", border: "border-[#ca8a04]/40", text: "text-[#854d0e]", iconBg: "bg-[#f59e0b]", iconText: "text-[#1f2937]" },
+  platinum: { label: "Platinum", bg: "bg-[#eef2ff]", border: "border-[#6366f1]/35", text: "text-[#4338ca]", iconBg: "bg-[#6366f1]", iconText: "text-white" },
 } as const;
 
 function routeRepeatFingerprint(route: GPXRoute): string {
@@ -106,8 +106,8 @@ function BadgeCard({ badge, earned, progress }: { badge: (typeof BADGE_DEFINITIO
       <div className={`absolute top-3 right-3 text-[9px] font-extrabold uppercase tracking-widest ${earned ? cfg.text : "text-on-surface-variant"}`}>
         {cfg.label}
       </div>
-      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 ${earned ? "bg-primary-container" : "bg-surface-container-high"}`}>
-        <span className={`material-symbols-outlined text-2xl ${earned ? "text-primary" : "text-on-surface-variant/40"}`}>{badge.icon}</span>
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 ${earned ? cfg.iconBg : "bg-surface-container-high border border-outline-variant/30"}`}>
+        <span className={`material-symbols-outlined text-2xl ${earned ? cfg.iconText : "text-on-surface-variant/55"}`}>{badge.icon}</span>
       </div>
       <p className={`text-xs font-extrabold text-center mb-1 ${earned ? "text-on-surface" : "text-on-surface-variant/60"}`}>
         {badge.name}
@@ -116,8 +116,8 @@ function BadgeCard({ badge, earned, progress }: { badge: (typeof BADGE_DEFINITIO
         {badge.description}
       </p>
       {earned ? (
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>
-          <span className="material-symbols-outlined text-xs">{cfg.icon}</span>
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-surface-container-lowest/70 ${cfg.text}`}>
+          <span className="material-symbols-outlined text-xs">check_circle</span>
           Earned
         </div>
       ) : (
@@ -271,8 +271,8 @@ export default function BadgesPage() {
             return (
               <div key={tier} className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-sm font-extrabold" style={{ color: config.color }}>
-                    {config.icon} {config.label}
+                  <span className={`text-sm font-extrabold ${config.text}`}>
+                    {config.label}
                   </span>
                   <div className="flex-1 border-t border-outline-variant/20" />
                   <span className="text-xs text-on-surface-variant">{earned}/{badges.length}</span>

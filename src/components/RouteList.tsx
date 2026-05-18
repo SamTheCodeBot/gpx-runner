@@ -11,9 +11,10 @@ interface RouteListProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showFilters: boolean;
-  filter: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" };
-  setFilter: (f: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }) => void;
+  filter: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" };
+  setFilter: (f: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }) => void;
   setShowFilters: (v: boolean) => void;
+  getYearOptions: () => string[];
   getMonthOptions: () => string[];
   countryOptions: string[];
   onSelectRoute: (r: GPXRoute | null) => void;
@@ -23,20 +24,18 @@ interface RouteListProps {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
-  wishlist: string[];
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
-  onToggleWishlist: (routeId: string) => void;
 }
 
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
-  showFilters, filter, setFilter, setShowFilters, getMonthOptions,
+  showFilters, filter, setFilter, setShowFilters, getYearOptions, getMonthOptions,
   countryOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
-  fileInputRef, onFileUpload, onRouteUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
+  fileInputRef, onFileUpload, onRouteUpload, favorites, onToggleFavorite,
 }: RouteListProps) {
-  const hasActiveFilters = !!(filter.month || filter.type || filter.country || filter.list);
+  const hasActiveFilters = !!(filter.year || filter.month || filter.type || filter.country || filter.list);
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
 
   return (
@@ -70,10 +69,10 @@ export function RouteList({
         />
       </div>
 
-      {/* Filter bar: wishlist/favorites pills + type/month filters */}
+      {/* Filter bar: favorites pill + clear action */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        {/* List filter: All / Favorites / Wishlist */}
-        {wishlist.length > 0 || favorites.length > 0 ? (
+        {/* List filter: All / Favorites */}
+        {favorites.length > 0 ? (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container rounded-full border border-outline-variant">
             <button
               onClick={() => setFilter({ ...filter, list: "all" })}
@@ -93,19 +92,9 @@ export function RouteList({
                 }`}
               >⭐ <span className="hidden sm:inline">Favorites</span><span className="sm:hidden">{favorites.length}</span></button>
             )}
-            {wishlist.length > 0 && (
-              <button
-                onClick={() => setFilter({ ...filter, list: filter.list === "wishlist" ? "all" : "wishlist" })}
-                className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
-                  filter.list === "wishlist"
-                    ? "bg-primary-container text-on-primary-container"
-                    : "text-on-surface-variant hover:text-primary"
-                }`}
-              ><Icon name="bookmark" className="text-xs" /><span className="hidden sm:inline">Wishlist</span><span className="sm:hidden">{wishlist.length}</span></button>
-            )}
           </div>
         ) : null}
-        {(filter.month || filter.type || filter.country || filter.list) && (
+        {(filter.year || filter.month || filter.type || filter.country || filter.list) && (
           <button
             onClick={() => setFilter({})}
             className="text-xs text-error font-medium hover:underline"
@@ -119,12 +108,20 @@ export function RouteList({
       {showFilters && (
         <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-3 mb-3 flex flex-wrap items-center gap-2 animate-fade-in">
           <select
+            value={filter.year || ""}
+            onChange={(e) => setFilter({ ...filter, year: e.target.value || undefined })}
+            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+          >
+            <option value="">All years</option>
+            {getYearOptions().map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+          <select
             value={filter.month || ""}
             onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
             className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
           >
             <option value="">All months</option>
-            {getMonthOptions().map((m) => <option key={m} value={m}>{m}</option>)}
+            {getMonthOptions().map((m) => <option key={m} value={m}>{new Date(2000, Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "short" })}</option>)}
           </select>
           <select
             value={filter.type || "all"}
@@ -185,7 +182,6 @@ export function RouteList({
               onDownload={() => onDownloadRoute(route)}
               onEdit={() => onEditRoute(route)}
               onToggleFavorite={() => onToggleFavorite(route.id)}
-              onToggleWishlist={() => onToggleWishlist(route.id)}
             />
           ))}
         </div>

@@ -9,6 +9,7 @@ import { routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 export interface RouteFilter {
+  year?: string;
   month?: string;
   type?: string;
   country?: string;
@@ -339,7 +340,8 @@ export function useRouteFilter(
 
   useEffect(() => {
     let out = [...routes];
-    if (baseFilter.month) out = out.filter((r) => r.date.startsWith(baseFilter.month!));
+    if (baseFilter.year) out = out.filter((r) => r.date.startsWith(baseFilter.year!));
+    if (baseFilter.month) out = out.filter((r) => r.date.substring(5, 7) === baseFilter.month);
     if (baseFilter.minDistance !== undefined)
       out = out.filter((r) => r.distance / 1000 >= baseFilter.minDistance!);
     if (baseFilter.maxDistance !== undefined)

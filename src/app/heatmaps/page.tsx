@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
+import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
@@ -39,15 +40,35 @@ export default function PersonalHeatmapsPage() {
   const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
   const pendingUpload = pendingUploads[0] ?? null;
   const [routeType, setRouteType] = useState<RouteTypeFilter>("all");
+  const [routeYear, setRouteYear] = useState("");
+  const [routeMonth, setRouteMonth] = useState("");
+  const [routeCountry, setRouteCountry] = useState("");
   const [activeHeatmap, setActiveHeatmap] = useState<HeatmapMode>("frequency");
 
   const { routes, saveRoutes, uploadFiles, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   const filteredRoutes = useMemo(() => {
-    if (routeType === "all") return routes;
-    return routes.filter((route) => route.type === routeType);
-  }, [routes, routeType]);
+    return routes.filter((route) => {
+      if (routeType !== "all" && route.type !== routeType) return false;
+      if (routeYear && !route.date.startsWith(routeYear)) return false;
+      if (routeMonth && route.date.substring(5, 7) !== routeMonth) return false;
+      if (routeCountry && !routeHasCountry(route, routeCountry)) return false;
+      return true;
+    });
+  }, [routes, routeType, routeYear, routeMonth, routeCountry]);
+
+  const countryOptions = useMemo(() => (
+    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [routes]);
+
+  const yearOptions = useMemo(() => (
+    Array.from(new Set(routes.map((route) => route.date.substring(0, 4)).filter(Boolean))).sort().reverse()
+  ), [routes]);
+
+  const monthOptions = useMemo(() => (
+    Array.from(new Set(routes.map((route) => route.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b))
+  ), [routes]);
 
   const stats = useMemo(() => {
     if (!filteredRoutes.length) return null;
@@ -66,6 +87,10 @@ export default function PersonalHeatmapsPage() {
     "heart-rate": filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.heartRate === "number")),
     elevation: filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.elevation === "number")),
   }), [filteredRoutes]);
+
+  useEffect(() => {
+    if (!availableHeatmaps[activeHeatmap]) setActiveHeatmap("frequency");
+  }, [activeHeatmap, availableHeatmaps]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,6 +257,45 @@ export default function PersonalHeatmapsPage() {
               ))}
             </div>
 
+            <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-3 flex flex-wrap items-center gap-2">
+              <select
+                value={routeYear}
+                onChange={(e) => setRouteYear(e.target.value)}
+                className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+              >
+                <option value="">All years</option>
+                {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+              <select
+                value={routeMonth}
+                onChange={(e) => setRouteMonth(e.target.value)}
+                className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+              >
+                <option value="">All months</option>
+                {monthOptions.map((month) => (
+                  <option key={month} value={month}>{new Date(2000, Number(month) - 1, 1).toLocaleDateString("en-GB", { month: "short" })}</option>
+                ))}
+              </select>
+              {countryOptions.length > 1 && (
+                <select
+                  value={routeCountry}
+                  onChange={(e) => setRouteCountry(e.target.value)}
+                  className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+                >
+                  <option value="">All countries</option>
+                  {countryOptions.map((country) => <option key={country} value={country}>{country}</option>)}
+                </select>
+              )}
+              {(routeYear || routeMonth || routeCountry) && (
+                <button
+                  onClick={() => { setRouteYear(""); setRouteMonth(""); setRouteCountry(""); }}
+                  className="text-xs text-error font-medium hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-extrabold text-primary font-headline">Heatmaps</h3>
@@ -288,6 +352,7 @@ export default function PersonalHeatmapsPage() {
                 selectedRoute={null}
                 suggestedRoute={null}
                 showHeatmap={false}
+                fitAllRoutes={Boolean(routeCountry)}
                 showPersonalHeatmap={availableHeatmaps[activeHeatmap]}
                 personalHeatmapMode={activeHeatmap}
                 onToggleHeatmap={() => {}}

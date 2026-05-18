@@ -63,15 +63,13 @@ interface RouteRowProps {
   onDelete: () => void;
   onDownload: () => void;
   onEdit: () => void;
-  wishlisted?: boolean;
   isFavorite?: boolean;
-  onToggleWishlist?: (routeId: string) => void;
   onToggleFavorite?: (routeId: string) => void;
 }
 
 export function RouteRow({
   route, selected, onSelect, onDelete, onDownload, onEdit,
-  wishlisted, isFavorite, onToggleWishlist, onToggleFavorite,
+  isFavorite, onToggleFavorite,
 }: RouteRowProps) {
   const date = new Date(route.date);
   const distKm = (route.distance / 1000).toFixed(1);
@@ -90,7 +88,10 @@ export function RouteRow({
         style={{ backgroundColor: route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)' }}
       />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {isFavorite && <Icon name="star" filled className="text-yellow-500 text-sm shrink-0" />}
+          <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
+        </div>
         <p className="text-[10px] text-on-surface-variant mt-0.5">
           {date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
           &nbsp;·&nbsp;{distKm} km&nbsp;·&nbsp;{elevM}m ↑&nbsp;
@@ -106,15 +107,6 @@ export function RouteRow({
             title={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
             <Icon name={isFavorite ? "star" : "star_outline"} className="text-sm" />
-          </button>
-        )}
-        {onToggleWishlist && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleWishlist(route.id); }}
-            className={`p-1.5 rounded-lg transition-colors ${wishlisted ? "text-primary" : "text-on-surface-variant hover:text-primary"} hover:bg-surface-container-highest`}
-            title={wishlisted ? "Remove from wishlist" : "Save to wishlist"}
-          >
-            <Icon name={wishlisted ? "bookmark" : "bookmark_add"} className="text-sm" />
           </button>
         )}
         <button

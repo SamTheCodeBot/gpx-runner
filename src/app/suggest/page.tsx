@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteSuggestions, useUserProfile, useWishlist } from "@/lib/hooks";
+import { useGPXRoutes, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
 import { Icon, LoginScreen } from "@/components/ui";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
@@ -46,7 +46,6 @@ export default function SuggestPage() {
 
   const { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, avoidFamiliar);
-  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,7 +89,6 @@ export default function SuggestPage() {
     if (isSelectingStartPoint) { setSelectedStartPoint([lon, lat]); setIsSelectingStartPoint(false); }
   };
 
-  const handleSaveSuggestedToWishlist = async () => { if (suggestedRoute) await toggleWishlist(suggestedRoute.id); };
   const handleGenerate = () => {
     getSuggestion(selectedStartPoint, routes, routeSource, mapboxApiKey);
   };
@@ -284,10 +282,6 @@ export default function SuggestPage() {
                     <button onClick={handleGenerate} disabled={isSuggesting}
                       className="flex-1 py-2 bg-primary-container hover:bg-primary-container/70 text-on-primary-container rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
                       <Icon name="refresh" className="text-sm" /> Regenerate
-                    </button>
-                    <button onClick={handleSaveSuggestedToWishlist}
-                      className="py-2 px-3 bg-surface-container hover:bg-surface-container-high text-on-surface-variant rounded-xl transition-colors">
-                      <Icon name={wishlist.includes(suggestedRoute.id) ? "bookmark" : "bookmark_add"} className="text-sm" />
                     </button>
                     <button onClick={() => downloadGPXFile(suggestedRoute)}
                       className="py-2 px-3 bg-surface-container hover:bg-surface-container-high text-on-surface-variant rounded-xl transition-colors">

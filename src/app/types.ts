@@ -33,7 +33,8 @@ export interface RouteStats {
 }
 
 export interface RouteFilter {
-  month?: string; // YYYY-MM
+  year?: string; // YYYY
+  month?: string; // MM
   minDistance?: number; // km
   maxDistance?: number; // km
   type?: 'road' | 'trail' | 'mixed' | 'all'; // Filter by route type
