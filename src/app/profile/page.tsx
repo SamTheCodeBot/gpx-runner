@@ -52,6 +52,9 @@ export default function ProfilePage() {
   const [saving, setSaving]          = useState(false);
   const [saved, setSaved]             = useState(false);
   const [saveError, setSaveError]     = useState("");
+  const [stravaBusy, setStravaBusy] = useState(false);
+  const [stravaError, setStravaError] = useState("");
+  const [stravaStatus, setStravaStatus] = useState("");
 
   // Delete account two-step state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -64,6 +67,10 @@ export default function ProfilePage() {
       if (profile.avatar)     setAvatar(profile.avatar);
     }
   }, [profile]);
+
+  useEffect(() => {
+    setStravaStatus(new URLSearchParams(window.location.search).get("strava") || "");
+  }, []);
 
   const greeting  = profile?.displayName || profile?.username
     ? `Hey ${profile?.displayName || profile?.username}!`
@@ -119,6 +126,45 @@ export default function ProfilePage() {
   const handleDeleteConfirm = async () => {
     if (!deletePassword.trim()) return;
     await deleteAccount(user!.uid, deletePassword);
+  };
+
+  const handleConnectStrava = async () => {
+    if (!user) return;
+    setStravaBusy(true);
+    setStravaError("");
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/strava/connect", {
+        method: "POST",
+        headers: { authorization: `Bearer ${idToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Failed to start Strava connection");
+      window.location.href = data.url;
+    } catch (e: any) {
+      setStravaError(e?.message || "Failed to connect Strava");
+      setStravaBusy(false);
+    }
+  };
+
+  const handleDisconnectStrava = async () => {
+    if (!user) return;
+    if (!confirm("Disconnect Strava from your GPX running account?")) return;
+    setStravaBusy(true);
+    setStravaError("");
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/strava/disconnect", {
+        method: "POST",
+        headers: { authorization: `Bearer ${idToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to disconnect Strava");
+      window.location.href = "/profile?strava=disconnected";
+    } catch (e: any) {
+      setStravaError(e?.message || "Failed to disconnect Strava");
+      setStravaBusy(false);
+    }
   };
 
   if (!user || profileLoading) {
@@ -242,6 +288,67 @@ export default function ProfilePage() {
               {user.email}
             </div>
             <p className="text-[10px] text-on-surface-variant/60 mt-1">Email cannot be changed</p>
+          </div>
+
+          {/* Strava connection */}
+          <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-[#fc4c02]/10 flex items-center justify-center shrink-0">
+                <Icon name="directions_run" className="text-[#fc4c02] text-xl" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Strava</p>
+                <h2 className="text-sm font-extrabold text-on-surface mt-0.5">
+                  {profile?.strava ? "Connected to Strava" : "Connect to Strava"}
+                </h2>
+                <p className="text-xs text-on-surface-variant mt-1">
+                  {profile?.strava
+                    ? `Connected${profile.strava.athleteName ? ` as ${profile.strava.athleteName}` : ""}. Future sync can import runs from Strava.`
+                    : "Authorize Strava so GPX running can sync your runs later."}
+                </p>
+              </div>
+            </div>
+
+            {stravaStatus === "connected" && (
+              <div className="mt-3 px-3 py-2 bg-secondary-container text-secondary text-xs rounded-xl">
+                Strava connected.
+              </div>
+            )}
+            {stravaStatus === "disconnected" && (
+              <div className="mt-3 px-3 py-2 bg-surface-container text-on-surface-variant text-xs rounded-xl">
+                Strava disconnected.
+              </div>
+            )}
+            {["error", "denied", "scope"].includes(stravaStatus) && (
+              <div className="mt-3 px-3 py-2 bg-error-container text-error text-xs rounded-xl">
+                {stravaStatus === "scope"
+                  ? "Strava activity permission is required to connect."
+                  : stravaStatus === "denied"
+                    ? "Strava connection was cancelled."
+                    : "Could not connect Strava. Please try again."}
+              </div>
+            )}
+            {stravaError && (
+              <div className="mt-3 px-3 py-2 bg-error-container text-error text-xs rounded-xl">{stravaError}</div>
+            )}
+
+            {profile?.strava ? (
+              <button
+                onClick={handleDisconnectStrava}
+                disabled={stravaBusy}
+                className="mt-4 w-full py-3 border border-outline-variant rounded-xl text-sm font-bold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Disconnecting...</> : "Disconnect Strava"}
+              </button>
+            ) : (
+              <button
+                onClick={handleConnectStrava}
+                disabled={stravaBusy}
+                className="mt-4 w-full py-3 bg-[#fc4c02] text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Connecting...</> : "Connect to Strava"}
+              </button>
+            )}
           </div>
 
           {/* Stats */}

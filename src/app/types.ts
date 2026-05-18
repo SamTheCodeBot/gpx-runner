@@ -71,4 +71,14 @@ export interface UserProfile {
   userId?: string; // Firebase UID (stored in document)
   wishlisted?: string[]; // array of route IDs
   favorites?: string[]; // array of route IDs
+  strava?: {
+    athleteId: number;
+    athleteName?: string;
+    scope: string;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    connectedAt: string;
+    updatedAt: string;
+  };
 }
