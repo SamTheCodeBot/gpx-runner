@@ -50,7 +50,7 @@ function MapController({ routes, selectedRoute, suggestedRoute }: {
     } else if (routes.length > 0) {
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
-      fitKey = `all:${routes.length}`;
+      fitKey = `all:${routes.map((route) => route.id).sort().join("|")}`;
     } else {
       return;
     }

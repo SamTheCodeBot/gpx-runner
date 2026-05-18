@@ -38,11 +38,18 @@ export default function Home() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }>({});
+  const [filter, setFilter]                = useState<{ year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }>({});
   const [username, setUsername]             = useState("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
+  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
+  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
+  const listFilteredRoutes = useMemo(() => {
+    if (filter.list === "favorites") return routes.filter((route) => favorites.includes(route.id));
+    if (filter.list === "wishlist") return routes.filter((route) => wishlist.includes(route.id));
+    return routes;
+  }, [routes, filter.list, favorites, wishlist]);
+  const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   const stats = useMemo(() => {
@@ -57,8 +64,6 @@ export default function Home() {
     };
   }, [filteredRoutes]);
 
-  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
-  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
   const countryOptions = useMemo(() => (
     Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
   ), [routes]);
@@ -168,8 +173,11 @@ export default function Home() {
     // No-op — kept for compatibility with MapSection interface
   };
 
+  const getYearOptions = () =>
+    Array.from(new Set(routes.map((r) => r.date.substring(0, 4)).filter(Boolean))).sort().reverse();
+
   const getMonthOptions = () =>
-    Array.from(new Set(routes.map((r) => r.date.substring(0, 7)))).sort().reverse();
+    Array.from(new Set(routes.map((r) => r.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading) {
@@ -248,6 +256,7 @@ export default function Home() {
               filter={filter}
               setFilter={setFilter}
               setShowFilters={setShowFilters}
+              getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
               countryOptions={countryOptions}
               onSelectRoute={setSelectedRoute}

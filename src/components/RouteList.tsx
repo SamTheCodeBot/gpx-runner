@@ -11,9 +11,10 @@ interface RouteListProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showFilters: boolean;
-  filter: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" };
-  setFilter: (f: { month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }) => void;
+  filter: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" };
+  setFilter: (f: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" | "wishlist" }) => void;
   setShowFilters: (v: boolean) => void;
+  getYearOptions: () => string[];
   getMonthOptions: () => string[];
   countryOptions: string[];
   onSelectRoute: (r: GPXRoute | null) => void;
@@ -31,12 +32,12 @@ interface RouteListProps {
 
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
-  showFilters, filter, setFilter, setShowFilters, getMonthOptions,
+  showFilters, filter, setFilter, setShowFilters, getYearOptions, getMonthOptions,
   countryOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
   fileInputRef, onFileUpload, onRouteUpload, wishlist, favorites, onToggleFavorite, onToggleWishlist,
 }: RouteListProps) {
-  const hasActiveFilters = !!(filter.month || filter.type || filter.country || filter.list);
+  const hasActiveFilters = !!(filter.year || filter.month || filter.type || filter.country || filter.list);
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
 
   return (
@@ -105,7 +106,7 @@ export function RouteList({
             )}
           </div>
         ) : null}
-        {(filter.month || filter.type || filter.country || filter.list) && (
+        {(filter.year || filter.month || filter.type || filter.country || filter.list) && (
           <button
             onClick={() => setFilter({})}
             className="text-xs text-error font-medium hover:underline"
@@ -119,12 +120,20 @@ export function RouteList({
       {showFilters && (
         <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-3 mb-3 flex flex-wrap items-center gap-2 animate-fade-in">
           <select
+            value={filter.year || ""}
+            onChange={(e) => setFilter({ ...filter, year: e.target.value || undefined })}
+            className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
+          >
+            <option value="">All years</option>
+            {getYearOptions().map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+          <select
             value={filter.month || ""}
             onChange={(e) => setFilter({ ...filter, month: e.target.value || undefined })}
             className="px-3 py-1.5 bg-surface-container border border-outline-variant rounded-xl text-xs text-on-surface focus:outline-none"
           >
             <option value="">All months</option>
-            {getMonthOptions().map((m) => <option key={m} value={m}>{m}</option>)}
+            {getMonthOptions().map((m) => <option key={m} value={m}>{new Date(2000, Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "short" })}</option>)}
           </select>
           <select
             value={filter.type || "all"}
