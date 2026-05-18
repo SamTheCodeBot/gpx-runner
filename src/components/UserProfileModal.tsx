@@ -53,10 +53,10 @@ export function UserProfileModal({ user, profile, onSave, onClose }: UserProfile
   // Sync state when profile loads from Firestore
   useEffect(() => {
     if (profile) {
-      if (profile.displayName && profile.displayName !== displayName) {
+      if (profile.displayName) {
         setDisplayName(profile.displayName);
       }
-      if (profile.avatar && profile.avatar !== avatar) {
+      if (profile.avatar) {
         setAvatar(profile.avatar);
       }
     }
