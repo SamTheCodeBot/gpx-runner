@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebaseAdmin";
 import { createStravaState } from "@/lib/stravaState";
-import { getAppUrl } from "@/lib/strava";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +17,7 @@ export async function POST(req: NextRequest) {
     const clientId = process.env.STRAVA_CLIENT_ID;
     if (!clientId) throw new Error("Missing env var: STRAVA_CLIENT_ID");
 
-    const redirectUri = `${getAppUrl()}/api/strava/callback`;
+    const redirectUri = `${req.nextUrl.origin}/api/strava/callback`;
     const url = new URL("https://www.strava.com/oauth/authorize");
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);

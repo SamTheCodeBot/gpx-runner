@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { exchangeStravaCode, getAppUrl, stravaAthleteName } from "@/lib/strava";
+import { exchangeStravaCode, stravaAthleteName } from "@/lib/strava";
 import { verifyStravaState } from "@/lib/stravaState";
 
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ async function getProfileRef(uid: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const redirectBase = getAppUrl();
+  const redirectBase = req.nextUrl.origin;
 
   try {
     const { searchParams } = new URL(req.url);
