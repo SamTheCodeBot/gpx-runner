@@ -29,6 +29,34 @@ function routeRepeatFingerprint(route: GPXRoute): string {
   return [roundCoord(first), roundCoord(middle), roundCoord(last), distanceBucketKm].join("|");
 }
 
+function routeAreaKey(route: GPXRoute): string | null {
+  if (route.coordinates.length === 0) return null;
+  const lng = route.coordinates.reduce((sum, [lon]) => sum + lon, 0) / route.coordinates.length;
+  const lat = route.coordinates.reduce((sum, [, routeLat]) => sum + routeLat, 0) / route.coordinates.length;
+  return `${lat.toFixed(1)},${lng.toFixed(1)}`;
+}
+
+function routeStartHour(route: GPXRoute): number | null {
+  const time = route.samples?.find((sample) => sample.time)?.time ?? route.date;
+  const date = new Date(time);
+  if (Number.isNaN(date.valueOf())) return null;
+  return date.getHours();
+}
+
+function routeLooksRoundTrip(route: GPXRoute): boolean {
+  if (route.isRoundTrip) return true;
+  if (route.coordinates.length < 2) return false;
+  const [startLon, startLat] = route.coordinates[0];
+  const [endLon, endLat] = route.coordinates[route.coordinates.length - 1];
+  const toRad = (value: number) => value * Math.PI / 180;
+  const dLat = toRad(endLat - startLat);
+  const dLon = toRad(endLon - startLon);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(startLat)) * Math.cos(toRad(endLat)) * Math.sin(dLon / 2) ** 2;
+  const distanceM = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return distanceM <= Math.max(200, (route.distance || 0) * 0.03);
+}
+
 function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []): BadgeContext {
   const totalRuns = routes.length;
   const totalDistanceKm = routes.reduce((s, r) => s + (r.distance || 0) / 1000, 0);
@@ -81,6 +109,44 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
     routeFingerprints.set(fp, (routeFingerprints.get(fp) ?? 0) + 1);
   }
   const maxRunsOnSingleRoute = Math.max(...routeFingerprints.values(), 1);
+  const uniqueRouteFingerprints = routeFingerprints.size;
+  const distinctAreas = new Set(routes.map(routeAreaKey).filter(Boolean)).size;
+
+  const monthNumbers = new Set<number>();
+  const monthsByYear = new Map<number, Set<number>>();
+  const dateKeys = new Set<string>();
+  for (const route of routes) {
+    const datePart = route.date?.split("T")[0];
+    if (!datePart) continue;
+    const date = new Date(`${datePart}T00:00:00`);
+    if (Number.isNaN(date.valueOf())) continue;
+    dateKeys.add(datePart);
+    monthNumbers.add(date.getMonth());
+    const year = date.getFullYear();
+    const months = monthsByYear.get(year) ?? new Set<number>();
+    months.add(date.getMonth());
+    monthsByYear.set(year, months);
+  }
+
+  const hasWeekendPair = Array.from(dateKeys).some((dateKey) => {
+    const date = new Date(`${dateKey}T00:00:00`);
+    if (date.getDay() !== 6) return false;
+    const sunday = new Date(date);
+    sunday.setDate(date.getDate() + 1);
+    return dateKeys.has(sunday.toISOString().slice(0, 10));
+  });
+
+  const hasFullCalendarYear = Array.from(monthsByYear.values()).some((months) => months.size >= 12);
+  const hasWinterSeason = monthNumbers.has(11) && monthNumbers.has(0) && monthNumbers.has(1);
+  const hasSummerSeason = monthNumbers.has(5) && monthNumbers.has(6) && monthNumbers.has(7);
+  const earlyRuns = routes.filter((route) => {
+    const hour = routeStartHour(route);
+    return hour !== null && hour < 7;
+  }).length;
+  const nightRuns = routes.filter((route) => {
+    const hour = routeStartHour(route);
+    return hour !== null && hour >= 21;
+  }).length;
 
   return {
     totalRuns,
@@ -96,6 +162,16 @@ function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []
     totalCountries,
     currentStreak,
     longestStreak,
+    routesWithTcx: routes.filter((route) => route.hasTcx).length,
+    roundTripRuns: routes.filter(routeLooksRoundTrip).length,
+    uniqueRouteFingerprints,
+    distinctAreas,
+    hasWeekendPair,
+    hasFullCalendarYear,
+    hasWinterSeason,
+    hasSummerSeason,
+    earlyRuns,
+    nightRuns,
   };
 }
 
