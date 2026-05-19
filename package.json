@@ -17,6 +17,7 @@
     "axios": "^1.13.6",
     "fast-xml-parser": "^5.5.5",
     "firebase": "^12.10.0",
+    "firebase-admin": "^13.10.0",
     "leaflet": "^1.9.4",
     "next": "14.2.35",
     "react": "^18",
