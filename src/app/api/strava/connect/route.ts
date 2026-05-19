@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebaseAdmin";
+import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
 import { createStravaState } from "@/lib/stravaState";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing Firebase auth token" }, { status: 401 });
     }
 
-    const decoded = await adminAuth().verifyIdToken(idToken);
+    const decoded = await verifyFirebaseIdToken(idToken);
     const clientId = process.env.STRAVA_CLIENT_ID;
     if (!clientId) throw new Error("Missing env var: STRAVA_CLIENT_ID");
 

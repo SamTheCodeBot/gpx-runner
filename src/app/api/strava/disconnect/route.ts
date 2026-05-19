@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { adminDb } from "@/lib/firebaseAdmin";
+import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
 import { deauthorizeStrava, refreshStravaToken } from "@/lib/strava";
 import type { UserProfile } from "@/app/types";
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing Firebase auth token" }, { status: 401 });
     }
 
-    const decoded = await adminAuth().verifyIdToken(idToken);
+    const decoded = await verifyFirebaseIdToken(idToken);
     const profileDoc = await getProfileDoc(decoded.uid);
     if (!profileDoc) {
       return NextResponse.json({ ok: true });
