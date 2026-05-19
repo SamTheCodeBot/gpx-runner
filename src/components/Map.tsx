@@ -281,6 +281,24 @@ function sampleMetric(sample: NonNullable<GPXRoute["samples"]>[number], mode: "p
   return sample.paceMinPerKm > 0 ? 1 / sample.paceMinPerKm : null;
 }
 
+function metricRange(routes: GPXRoute[], mode: "pace" | "heart-rate" | "elevation"): { min: number; max: number } | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let count = 0;
+
+  for (const route of routes) {
+    for (const sample of route.samples || []) {
+      const value = sampleMetric(sample, mode);
+      if (value === null) continue;
+      if (value < min) min = value;
+      if (value > max) max = value;
+      count += 1;
+    }
+  }
+
+  return count > 0 ? { min, max } : null;
+}
+
 function PersonalMetricHeatmapCanvas({
   routes,
   enabled,
@@ -295,14 +313,10 @@ function PersonalMetricHeatmapCanvas({
   useEffect(() => {
     if (!enabled || routes.length === 0) return;
 
-    const values = routes
-      .flatMap((route) => route.samples || [])
-      .map((sample) => sampleMetric(sample, mode))
-      .filter((value): value is number => value !== null);
-    if (values.length === 0) return;
+    const range = metricRange(routes, mode);
+    if (!range) return;
 
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    const { min, max } = range;
     const canvas = L.DomUtil.create("canvas", "leaflet-heatmap-canvas") as HTMLCanvasElement;
     canvas.style.position = "absolute";
     canvas.style.pointerEvents = "none";
