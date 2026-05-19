@@ -6,7 +6,7 @@ export type StravaTokenResponse = {
   refresh_token: string;
   expires_at: number;
   expires_in: number;
-  athlete: {
+  athlete?: {
     id: number;
     username?: string;
     firstname?: string;
@@ -80,6 +80,18 @@ export async function deauthorizeStrava(accessToken: string): Promise<void> {
   }
 }
 
-export function stravaAthleteName(athlete: StravaTokenResponse["athlete"]): string | undefined {
+export async function stravaGet<T>(path: string, accessToken: string): Promise<T> {
+  const res = await fetch(`${STRAVA_API}${path}`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Strava API request failed: ${res.status} ${await res.text()}`);
+  }
+
+  return res.json();
+}
+
+export function stravaAthleteName(athlete: NonNullable<StravaTokenResponse["athlete"]>): string | undefined {
   return [athlete.firstname, athlete.lastname].filter(Boolean).join(" ") || athlete.username;
 }

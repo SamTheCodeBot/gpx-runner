@@ -23,6 +23,11 @@ export interface GPXRoute {
   startPoint?: [number, number];
   samples?: RouteMetricSample[];
   hasTcx?: boolean;
+  strava?: {
+    activityId: number;
+    sportType?: string;
+    syncedAt: string;
+  };
 }
 
 export interface RouteStats {

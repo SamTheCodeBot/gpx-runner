@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
 
     const { uid } = verifyStravaState(state);
     const token = await exchangeStravaCode(code);
+    if (!token.athlete) throw new Error("Strava token response missing athlete");
     const now = new Date().toISOString();
     const profileRef = await getProfileRef(uid);
 

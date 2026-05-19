@@ -36,14 +36,36 @@ export function useGPXRoutes(userId: string | null) {
     samples: undefined,
   }), []);
 
+  const compactRouteCache = useCallback((route: GPXRoute): GPXRoute => {
+    const maxCoordinates = 500;
+    if (route.coordinates.length <= maxCoordinates) return stripRouteCache(route);
+
+    const step = Math.ceil(route.coordinates.length / maxCoordinates);
+    return stripRouteCache({
+      ...route,
+      coordinates: route.coordinates.filter((_, index) => (
+        index === 0 || index === route.coordinates.length - 1 || index % step === 0
+      )),
+    });
+  }, [stripRouteCache]);
+
   const cacheRoutes = useCallback((routesToCache: GPXRoute[]) => {
+    const maxCacheBytes = 2_500_000;
     try {
-      localStorage.setItem("gpx-routes", JSON.stringify(routesToCache.map(stripRouteCache)));
+      const stripped = routesToCache.map(stripRouteCache);
+      let payload = JSON.stringify(stripped);
+      if (payload.length > maxCacheBytes) {
+        payload = JSON.stringify(routesToCache.slice(0, 50).map(compactRouteCache));
+      }
+      if (payload.length > maxCacheBytes) {
+        localStorage.removeItem("gpx-routes");
+        return;
+      }
+      localStorage.setItem("gpx-routes", payload);
     } catch (e) {
-      console.warn("Route cache exceeded localStorage quota; clearing cached routes.", e);
       localStorage.removeItem("gpx-routes");
     }
-  }, [stripRouteCache]);
+  }, [compactRouteCache, stripRouteCache]);
 
   const serializeRoute = useCallback((route: GPXRoute) => {
     const payload: any = {

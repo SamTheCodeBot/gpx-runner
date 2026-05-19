@@ -53,8 +53,10 @@ export default function ProfilePage() {
   const [saved, setSaved]             = useState(false);
   const [saveError, setSaveError]     = useState("");
   const [stravaBusy, setStravaBusy] = useState(false);
+  const [stravaSyncBusy, setStravaSyncBusy] = useState(false);
   const [stravaError, setStravaError] = useState("");
   const [stravaStatus, setStravaStatus] = useState("");
+  const [stravaSyncMessage, setStravaSyncMessage] = useState("");
 
   // Delete account two-step state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -164,6 +166,33 @@ export default function ProfilePage() {
     } catch (e: any) {
       setStravaError(e?.message || "Failed to disconnect Strava");
       setStravaBusy(false);
+    }
+  };
+
+  const handleSyncStrava = async () => {
+    if (!user) return;
+    setStravaSyncBusy(true);
+    setStravaError("");
+    setStravaSyncMessage("");
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/strava/sync", {
+        method: "POST",
+        headers: { authorization: `Bearer ${idToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to sync Strava runs");
+      const imported = Number(data.imported || 0);
+      const skipped = Number(data.skipped || 0);
+      setStravaSyncMessage(
+        imported > 0
+          ? `Imported ${imported} Strava run${imported === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} already imported or unsupported.` : ""}`
+          : "No new Strava runs found."
+      );
+    } catch (e: any) {
+      setStravaError(e?.message || "Failed to sync Strava runs");
+    } finally {
+      setStravaSyncBusy(false);
     }
   };
 
@@ -303,7 +332,7 @@ export default function ProfilePage() {
                 </h2>
                 <p className="text-xs text-on-surface-variant mt-1">
                   {profile?.strava
-                    ? `Connected${profile.strava.athleteName ? ` as ${profile.strava.athleteName}` : ""}. Future sync can import runs from Strava.`
+                    ? `Connected${profile.strava.athleteName ? ` as ${profile.strava.athleteName}` : ""}. Import recent Strava runs when you want to update My Routes.`
                     : "Authorize Strava so GPX running can sync your runs later."}
                 </p>
               </div>
@@ -331,15 +360,27 @@ export default function ProfilePage() {
             {stravaError && (
               <div className="mt-3 px-3 py-2 bg-error-container text-error text-xs rounded-xl">{stravaError}</div>
             )}
+            {stravaSyncMessage && (
+              <div className="mt-3 px-3 py-2 bg-secondary-container text-secondary text-xs rounded-xl">{stravaSyncMessage}</div>
+            )}
 
             {profile?.strava ? (
-              <button
-                onClick={handleDisconnectStrava}
-                disabled={stravaBusy}
-                className="mt-4 w-full py-3 border border-outline-variant rounded-xl text-sm font-bold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-              >
-                {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Disconnecting...</> : "Disconnect Strava"}
-              </button>
+              <div className="mt-4 grid grid-cols-1 gap-2">
+                <button
+                  onClick={handleSyncStrava}
+                  disabled={stravaSyncBusy || stravaBusy}
+                  className="w-full py-3 bg-[#fc4c02] text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {stravaSyncBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Syncing...</> : "Sync recent runs"}
+                </button>
+                <button
+                  onClick={handleDisconnectStrava}
+                  disabled={stravaBusy || stravaSyncBusy}
+                  className="w-full py-3 border border-outline-variant rounded-xl text-sm font-bold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Disconnecting...</> : "Disconnect Strava"}
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleConnectStrava}
