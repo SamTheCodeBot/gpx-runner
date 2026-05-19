@@ -54,6 +54,7 @@ export default function ProfilePage() {
   const [saveError, setSaveError]     = useState("");
   const [stravaBusy, setStravaBusy] = useState(false);
   const [stravaSyncBusy, setStravaSyncBusy] = useState(false);
+  const [stravaBackfillBusy, setStravaBackfillBusy] = useState(false);
   const [stravaError, setStravaError] = useState("");
   const [stravaStatus, setStravaStatus] = useState("");
   const [stravaSyncMessage, setStravaSyncMessage] = useState("");
@@ -169,30 +170,40 @@ export default function ProfilePage() {
     }
   };
 
-  const handleSyncStrava = async () => {
+  const handleSyncStrava = async (mode: "recent" | "backfill" = "recent") => {
     if (!user) return;
-    setStravaSyncBusy(true);
+    if (mode === "backfill") setStravaBackfillBusy(true);
+    else setStravaSyncBusy(true);
     setStravaError("");
     setStravaSyncMessage("");
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/strava/sync", {
         method: "POST",
-        headers: { authorization: `Bearer ${idToken}` },
+        headers: {
+          authorization: `Bearer ${idToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ mode }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to sync Strava runs");
       const imported = Number(data.imported || 0);
       const skipped = Number(data.skipped || 0);
+      const scanned = Number(data.scanned || 0);
+      const action = mode === "backfill" ? "history import" : "sync";
       setStravaSyncMessage(
         imported > 0
           ? `Imported ${imported} Strava run${imported === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} already imported or unsupported.` : ""}`
-          : "No new Strava runs found."
+          : scanned > 0
+            ? `No new Strava runs found in this ${action}.`
+            : "No Strava runs found."
       );
     } catch (e: any) {
       setStravaError(e?.message || "Failed to sync Strava runs");
     } finally {
-      setStravaSyncBusy(false);
+      if (mode === "backfill") setStravaBackfillBusy(false);
+      else setStravaSyncBusy(false);
     }
   };
 
@@ -332,7 +343,7 @@ export default function ProfilePage() {
                 </h2>
                 <p className="text-xs text-on-surface-variant mt-1">
                   {profile?.strava
-                    ? `Connected${profile.strava.athleteName ? ` as ${profile.strava.athleteName}` : ""}. Import recent Strava runs when you want to update My Routes.`
+                    ? `Connected${profile.strava.athleteName ? ` as ${profile.strava.athleteName}` : ""}. Import recent runs or backfill your Strava history.`
                     : "Authorize Strava so GPX running can sync your runs later."}
                 </p>
               </div>
@@ -367,15 +378,22 @@ export default function ProfilePage() {
             {profile?.strava ? (
               <div className="mt-4 grid grid-cols-1 gap-2">
                 <button
-                  onClick={handleSyncStrava}
-                  disabled={stravaSyncBusy || stravaBusy}
+                  onClick={() => handleSyncStrava("recent")}
+                  disabled={stravaSyncBusy || stravaBackfillBusy || stravaBusy}
                   className="w-full py-3 bg-[#fc4c02] text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
                 >
                   {stravaSyncBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Syncing...</> : "Sync recent runs"}
                 </button>
                 <button
+                  onClick={() => handleSyncStrava("backfill")}
+                  disabled={stravaSyncBusy || stravaBackfillBusy || stravaBusy}
+                  className="w-full py-3 bg-surface-container text-on-surface rounded-xl text-sm font-bold hover:bg-surface-high transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {stravaBackfillBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Importing...</> : "Import last 100 runs"}
+                </button>
+                <button
                   onClick={handleDisconnectStrava}
-                  disabled={stravaBusy || stravaSyncBusy}
+                  disabled={stravaBusy || stravaSyncBusy || stravaBackfillBusy}
                   className="w-full py-3 border border-outline-variant rounded-xl text-sm font-bold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
                 >
                   {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Disconnecting...</> : "Disconnect Strava"}

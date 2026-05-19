@@ -32,6 +32,36 @@ type StravaStreams = {
   distance?: StravaStream<number>;
 };
 
+type SyncMode = "recent" | "backfill";
+
+type SyncOptions = {
+  mode: SyncMode;
+  perPage: number;
+  maxPages: number;
+  targetRuns: number;
+  importLimit: number;
+};
+
+function syncOptions(mode: SyncMode): SyncOptions {
+  if (mode === "backfill") {
+    return {
+      mode,
+      perPage: 100,
+      maxPages: 5,
+      targetRuns: 100,
+      importLimit: 100,
+    };
+  }
+
+  return {
+    mode,
+    perPage: 30,
+    maxPages: 1,
+    targetRuns: 30,
+    importLimit: 20,
+  };
+}
+
 async function getProfileDoc(uid: string) {
   const db = adminDb();
   const snap = await db.collection("userProfiles").where("userId", "==", uid).limit(1).get();
@@ -131,8 +161,31 @@ function routeFromStrava(activity: StravaActivity, streams: StravaStreams, uid: 
   };
 }
 
+async function loadRunActivities(accessToken: string, options: SyncOptions): Promise<StravaActivity[]> {
+  const runs: StravaActivity[] = [];
+
+  for (let page = 1; page <= options.maxPages && runs.length < options.targetRuns; page += 1) {
+    const activities = await stravaGet<StravaActivity[]>(
+      `/athlete/activities?per_page=${options.perPage}&page=${page}`,
+      accessToken
+    );
+
+    if (!activities.length) break;
+
+    for (const activity of activities) {
+      if (isRun(activity)) runs.push(activity);
+      if (runs.length >= options.targetRuns) break;
+    }
+  }
+
+  return runs.slice(0, options.targetRuns);
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => ({}));
+    const mode: SyncMode = body?.mode === "backfill" ? "backfill" : "recent";
+    const options = syncOptions(mode);
     const authHeader = req.headers.get("authorization") ?? "";
     const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
     if (!idToken) {
@@ -177,12 +230,12 @@ export async function POST(req: NextRequest) {
       if (typeof data.distance === "number") existingDistanceMeters += data.distance;
     });
 
-    const activities = await stravaGet<StravaActivity[]>("/athlete/activities?per_page=30&page=1", accessToken);
-    const runActivities = activities.filter((activity) => isRun(activity) && !existingActivityIds.has(activity.id));
+    const runActivities = await loadRunActivities(accessToken, options);
+    const newRunActivities = runActivities.filter((activity) => !existingActivityIds.has(activity.id));
 
     const importedRoutes: GPXRoute[] = [];
     const skipped: { id: number; reason: string }[] = [];
-    for (const activity of runActivities.slice(0, 20)) {
+    for (const activity of newRunActivities.slice(0, options.importLimit)) {
       const streams = await stravaGet<StravaStreams>(
         `/activities/${activity.id}/streams?keys=time,distance,latlng,altitude,velocity_smooth,heartrate&key_by_type=true`,
         accessToken
@@ -208,8 +261,10 @@ export async function POST(req: NextRequest) {
     }, { merge: true });
 
     return NextResponse.json({
+      mode,
       imported: importedRoutes.length,
-      skipped: skipped.length + activities.filter((activity) => isRun(activity) && existingActivityIds.has(activity.id)).length,
+      skipped: skipped.length + runActivities.filter((activity) => existingActivityIds.has(activity.id)).length,
+      scanned: runActivities.length,
     });
   } catch (error) {
     console.error("[strava/sync]", error);
