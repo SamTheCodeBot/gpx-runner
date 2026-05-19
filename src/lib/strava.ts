@@ -21,6 +21,12 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function stravaTokenBody(params: Record<string, string>): URLSearchParams {
+  const body = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => body.set(key, value));
+  return body;
+}
+
 export function getAppUrl(): string {
   return requireEnv("NEXT_PUBLIC_APP_URL").replace(/\/$/, "");
 }
@@ -28,8 +34,8 @@ export function getAppUrl(): string {
 export async function exchangeStravaCode(code: string): Promise<StravaTokenResponse> {
   const res = await fetch("https://www.strava.com/oauth/token", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: stravaTokenBody({
       client_id: requireEnv("STRAVA_CLIENT_ID"),
       client_secret: requireEnv("STRAVA_CLIENT_SECRET"),
       code,
@@ -47,8 +53,8 @@ export async function exchangeStravaCode(code: string): Promise<StravaTokenRespo
 export async function refreshStravaToken(refreshToken: string): Promise<StravaTokenResponse> {
   const res = await fetch("https://www.strava.com/oauth/token", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: stravaTokenBody({
       client_id: requireEnv("STRAVA_CLIENT_ID"),
       client_secret: requireEnv("STRAVA_CLIENT_SECRET"),
       refresh_token: refreshToken,
@@ -77,4 +83,3 @@ export async function deauthorizeStrava(accessToken: string): Promise<void> {
 export function stravaAthleteName(athlete: StravaTokenResponse["athlete"]): string | undefined {
   return [athlete.firstname, athlete.lastname].filter(Boolean).join(" ") || athlete.username;
 }
-

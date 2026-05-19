@@ -2,6 +2,14 @@ import { cert, getApps, initializeApp, applicationDefault } from "firebase-admin
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
+function parseServiceAccountJson(value: string) {
+  const parsed = JSON.parse(value);
+  if (typeof parsed.private_key === "string") {
+    parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+  }
+  return parsed;
+}
+
 function getAdminApp() {
   const existing = getApps()[0];
   if (existing) return existing;
@@ -13,7 +21,7 @@ function getAdminApp() {
 
   if (serviceAccountJson) {
     return initializeApp({
-      credential: cert(JSON.parse(serviceAccountJson)),
+      credential: cert(parseServiceAccountJson(serviceAccountJson)),
     });
   }
 
@@ -31,4 +39,3 @@ function getAdminApp() {
 
 export const adminAuth = () => getAuth(getAdminApp());
 export const adminDb = () => getFirestore(getAdminApp());
-
