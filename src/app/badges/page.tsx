@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
-import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useRouteSummaries, useUserProfile, type RouteSummary } from "@/lib/hooks";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
 import { BADGE_DEFINITIONS, BadgeContext } from "@/lib/badges";
@@ -17,7 +17,9 @@ const TIER_CONFIG = {
   platinum: { label: "Platinum", bg: "bg-[#eef2ff]", border: "border-[#6366f1]/35", text: "text-[#4338ca]", iconBg: "bg-[#6366f1]", iconText: "text-white" },
 } as const;
 
-function routeRepeatFingerprint(route: GPXRoute): string {
+type BadgeRoute = GPXRoute | RouteSummary;
+
+function routeRepeatFingerprint(route: BadgeRoute): string {
   if (route.coordinates.length < 2) return route.name.trim().toLowerCase();
 
   const roundCoord = ([lng, lat]: [number, number]) => `${lat.toFixed(2)},${lng.toFixed(2)}`;
@@ -29,21 +31,21 @@ function routeRepeatFingerprint(route: GPXRoute): string {
   return [roundCoord(first), roundCoord(middle), roundCoord(last), distanceBucketKm].join("|");
 }
 
-function routeAreaKey(route: GPXRoute): string | null {
+function routeAreaKey(route: BadgeRoute): string | null {
   if (route.coordinates.length === 0) return null;
   const lng = route.coordinates.reduce((sum, [lon]) => sum + lon, 0) / route.coordinates.length;
   const lat = route.coordinates.reduce((sum, [, routeLat]) => sum + routeLat, 0) / route.coordinates.length;
   return `${lat.toFixed(1)},${lng.toFixed(1)}`;
 }
 
-function routeStartHour(route: GPXRoute): number | null {
-  const time = route.samples?.find((sample) => sample.time)?.time ?? route.date;
+function routeStartHour(route: BadgeRoute): number | null {
+  const time = ("samples" in route ? route.samples?.find((sample) => sample.time)?.time : undefined) ?? route.date;
   const date = new Date(time);
   if (Number.isNaN(date.valueOf())) return null;
   return date.getHours();
 }
 
-function routeLooksRoundTrip(route: GPXRoute): boolean {
+function routeLooksRoundTrip(route: BadgeRoute): boolean {
   if (route.isRoundTrip) return true;
   if (route.coordinates.length < 2) return false;
   const [startLon, startLat] = route.coordinates[0];
@@ -57,7 +59,7 @@ function routeLooksRoundTrip(route: GPXRoute): boolean {
   return distanceM <= Math.max(200, (route.distance || 0) * 0.03);
 }
 
-function computeBadgeContext(routes: GPXRoute[], _clubMemberships: string[] = []): BadgeContext {
+function computeBadgeContext(routes: BadgeRoute[], _clubMemberships: string[] = []): BadgeContext {
   const totalRuns = routes.length;
   const totalDistanceKm = routes.reduce((s, r) => s + (r.distance || 0) / 1000, 0);
   const totalElevationM = routes.reduce((s, r) => s + (r.elevationGain || 0), 0);
@@ -212,9 +214,11 @@ export default function BadgesPage() {
   const pendingUpload = pendingUploads[0] ?? null;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const { routes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
+  const { routes: routeSummaries } = useRouteSummaries(user?.uid ?? null);
+  const { routes: uploadRoutes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null, { loadRoutes: false });
   const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
 
+  const routes = routeSummaries;
   const ctx = useMemo(() => computeBadgeContext(routes, []), [routes]);
 
   const earnedIds = useMemo(() => {
@@ -245,14 +249,14 @@ export default function BadgesPage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    const newRoutes = await uploadFiles(files, routes);
+    const newRoutes = await uploadFiles(files, uploadRoutes);
     if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
     if (!gpxFiles.length) return;
-    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
+    const newRoutes = await uploadFiles(gpxFiles, uploadRoutes, tcxFiles);
     if (newRoutes.length > 0) setPendingUploads(newRoutes);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -260,7 +264,7 @@ export default function BadgesPage() {
   const acceptUpload = async (name: string, type: string) => {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
-    saveRoutes([...routes, named]);
+    saveRoutes([...uploadRoutes, named]);
     setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
       const { doc, updateDoc } = await import("firebase/firestore");

@@ -17,6 +17,7 @@ export interface GPXRoute {
   color: string;
   userId?: string; // Firebase user ID for cloud sync
   type?: 'road' | 'trail' | 'mixed'; // Route type tag
+  countries?: string[];
   isWishlisted?: boolean;
   isFavorite?: boolean;
   isRoundTrip?: boolean;
