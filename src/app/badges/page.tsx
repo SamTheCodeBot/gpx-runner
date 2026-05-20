@@ -309,10 +309,10 @@ export default function BadgesPage() {
         {/* Mobile header */}
         <header className="md:hidden h-14 bg-surface-container-lowest border-b border-outline-variant/10 flex items-center justify-between px-4 shrink-0 z-20">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary-container flex items-center justify-center">
-              <Icon name="sprint" filled className="text-on-primary-container text-sm" />
+            <div className="w-7 h-7 rounded-lg bg-[#eef2ff] border border-[#6366f1]/35 flex items-center justify-center">
+              <Icon name="emoji_events" filled className="text-[#4338ca] text-sm" />
             </div>
-            <span className="text-sm font-extrabold text-primary font-headline">GPX running</span>
+            <span className="text-sm font-extrabold text-primary font-headline">Achievement Badges</span>
           </div>
           <Link href="/" className="p-2 -mr-2 rounded-xl hover:bg-surface-container transition-colors">
             <Icon name="arrow_back" className="text-on-surface-variant text-xl" />
@@ -322,8 +322,8 @@ export default function BadgesPage() {
         <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
           {/* Header */}
           <div className="flex items-center gap-4 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
-              <Icon name="emoji_events" className="text-primary text-2xl" />
+            <div className="w-12 h-12 rounded-2xl bg-[#eef2ff] border border-[#6366f1]/35 flex items-center justify-center shrink-0 shadow-card">
+              <Icon name="emoji_events" filled className="text-[#4338ca] text-2xl" />
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-on-surface font-headline">Achievement Badges</h1>
