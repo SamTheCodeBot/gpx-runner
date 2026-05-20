@@ -105,6 +105,30 @@ function MapController({ routes, selectedRoute, suggestedRoute, fitAllRoutes = f
   return null;
 }
 
+function MapResizeHandler() {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    let frame = 0;
+    const invalidate = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => map.invalidateSize({ animate: false }));
+    };
+    const observer = new ResizeObserver(invalidate);
+
+    observer.observe(container);
+    invalidate();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [map]);
+
+  return null;
+}
+
 function calcDistance(coord1: [number, number], coord2: [number, number]): number {
   const R = 6371;
   const dLat = (coord2[1] - coord1[1]) * Math.PI / 180;
@@ -599,6 +623,7 @@ export default function Map({
       />
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
+      <MapResizeHandler />
       <MapEvents onMapClick={onMapClick} />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       {personalHeatmapMode === "frequency" ? (
