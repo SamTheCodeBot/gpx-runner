@@ -15,6 +15,8 @@ interface SidebarProps {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 export function UploadRoutePrompt({
@@ -233,7 +235,17 @@ export function UploadRoutePrompt({
   );
 }
 
-export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onRouteUpload }: SidebarProps) {
+export function Sidebar({
+  user,
+  profile,
+  profileLoading,
+  onLogout,
+  fileInputRef,
+  onFileUpload,
+  onRouteUpload,
+  collapsed = false,
+  onToggleCollapsed,
+}: SidebarProps) {
   const pathname = usePathname();
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
   const isActive = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -241,73 +253,96 @@ export function Sidebar({ user, profile, profileLoading, onLogout, fileInputRef,
   const displayName = profileLoading ? user?.email?.split("@")[0] || "Runner" : (profile?.displayName || user?.email?.split("@")[0]);
 
   return (
-    <aside className="hidden md:flex w-64 h-full bg-primary text-on-primary flex-col shrink-0 overflow-hidden">
+    <aside className={`hidden md:flex ${collapsed ? "w-20" : "w-64"} h-full bg-primary text-on-primary flex-col shrink-0 overflow-visible transition-all duration-300 ease-out relative`}>
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        className="absolute -right-4 top-6 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-primary-container text-on-primary shadow-card hover:opacity-90 transition-opacity"
+        title={collapsed ? "Expand menu" : "Collapse menu"}
+        aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+      >
+        <Icon name={collapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
+      </button>
+
       {/* Logo area */}
-      <div className="p-6">
-        <div className="flex items-center gap-3 mb-1">
+      <div className={collapsed ? "px-4 py-6" : "p-6"}>
+        <div className={`flex items-center gap-3 mb-1 ${collapsed ? "justify-center" : ""}`}>
           <div className="w-9 h-9 rounded-xl bg-primary-container flex items-center justify-center shrink-0">
             <Icon name="sprint" filled className="text-on-primary-container text-xl" />
           </div>
-          <h1 className="text-xl font-extrabold tracking-tight font-headline text-on-primary">GPX running</h1>
+          {!collapsed && <h1 className="text-xl font-extrabold tracking-tight font-headline text-on-primary">GPX running</h1>}
         </div>
-        <p className="text-[10px] text-on-primary-container/80 font-medium">Every run, mapped out</p>
+        {!collapsed && <p className="text-[10px] text-on-primary-container/80 font-medium">Every run, mapped out</p>}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+      <nav className={`flex-1 ${collapsed ? "px-3" : "px-3"} py-2 space-y-0.5 overflow-y-auto`}>
 
         {/* Core nav */}
-        <Link href="/" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+        <Link
+          href="/"
+          className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl transition-colors ${isActive("/") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}
+          title="My Routes"
+        >
           <Icon name="route" filled={isActive("/")} className="text-base" />
-          <span className="font-semibold text-sm">My Routes</span>
+          {!collapsed && <span className="font-semibold text-sm">My Routes</span>}
         </Link>
         {/* Divider */}
         <div className="my-3 border-t border-white/10" />
 
         {/* Heatmap & badges — fun extras */}
-        <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
+        {!collapsed && <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>}
 
-        <Link href="/heatmaps" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+        <Link
+          href="/heatmaps"
+          className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}
+          title="Personal Heatmaps"
+        >
           <Icon name="whatshot" filled={isActive("/heatmaps")} className="text-base" />
-          <div>
+          {!collapsed && <div>
             <span className="font-semibold text-sm">Personal Heatmaps</span>
             <span className="block text-[10px] text-on-primary/50">Route layers</span>
-          </div>
+          </div>}
         </Link>
 
-        <a className="flex items-center gap-3 px-4 py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors" href="/badges">
+        <a
+          className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors`}
+          href="/badges"
+          title="Badges"
+        >
           <Icon name="emoji_events" className="text-base" />
-          <div>
+          {!collapsed && <div>
             <span className="font-semibold text-sm">Badges</span>
             <span className="block text-[10px] text-on-primary/50">Collect achievements</span>
-          </div>
+          </div>}
         </a>
 
       </nav>
 
       {/* Upload route button */}
-      <div className="px-4 mb-2">
+      <div className={`${collapsed ? "px-3" : "px-4"} mb-2`}>
         <button
           type="button"
           onClick={() => onRouteUpload ? setShowUploadPrompt(true) : fileInputRef.current?.click()}
           className="w-full bg-primary-container text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer"
+          title="Upload route"
         >
           <Icon name="add" className="text-sm" />
-          Upload route
+          {!collapsed && "Upload route"}
         </button>
         <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
       </div>
 
       {/* User section */}
-      <div className="px-5 py-5 border-t border-white/10 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className={`${collapsed ? "px-3 py-5 flex-col gap-3" : "px-5 py-5"} border-t border-white/10 flex items-center justify-between`}>
+        <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
           <span className={`material-symbols-outlined text-2xl text-on-primary transition-opacity ${profileLoading ? "opacity-30 animate-pulse" : ""}`}>{avatarIcon}</span>
-          <div className="min-w-0">
+          {!collapsed && <div className="min-w-0">
             <p className="text-sm font-bold text-on-primary truncate">{displayName}</p>
             <p className="text-[10px] text-on-primary-container/80 uppercase tracking-wider">Runner</p>
-          </div>
+          </div>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className={`flex items-center gap-1 ${collapsed ? "flex-col" : ""}`}>
           <Link
             href="/profile"
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"

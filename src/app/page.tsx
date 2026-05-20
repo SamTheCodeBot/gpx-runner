@@ -40,6 +40,8 @@ export default function Home() {
   const [showFilters, setShowFilters]      = useState(false);
   const [filter, setFilter]                = useState<{ year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }>({});
   const [username, setUsername]             = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [routesPanelCollapsed, setRoutesPanelCollapsed] = useState(false);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
@@ -208,6 +210,8 @@ export default function Home() {
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
         onRouteUpload={handleRouteUpload}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
       />
 
       {/* Main content */}
@@ -237,7 +241,9 @@ export default function Home() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none">
+          <div
+            className={`flex-1 overflow-y-auto px-4 pt-5 pb-4 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none transition-all duration-300 ease-out ${routesPanelCollapsed ? "md:flex-none md:w-0 md:p-0 md:opacity-0 md:pointer-events-none" : "md:p-6 md:opacity-100"}`}
+          >
 
             <StatsBar stats={stats} />
 
@@ -266,7 +272,7 @@ export default function Home() {
           </div>
 
           {/* ── Map panel ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
+          <div className={`w-full order-1 md:order-none relative transition-all duration-300 ease-out ${routesPanelCollapsed ? "md:flex-1" : "md:w-1/2 md:shrink-0"}`}>
             {/* Floating search overlay on mobile */}
             {mobileSearchOpen && (
               <div className="absolute top-2 left-2 right-2 z-30 flex items-center gap-2 md:hidden">
@@ -286,6 +292,16 @@ export default function Home() {
                 </button>
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setRoutesPanelCollapsed((collapsed) => !collapsed)}
+              className="hidden md:flex absolute top-6 left-0 z-30 h-10 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-primary shadow-card hover:bg-surface-container transition-colors"
+              title={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+              aria-label={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+            >
+              <Icon name={routesPanelCollapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
+            </button>
 
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
