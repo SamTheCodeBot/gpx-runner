@@ -44,6 +44,8 @@ export default function PersonalHeatmapsPage() {
   const [routeMonth, setRouteMonth] = useState("");
   const [routeCountry, setRouteCountry] = useState("");
   const [activeHeatmap, setActiveHeatmap] = useState<HeatmapMode>("frequency");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [heatmapPanelCollapsed, setHeatmapPanelCollapsed] = useState(false);
 
   const { routes, saveRoutes, uploadFiles, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
@@ -195,6 +197,8 @@ export default function PersonalHeatmapsPage() {
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
         onRouteUpload={handleRouteUpload}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
@@ -211,7 +215,9 @@ export default function PersonalHeatmapsPage() {
         </header>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none">
+          <div
+            className={`flex-1 overflow-y-auto px-4 pt-5 pb-4 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none transition-all duration-300 ease-out ${heatmapPanelCollapsed ? "md:flex-none md:w-0 md:p-0 md:opacity-0 md:pointer-events-none" : "md:p-6 md:opacity-100"}`}
+          >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
                 <Icon name="whatshot" className="text-primary text-xl" />
@@ -345,7 +351,28 @@ export default function PersonalHeatmapsPage() {
             </div>
           </div>
 
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
+          <div className={`w-full order-1 md:order-none relative transition-all duration-300 ease-out ${heatmapPanelCollapsed ? "md:flex-1" : "md:w-1/2 md:shrink-0"}`}>
+            {heatmapPanelCollapsed ? (
+              <button
+                type="button"
+                onClick={() => setHeatmapPanelCollapsed(false)}
+                className={`fixed top-20 ${sidebarCollapsed ? "left-16" : "left-60"} z-50 hidden h-10 w-8 items-center justify-center rounded-full bg-surface-container-lowest text-primary shadow-card ring-1 ring-outline-variant/25 hover:bg-surface-container transition-colors md:flex`}
+                title="Show heatmap controls"
+                aria-label="Show heatmap controls"
+              >
+                <Icon name="chevron_right" className="text-lg" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setHeatmapPanelCollapsed(true)}
+                className="absolute top-6 left-0 z-30 hidden h-10 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-surface-container-lowest text-primary shadow-card ring-1 ring-outline-variant/25 hover:bg-surface-container transition-colors md:flex"
+                title="Hide heatmap controls"
+                aria-label="Hide heatmap controls"
+              >
+                <Icon name="chevron_left" className="text-lg" />
+              </button>
+            )}
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
                 routes={filteredRoutes}

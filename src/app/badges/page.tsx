@@ -210,6 +210,7 @@ export default function BadgesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
   const pendingUpload = pendingUploads[0] ?? null;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { routes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
   const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
@@ -300,6 +301,8 @@ export default function BadgesPage() {
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
         onRouteUpload={handleRouteUpload}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
