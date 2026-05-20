@@ -296,7 +296,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setRoutesPanelCollapsed((collapsed) => !collapsed)}
-              className={`hidden md:flex absolute z-30 h-10 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-primary shadow-card hover:bg-surface-container transition-all ${routesPanelCollapsed ? "top-20 left-0 w-8 -translate-x-1/2" : "top-6 left-0 w-8 -translate-x-1/2"}`}
+              className={`hidden md:flex absolute z-30 h-10 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-primary shadow-card hover:bg-surface-container transition-all ${routesPanelCollapsed ? "top-20 left-2 w-8" : "top-6 left-0 w-8 -translate-x-1/2"}`}
               title={routesPanelCollapsed ? "Show route list" : "Hide route list"}
               aria-label={routesPanelCollapsed ? "Show route list" : "Hide route list"}
             >
