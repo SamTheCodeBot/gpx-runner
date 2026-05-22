@@ -120,20 +120,23 @@ function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; active
 
   useEffect(() => {
     const canvasEl = canvasRef.current;
-    if (!canvasEl) return;
+    if (!canvasEl) { console.log("[Map] no canvas yet"); return; }
     const filtered = activeType === "all" ? routes : routes.filter((r) => r.type === activeType);
+    console.log("[Map] rendering", filtered.length, "routes, activeType=", activeType, "canvas size:", canvasEl.width, "x", canvasEl.height);
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
     const W = canvasEl.width;
     const H = canvasEl.height;
     ctx.clearRect(0, 0, W, H);
     if (filtered.length === 0) {
+      console.log("[Map] no routes to draw");
       ctx.fillStyle = "rgb(99, 115, 139)";
       ctx.font = "14px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("No routes for this filter", W / 2, H / 2);
       return;
     }
+    console.log("[Map] coordinate bounds: lat", minLat, "-", maxLat, "lon", minLon, "-", maxLon);
     let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
     for (const route of filtered) {
       for (const [, lat] of route.coordinates) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat; }
@@ -178,7 +181,7 @@ function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; active
 
   return (
     <div className="relative rounded-2xl overflow-hidden bg-[#1e222f]">
-      <canvas ref={canvasRef} width={900} height={540} className="w-full h-64 sm:h-80 md:h-96 object-cover" />
+      <canvas ref={canvasRef} width={900} height={540} className="w-full h-full" />
       <div className="absolute bottom-3 left-3 flex items-center gap-3 bg-surface-container/80 backdrop-blur-sm rounded-xl px-3 py-1.5">
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.road}} /><span className="text-[9px] font-medium text-on-surface-variant">Road</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.trail}} /><span className="text-[9px] font-medium text-on-surface-variant">Trail</span></div>
@@ -271,6 +274,10 @@ function DashboardView({ user }: { user: User }) {
         </div>
         {loadingRoutes ? (
           <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl animate-pulse" />
+        ) : routes.length === 0 ? (
+          <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl flex items-center justify-center">
+            <p className="text-on-surface-variant text-sm">No routes found in database</p>
+          </div>
         ) : (
           <RouteMapCanvas routes={routes} activeType={activeType} />
         )}
