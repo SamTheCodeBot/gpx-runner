@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
-import { signInWithEmailAndPassword, signOut, User } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Icon } from "@/components/ui";
 import { AdminSidebar } from "@/components/AdminSidebar";
@@ -35,14 +35,7 @@ interface UserSummary {
 
 const ADMIN_EMAIL = "mago@osterhult.com";
 const SESSION_KEY = "cc_admin_token";
-
-const TYPE_COLORS: Record<string, string> = {
-  road: "rgb(255 65 164)",
-  trail: "rgb(18 221 251)",
-  mixed: "rgb(197 45 255)",
-};
-
-// ─── Login Screen ─────────────────────────────────────────────────────────────
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
 function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail] = useState("");
@@ -95,12 +88,12 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
             </div>
             <div>
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" required
                 className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <button type="submit" disabled={loading}
               className="w-full py-3 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
-              {loading ? "Signing in…" : "Sign in"}
+              {loading ? "Signing in\u2026" : "Sign in"}
             </button>
           </form>
         </div>
@@ -108,8 +101,6 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
     </div>
   );
 }
-
-// ─── Stat Card ───────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, unit, icon }: { label: string; value: string; unit?: string; icon: string }) {
   return (
@@ -126,8 +117,6 @@ function StatCard({ label, value, unit, icon }: { label: string; value: string; 
     </div>
   );
 }
-
-// ─── Routes View (Dashboard renamed) ─────────────────────────────────────────
 
 function RoutesView({ user }: { user: User }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -182,7 +171,6 @@ function RoutesView({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
         {loadingStats ? (
           <>{[...Array(5)].map((_, i) => (<div key={i} className="bg-surface-container rounded-xl px-3 py-2.5 animate-pulse h-16" />))}</>
@@ -199,7 +187,6 @@ function RoutesView({ user }: { user: User }) {
         )}
       </div>
 
-      {/* Map with filters */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-extrabold text-on-surface">Route Map</h2>
@@ -215,8 +202,8 @@ function RoutesView({ user }: { user: User }) {
         {loadingRoutes ? (
           <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl animate-pulse" />
         ) : (
-          <div className="rounded-2xl overflow-hidden bg-[#111113]" style={{ height: "min(520px, 55vh)" }}>
-            <MapAdmin routes={filteredRoutes} />
+          <div className="rounded-2xl overflow-hidden bg-[#f4f4f5]" style={{ height: "min(560px, 70vh)" }}>
+            <MapAdmin routes={filteredRoutes} darkMode={false} clusteringEnabled={true} />
           </div>
         )}
         <p className="text-[10px] text-on-surface-variant mt-1.5 text-right">
@@ -225,11 +212,7 @@ function RoutesView({ user }: { user: User }) {
       </div>
     </div>
   );
-}
-
-// ─── Users View ──────────────────────────────────────────────────────────────
-
-function UsersView({ user }: { user: User }) {
+}function UsersView({ user }: { user: User }) {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [deletedRouteCount, setDeletedRouteCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -323,11 +306,48 @@ function UsersView({ user }: { user: User }) {
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
-
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
   const [activeView, setActiveView] = useState<string>("routes");
+  const [authChecked, setAuthChecked] = useState(false);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth!, async (firebaseUser) => {
+      if (firebaseUser && firebaseUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        setUser(firebaseUser);
+        const idToken = await firebaseUser.getIdToken();
+        sessionStorage.setItem(SESSION_KEY, idToken);
+        lastActivityRef.current = Date.now();
+      } else {
+        setUser(null);
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+      setAuthChecked(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > SESSION_TIMEOUT_MS) {
+        signOut(auth!);
+        sessionStorage.removeItem(SESSION_KEY);
+        setUser(null);
+      }
+    }, 60000);
+    const resetTimer = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener("touchstart", resetTimer);
+    window.addEventListener("click", resetTimer);
+    window.addEventListener("keypress", resetTimer);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("touchstart", resetTimer);
+      window.removeEventListener("click", resetTimer);
+      window.removeEventListener("keypress", resetTimer);
+    };
+  }, [user]);
 
   const handleLogin = (u: User) => setUser(u);
 
@@ -336,6 +356,19 @@ export default function CrewCaptainPage() {
     sessionStorage.removeItem(SESSION_KEY);
     setUser(null);
   };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center">
+            <Icon name="shield" filled className="text-on-primary-container text-2xl" />
+          </div>
+          <p className="text-sm text-on-surface-variant">Loading…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) return <AdminLogin onLogin={handleLogin} />;
 
