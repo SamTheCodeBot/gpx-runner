@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Icon } from "@/components/ui";
+import { AdminSidebar } from "@/components/AdminSidebar";
 
 interface AdminStats {
   registeredUsers: number;
@@ -21,13 +22,15 @@ interface RouteSummary {
 }
 
 const ADMIN_EMAIL = "mago@osterhult.com";
-const SESSION_KEY = "crewcaptain_token";
+const SESSION_KEY = "cc_admin_token";
 
 const TYPE_COLORS: Record<string, string> = {
   road: "rgb(255 65 164)",
   trail: "rgb(18 221 251)",
   mixed: "rgb(197 45 255)",
 };
+
+// ─── Login Screen ─────────────────────────────────────────────────────────────
 
 function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail] = useState("");
@@ -59,7 +62,7 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-3 mb-8 justify-center">
           <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center">
-            <span className="material-symbols-outlined filled text-on-primary-container text-2xl">shield</span>
+            <Icon name="shield" filled className="text-on-primary-container text-2xl" />
           </div>
           <div>
             <h1 className="text-2xl font-extrabold text-primary font-headline tracking-tight">Crew Captain</h1>
@@ -93,6 +96,8 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
     </div>
   );
 }
+
+// ─── Dashboard View ─────────────────────────────────────────────────────────
 
 function StatCard({ label, value, unit, icon }: { label: string; value: string; unit?: string; icon: string }) {
   return (
@@ -185,7 +190,7 @@ function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; active
   );
 }
 
-function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+function DashboardView({ user }: { user: User }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
   const [activeType, setActiveType] = useState<string>("all");
@@ -209,7 +214,6 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   };
 
   useEffect(() => {
-    if (!user) return;
     const getIdToken = async () => {
       const idToken = await user.getIdToken();
       sessionStorage.setItem(SESSION_KEY, idToken);
@@ -217,7 +221,7 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
     };
     getIdToken();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, []);
 
   const handleTypeChange = async (type: string) => {
     setActiveType(type);
@@ -226,67 +230,126 @@ function AdminDashboard({ user, onLogout }: { user: User; onLogout: () => void }
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-20 bg-surface-container border-b border-outline-variant/20 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-primary-container flex items-center justify-center">
-            <Icon name="shield" filled className="text-on-primary-container text-base" />
-          </div>
-          <div>
-            <h1 className="text-base font-extrabold text-primary font-headline">Crew Captain</h1>
-            <p className="text-[9px] text-on-surface-variant uppercase tracking-wider">Admin Dashboard</p>
-          </div>
-        </div>
-        <button onClick={onLogout}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-medium transition-colors">
-          <Icon name="logout" className="text-sm" />
-          Sign out
-        </button>
-      </header>
-      <div className="max-w-6xl mx-auto p-4 space-y-5">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {loadingStats ? (
-            <>{[...Array(5)].map((_, i) => (<div key={i} className="bg-surface-container rounded-xl px-3 py-2.5 animate-pulse h-16" />))}</>
-          ) : stats ? (
-            <>
-              <StatCard label="Registered Users" value={String(stats.registeredUsers)} icon="group" />
-              <StatCard label="Total Routes" value={String(stats.totalRoutes)} icon="route" />
-              <StatCard label="Road" value={String(stats.roadRoutes)} icon="directions_run" />
-              <StatCard label="Trail" value={String(stats.trailRoutes)} icon="terrain" />
-              <StatCard label="Mixed" value={String(stats.mixedRoutes)} icon="all_inclusive" />
-            </>
-          ) : (
-            <p className="col-span-5 text-sm text-on-surface-variant text-center py-4">Failed to load stats.</p>
-          )}
+    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
+      <div className="flex items-center gap-4 mb-6">
+        <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0 shadow-card">
+          <Icon name="dashboard" filled className="text-on-primary-container text-2xl" />
         </div>
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-extrabold text-on-surface">Route Map</h2>
-            <div className="flex items-center gap-1.5">
-              {["all", "road", "trail", "mixed"].map((type) => (
-                <button key={type} onClick={() => handleTypeChange(type)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${activeType === type ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"}`}>
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-          {loadingRoutes ? (
-            <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl animate-pulse" />
-          ) : (
-            <RouteMapCanvas routes={routes} activeType={activeType} />
-          )}
-          <p className="text-[10px] text-on-surface-variant mt-1.5 text-right">
-            {routes.length} route{routes.length !== 1 ? "s" : ""} shown{activeType !== "all" ? ` (${activeType})` : ""}
-          </p>
+          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Dashboard</h1>
+          <p className="text-sm text-on-surface-variant">Platform overview and statistics</p>
         </div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+        {loadingStats ? (
+          <>{[...Array(5)].map((_, i) => (<div key={i} className="bg-surface-container rounded-xl px-3 py-2.5 animate-pulse h-16" />))}</>
+        ) : stats ? (
+          <>
+            <StatCard label="Registered Users" value={String(stats.registeredUsers)} icon="group" />
+            <StatCard label="Total Routes" value={String(stats.totalRoutes)} icon="route" />
+            <StatCard label="Road" value={String(stats.roadRoutes)} icon="directions_run" />
+            <StatCard label="Trail" value={String(stats.trailRoutes)} icon="terrain" />
+            <StatCard label="Mixed" value={String(stats.mixedRoutes)} icon="all_inclusive" />
+          </>
+        ) : (
+          <p className="col-span-5 text-sm text-on-surface-variant text-center py-4">Failed to load stats.</p>
+        )}
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-extrabold text-on-surface">Route Map</h2>
+          <div className="flex items-center gap-1.5">
+            {["all", "road", "trail", "mixed"].map((type) => (
+              <button key={type} onClick={() => handleTypeChange(type)}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${activeType === type ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"}`}>
+                {type}
+              </button>
+            ))}
+          </div>
+        </div>
+        {loadingRoutes ? (
+          <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl animate-pulse" />
+        ) : (
+          <RouteMapCanvas routes={routes} activeType={activeType} />
+        )}
+        <p className="text-[10px] text-on-surface-variant mt-1.5 text-right">
+          {routes.length} route{routes.length !== 1 ? "s" : ""} shown{activeType !== "all" ? ` (${activeType})` : ""}
+        </p>
       </div>
     </div>
   );
 }
 
+// ─── Routes View ─────────────────────────────────────────────────────────────
+
+function RoutesView({ user }: { user: User }) {
+  const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeType, setActiveType] = useState<string>("all");
+
+  useEffect(() => {
+    const load = async () => {
+      const idToken = await user.getIdToken();
+      const url = activeType === "all" ? "/api/crewcaptain/routes" : `/api/crewcaptain/routes?type=${activeType}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setRoutes(data.routes || []);
+      }
+      setLoading(false);
+    };
+    load();
+  }, [activeType, user]);
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
+      <div className="flex items-center gap-4 mb-6">
+        <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0 shadow-card">
+          <Icon name="map" filled className="text-on-primary-container text-2xl" />
+        </div>
+        <div>
+          <h1 className="text-2xl
+          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Routes</h1>
+          <p className="text-sm text-on-surface-variant">All uploaded routes</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 mb-4">
+        {["all", "road", "trail", "mixed"].map((type) => (
+          <button key={type} onClick={() => setActiveType(type)}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${activeType === type ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"}`}>
+            {type}
+          </button>
+        ))}
+      </div>
+      {loading ? (
+        <div className="h-64 bg-surface-container rounded-2xl animate-pulse" />
+      ) : (
+        <div className="space-y-2">
+          {routes.map((route) => (
+            <div key={route.id} className="bg-surface-container rounded-xl px-3 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center border border-outline-variant/20" style={{backgroundColor: TYPE_COLORS[route.type] + "33"}}>
+                  <Icon name="route" className="text-on-surface-variant text-base" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
+                  <p className="text-[10px] text-on-surface-variant uppercase">{route.type}</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-on-surface-variant">{route.coordinates.length} pts</p>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-[10px] text-on-surface-variant mt-3 text-right">{routes.length} route{routes.length !== 1 ? "s" : ""} total</p>
+    </div>
+  );
+}
+
+// Main Page
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [activeView, setActiveView] = useState<string>("dashboard");
 
   useEffect(() => {
     if (auth?.currentUser && auth.currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
@@ -303,5 +366,14 @@ export default function CrewCaptainPage() {
   };
 
   if (!user) return <AdminLogin onLogin={handleLogin} />;
-  return <AdminDashboard user={user} onLogout={handleLogout} />;
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-background">
+      <AdminSidebar user={user} activeView={activeView} onViewChange={setActiveView} onLogout={handleLogout} />
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {activeView === "dashboard" && <DashboardView user={user} />}
+        {activeView === "routes" && <RoutesView user={user} />}
+      </main>
+    </div>
+  );
 }
