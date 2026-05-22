@@ -293,27 +293,15 @@ export default function Home() {
               </div>
             )}
 
-            {routesPanelCollapsed ? (
-              <button
-                type="button"
-                onClick={() => setRoutesPanelCollapsed(false)}
-                className={`fixed top-20 ${sidebarCollapsed ? "left-16" : "left-60"} z-50 hidden h-10 w-8 items-center justify-center rounded-full bg-surface-container-lowest text-primary shadow-card ring-1 ring-outline-variant/25 hover:bg-surface-container transition-colors md:flex`}
-                title="Show route list"
-                aria-label="Show route list"
-              >
-                <Icon name="chevron_right" className="text-lg" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setRoutesPanelCollapsed(true)}
-                className="absolute top-6 left-0 z-30 hidden h-10 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-surface-container-lowest text-primary shadow-card ring-1 ring-outline-variant/25 hover:bg-surface-container transition-colors md:flex"
-                title="Hide route list"
-                aria-label="Hide route list"
-              >
-                <Icon name="chevron_left" className="text-lg" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setRoutesPanelCollapsed((collapsed) => !collapsed)}
+              className="hidden md:flex absolute top-6 left-0 z-30 h-10 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-primary shadow-card hover:bg-surface-container transition-colors"
+              title={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+              aria-label={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+            >
+              <Icon name={routesPanelCollapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
+            </button>
 
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
