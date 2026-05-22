@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Icon } from "@/components/ui";
 import { AdminSidebar } from "@/components/AdminSidebar";
+
+const MapAdmin = dynamic(() => import("@/components/MapAdmin"), { ssr: false });
 
 interface AdminStats {
   registeredUsers: number;
@@ -19,6 +22,15 @@ interface RouteSummary {
   name: string;
   type: "road" | "trail" | "mixed";
   coordinates: [number, number][];
+}
+
+interface UserSummary {
+  id: string;
+  username: string;
+  email: string;
+  routeCount: number;
+  stravaConnected: boolean;
+  isAdmin: boolean;
 }
 
 const ADMIN_EMAIL = "mago@osterhult.com";
@@ -46,7 +58,7 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
       const cred = await signInWithEmailAndPassword(auth!, email, password);
       if (cred.user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
         await signOut(auth!);
-        setError("Access denied \u2014 not an admin account.");
+        setError("Access denied — not an admin account.");
         return;
       }
       onLogin(cred.user);
@@ -71,7 +83,7 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
         </div>
         <div className="bg-surface-container-lowest rounded-3xl shadow-lg p-6">
           <h2 className="text-lg font-extrabold text-primary mb-1">Sign in</h2>
-          <p className="text-xs text-on-surface-variant mb-5">Restricted access \u2014 crew only</p>
+          <p className="text-xs text-on-surface-variant mb-5">Restricted access — crew only</p>
           {error && (
             <div className="mb-3 px-3 py-2 bg-error-container rounded-xl text-xs font-medium text-error">{error}</div>
           )}
@@ -83,12 +95,12 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
             </div>
             <div>
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" required
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required
                 className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <button type="submit" disabled={loading}
               className="w-full py-3 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
-              {loading ? "Signing in\u2026" : "Sign in"}
+              {loading ? "Signing in…" : "Sign in"}
             </button>
           </form>
         </div>
@@ -97,7 +109,7 @@ function AdminLogin({ onLogin }: { onLogin: (user: User) => void }) {
   );
 }
 
-// ─── Dashboard View ─────────────────────────────────────────────────────────
+// ─── Stat Card ───────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, unit, icon }: { label: string; value: string; unit?: string; icon: string }) {
   return (
@@ -115,87 +127,9 @@ function StatCard({ label, value, unit, icon }: { label: string; value: string; 
   );
 }
 
-function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; activeType: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+// ─── Routes View (Dashboard renamed) ─────────────────────────────────────────
 
-  useEffect(() => {
-    const canvasEl = canvasRef.current;
-    if (!canvasEl) { console.log("[Map] no canvas yet"); return; }
-    const filtered = activeType === "all" ? routes : routes.filter((r) => r.type === activeType);
-
-    const ctx = canvasEl.getContext("2d");
-    if (!ctx) return;
-    const W = canvasEl.width;
-    const H = canvasEl.height;
-    ctx.clearRect(0, 0, W, H);
-    if (filtered.length === 0) {
-  
-      ctx.fillStyle = "rgb(99, 115, 139)";
-      ctx.font = "14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("No routes for this filter", W / 2, H / 2);
-      return;
-    }
-
-    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-    for (const route of filtered) {
-      for (const [, lat] of route.coordinates) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat; }
-      for (const [lon] of route.coordinates) { if (lon < minLon) minLon = lon; if (lon > maxLon) maxLon = lon; }
-    }
-    const pad = 0.02;
-    minLat -= pad; maxLat += pad; minLon -= pad; maxLon += pad;
-    ctx.fillStyle = "rgb(30, 34, 47)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 10; i++) {
-      const x = (i / 10) * W; const y = (i / 10) * H;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-    const project = (lon: number, lat: number): [number, number] => {
-      return [(lon - minLon) / (maxLon - minLon) * W, (maxLat - lat) / (maxLat - minLat) * H];
-    };
-    for (const route of filtered) {
-      const color = TYPE_COLORS[route.type] || TYPE_COLORS.road;
-      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.8; ctx.lineJoin = "round"; ctx.lineCap = "round";
-      ctx.beginPath();
-      const coords = route.coordinates;
-      if (coords.length > 0) {
-        const [sx, sy] = project(coords[0][0], coords[0][1]); ctx.moveTo(sx, sy);
-        for (let i = 1; i < coords.length; i++) { const [x, y] = project(coords[i][0], coords[i][1]); ctx.lineTo(x, y); }
-      }
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    for (const route of filtered) {
-      const coords = route.coordinates;
-      if (coords.length === 0) continue;
-      const [sx, sy] = project(coords[0][0], coords[0][1]);
-      const [ex, ey] = project(coords[coords.length - 1][0], coords[coords.length - 1][1]);
-      ctx.fillStyle = "rgb(74, 222, 128)"; ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgb(255, 82, 82)"; ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
-    }
-  }, [routes, activeType]);
-
-
-  return (
-    <div className="relative rounded-2xl overflow-hidden bg-[#1e222f]">
-      <canvas ref={canvasRef} width={900} height={540} className="w-full h-full" />
-      <div className="absolute bottom-3 left-3 flex items-center gap-3 bg-surface-container/80 backdrop-blur-sm rounded-xl px-3 py-1.5">
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.road}} /><span className="text-[9px] font-medium text-on-surface-variant">Road</span></div>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.trail}} /><span className="text-[9px] font-medium text-on-surface-variant">Trail</span></div>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.mixed}} /><span className="text-[9px] font-medium text-on-surface-variant">Mixed</span></div>
-        <div className="ml-1 flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-green-400" /><span className="text-[9px] font-medium text-on-surface-variant">Start</span>
-          <div className="w-2.5 h-2.5 rounded-full bg-red-400 ml-1" /><span className="text-[9px] font-medium text-on-surface-variant">End</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DashboardView({ user }: { user: User }) {
+function RoutesView({ user }: { user: User }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
   const [activeType, setActiveType] = useState<string>("all");
@@ -234,6 +168,8 @@ function DashboardView({ user }: { user: User }) {
     await loadRoutes(idToken, type);
   };
 
+  const filteredRoutes = activeType === "all" ? routes : routes.filter((r) => r.type === activeType);
+
   return (
     <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
       <div className="flex items-center gap-4 mb-6">
@@ -241,10 +177,12 @@ function DashboardView({ user }: { user: User }) {
           <Icon name="dashboard" filled className="text-on-primary-container text-2xl" />
         </div>
         <div>
-          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Dashboard</h1>
+          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Routes</h1>
           <p className="text-sm text-on-surface-variant">Platform overview and statistics</p>
         </div>
       </div>
+
+      {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
         {loadingStats ? (
           <>{[...Array(5)].map((_, i) => (<div key={i} className="bg-surface-container rounded-xl px-3 py-2.5 animate-pulse h-16" />))}</>
@@ -260,6 +198,8 @@ function DashboardView({ user }: { user: User }) {
           <p className="col-span-5 text-sm text-on-surface-variant text-center py-4">Failed to load stats.</p>
         )}
       </div>
+
+      {/* Map with filters */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-extrabold text-on-surface">Route Map</h2>
@@ -274,128 +214,20 @@ function DashboardView({ user }: { user: User }) {
         </div>
         {loadingRoutes ? (
           <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl animate-pulse" />
-        ) : routes.length === 0 ? (
-          <div className="h-64 sm:h-80 md:h-96 bg-surface-container rounded-2xl flex items-center justify-center">
-            <p className="text-on-surface-variant text-sm">No routes found in database</p>
-          </div>
         ) : (
-          <RouteMapCanvas routes={routes} activeType={activeType} />
+          <div className="rounded-2xl overflow-hidden bg-[#111113]" style={{ height: "min(520px, 55vh)" }}>
+            <MapAdmin routes={filteredRoutes} />
+          </div>
         )}
         <p className="text-[10px] text-on-surface-variant mt-1.5 text-right">
-          {routes.length} route{routes.length !== 1 ? "s" : ""} shown{activeType !== "all" ? ` (${activeType})` : ""}
+          {filteredRoutes.length} route{filteredRoutes.length !== 1 ? "s" : ""} shown{activeType !== "all" ? ` (${activeType})` : ""}
         </p>
       </div>
     </div>
   );
 }
 
-// ─── Routes View ─────────────────────────────────────────────────────────────
-
-function RoutesView({ user }: { user: User }) {
-  const [routes, setRoutes] = useState<RouteSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeType, setActiveType] = useState<string>("all");
-
-  useEffect(() => {
-    const load = async () => {
-      const idToken = await user.getIdToken();
-      const url = activeType === "all" ? "/api/crewcaptain/routes" : `/api/crewcaptain/routes?type=${activeType}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
-      if (res.ok) {
-        const data = await res.json();
-        setRoutes(data.routes || []);
-      }
-      setLoading(false);
-    };
-    load();
-  }, [activeType, user]);
-
-  return (
-    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-4">
-        <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0 shadow-card">
-          <Icon name="map" filled className="text-on-primary-container text-2xl" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Routes</h1>
-          <p className="text-sm text-on-surface-variant">All uploaded routes on the platform</p>
-        </div>
-      </div>
-
-      {/* Filter buttons */}
-      <div className="flex items-center gap-1.5 mb-4">
-        {["all", "road", "trail", "mixed"].map((type) => (
-          <button key={type} onClick={() => setActiveType(type)}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${activeType === type ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"}`}>
-            {type}
-          </button>
-        ))}
-        <span className="ml-auto text-[10px] text-on-surface-variant">{routes.length} route{routes.length !== 1 ? "s" : ""}</span>
-      </div>
-
-      {/* Route list */}
-      {loading ? (
-        <div className="h-40 bg-surface-container rounded-2xl animate-pulse mb-4" />
-      ) : routes.length === 0 ? (
-        <div className="h-40 bg-surface-container rounded-2xl flex items-center justify-center mb-4">
-          <p className="text-on-surface-variant text-sm">No routes found</p>
-        </div>
-      ) : (
-        <div className="bg-surface-container rounded-xl overflow-hidden mb-4">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-outline-variant/20">
-                <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Name</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Type</th>
-                <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              {routes.map((route) => (
-                <tr key={route.id} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-high/50 transition-colors">
-                  <td className="px-3 py-2.5">
-                    <span className="font-semibold text-on-surface truncate block max-w-xs">{route.name}</span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{backgroundColor: TYPE_COLORS[route.type]}} />
-                      <span className="text-[10px] font-bold uppercase">{route.type}</span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-on-surface-variant text-xs">{route.coordinates.length}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Map */}
-      <div className="rounded-2xl overflow-hidden bg-[#1e222f]" style={{minHeight: "400px"}}>
-        {loading ? (
-          <div className="h-80 bg-surface-container animate-pulse" />
-        ) : (
-          <RouteMapCanvas routes={routes} activeType={activeType} />
-        )}
-      </div>
-      <p className="text-[10px] text-on-surface-variant mt-2 text-right">
-        Showing {routes.length} route{routes.length !== 1 ? "s" : ""}{activeType !== "all" ? ` (${activeType})` : ""}
-      </p>
-    </div>
-  );
-}
-
-// ─── Users View ────────────────────────────────────────────────────────────
-
-interface UserSummary {
-  id: string;
-  username: string;
-  email: string;
-  routeCount: number;
-  stravaConnected: boolean;
-  isAdmin: boolean;
-}
+// ─── Users View ──────────────────────────────────────────────────────────────
 
 function UsersView({ user }: { user: User }) {
   const [users, setUsers] = useState<UserSummary[]>([]);
@@ -450,7 +282,7 @@ function UsersView({ user }: { user: User }) {
                 {users.map((u) => (
                   <tr key={u.id} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-high/50 transition-colors">
                     <td className="px-3 py-2.5">
-                      <span className={`font-semibold ${u.username !== "Unknown" ? "text-on-surface" : "text-on-surface-variant italic"}`}>{u.username || "Unknown"}</span>
+                      <span className={`font-semibold ${u.username && u.username !== "Unknown" ? "text-on-surface" : "text-on-surface-variant italic"}`}>{u.username || "Unknown"}</span>
                     </td>
                     <td className="px-3 py-2.5 text-on-surface-variant text-xs">{u.email || <span className="italic">No email</span>}</td>
                     <td className="px-3 py-2.5 text-right">
@@ -477,12 +309,8 @@ function UsersView({ user }: { user: User }) {
                     <td className="px-3 py-2.5 text-right">
                       <span className="font-bold text-on-surface-variant">{deletedRouteCount}</span>
                     </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant/40">\u2014</span>
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant/40">\u2014</span>
-                    </td>
+                    <td className="px-3 py-2.5 text-center">—</td>
+                    <td className="px-3 py-2.5 text-center">—</td>
                   </tr>
                 )}
               </tbody>
@@ -495,18 +323,12 @@ function UsersView({ user }: { user: User }) {
   );
 }
 
-// Main Page
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<string>("routes");
 
-  useEffect(() => {
-    if (auth?.currentUser && auth.currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-      setUser(auth.currentUser);
-    }
-  }, []);
-
-  const handleLogin = (newUser: User) => setUser(newUser);
+  const handleLogin = (u: User) => setUser(u);
 
   const handleLogout = async () => {
     await signOut(auth!);
@@ -515,6 +337,8 @@ export default function CrewCaptainPage() {
   };
 
   if (!user) return <AdminLogin onLogin={handleLogin} />;
+
+  const [activeView, setActiveView] = useState<string>("routes");
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
