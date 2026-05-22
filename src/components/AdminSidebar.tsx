@@ -17,6 +17,7 @@ export function AdminSidebar({ user, activeView, onViewChange, onLogout }: Admin
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard", sublabel: "Stats overview" },
     { id: "routes", label: "Routes", icon: "map", sublabel: "All uploaded routes" },
+    { id: "users", label: "Users", icon: "group", sublabel: "Registered users" },
   ];
 
   const isActive = (id: string) => activeView === id;

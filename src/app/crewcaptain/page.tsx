@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Icon } from "@/components/ui";
@@ -116,9 +116,10 @@ function StatCard({ label, value, unit, icon }: { label: string; value: string; 
 }
 
 function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; activeType: string }) {
-  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    const canvasEl = canvasRef.current;
     if (!canvasEl) return;
     const filtered = activeType === "all" ? routes : routes.filter((r) => r.type === activeType);
     const ctx = canvasEl.getContext("2d");
@@ -172,11 +173,12 @@ function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; active
       ctx.fillStyle = "rgb(74, 222, 128)"; ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "rgb(255, 82, 82)"; ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
     }
-  }, [canvasEl, routes, activeType]);
+  }, [routes, activeType]);
+
 
   return (
     <div className="relative rounded-2xl overflow-hidden bg-[#1e222f]">
-      <canvas ref={(node) => setCanvasEl(node)} width={900} height={540} className="w-full h-64 sm:h-80 md:h-96 object-cover" />
+      <canvas ref={canvasRef} width={900} height={540} className="w-full h-64 sm:h-80 md:h-96 object-cover" />
       <div className="absolute bottom-3 left-3 flex items-center gap-3 bg-surface-container/80 backdrop-blur-sm rounded-xl px-3 py-1.5">
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.road}} /><span className="text-[9px] font-medium text-on-surface-variant">Road</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: TYPE_COLORS.trail}} /><span className="text-[9px] font-medium text-on-surface-variant">Trail</span></div>
@@ -308,7 +310,6 @@ function RoutesView({ user }: { user: User }) {
           <Icon name="map" filled className="text-on-primary-container text-2xl" />
         </div>
         <div>
-          <h1 className="text-2xl
           <h1 className="text-2xl font-extrabold text-on-surface font-headline">Routes</h1>
           <p className="text-sm text-on-surface-variant">All uploaded routes</p>
         </div>
@@ -346,6 +347,96 @@ function RoutesView({ user }: { user: User }) {
   );
 }
 
+// ─── Users View ────────────────────────────────────────────────────────────
+
+interface UserSummary {
+  id: string;
+  username: string;
+  email: string;
+  routeCount: number;
+  stravaConnected: boolean;
+  isAdmin: boolean;
+}
+
+function UsersView({ user }: { user: User }) {
+  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/crewcaptain/users", { headers: { Authorization: `Bearer ${idToken}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data.users || []);
+      }
+      setLoading(false);
+    };
+    load();
+  }, [user]);
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
+      <div className="flex items-center gap-4 mb-6">
+        <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0 shadow-card">
+          <Icon name="group" filled className="text-on-primary-container text-2xl" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-extrabold text-on-surface font-headline">Users</h1>
+          <p className="text-sm text-on-surface-variant">Registered users on the platform</p>
+        </div>
+      </div>
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-16 bg-surface-container rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="bg-surface-container rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-outline-variant/20">
+                  <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Username</th>
+                  <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Email</th>
+                  <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Routes</th>
+                  <th className="px-3 py-2.5 text-center text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Strava</th>
+                  <th className="px-3 py-2.5 text-center text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Admin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-high/50 transition-colors">
+                    <td className="px-3 py-2.5">
+                      <span className="font-semibold text-on-surface">{u.username}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-on-surface-variant text-xs">{u.email}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="font-bold text-primary">{u.routeCount}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold ${u.stravaConnected ? "bg-green-400/20 text-green-400" : "bg-surface-container-high text-on-surface-variant/50"}`}>
+                        {u.stravaConnected ? "Y" : "N"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold ${u.isAdmin ? "bg-primary/20 text-primary" : "bg-surface-container-high text-on-surface-variant/50"}`}>
+                        {u.isAdmin ? "Y" : "N"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-on-surface-variant mt-3 text-right">{users.length} user{users.length !== 1 ? "s" : ""} total</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Main Page
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -373,6 +464,7 @@ export default function CrewCaptainPage() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {activeView === "dashboard" && <DashboardView user={user} />}
         {activeView === "routes" && <RoutesView user={user} />}
+        {activeView === "users" && <UsersView user={user} />}
       </main>
     </div>
   );
