@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
 
     const db = adminDb();
 
-    const snap = await db.collection("userProfiles").limit(500).get();
+    // Exclude the "deleted" shadow user profile used for orphaned routes
+    const snap = await db.collection("userProfiles").where("userId", "!=", "deleted").limit(500).get();
 
     const allRoutesSnap = await db.collection("routes").count().get();
     const totalRouteCount = allRoutesSnap.data().count ?? 0;
