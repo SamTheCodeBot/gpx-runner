@@ -327,6 +327,7 @@ function UsersView({ user }: { user: User }) {
 
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [activeView, setActiveView] = useState<string>("routes");
 
   const handleLogin = (u: User) => setUser(u);
 
@@ -337,8 +338,6 @@ export default function CrewCaptainPage() {
   };
 
   if (!user) return <AdminLogin onLogin={handleLogin} />;
-
-  const [activeView, setActiveView] = useState<string>("routes");
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
