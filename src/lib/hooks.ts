@@ -5,7 +5,7 @@ import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } 
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
-import { routeHasCountry } from "@/lib/countries";
+import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 export interface RouteFilter {
@@ -24,7 +24,80 @@ export interface RouteStats {
   totalTime: number;
 }
 
-export function useGPXRoutes(userId: string | null) {
+export type RouteSummary = Pick<
+  GPXRoute,
+  | "id"
+  | "name"
+  | "date"
+  | "distance"
+  | "elevationGain"
+  | "duration"
+  | "color"
+  | "userId"
+  | "type"
+  | "isRoundTrip"
+  | "countries"
+  | "hasTcx"
+  | "strava"
+> & {
+  coordinates: [number, number][];
+};
+
+function routeCountriesFromData(data: any, coordinates: [number, number][] = []): string[] | undefined {
+  if (Array.isArray(data?.countries) && data.countries.length > 0) {
+    const countries = data.countries.filter((country: unknown): country is string => typeof country === "string");
+    return Array.from(new Set<string>(countries)).sort((a, b) => a.localeCompare(b));
+  }
+  if (!coordinates.length) return undefined;
+  return routeCountryNames({ coordinates });
+}
+
+function summarizeRoute(route: GPXRoute): RouteSummary {
+  return {
+    id: route.id,
+    name: route.name,
+    date: route.date,
+    distance: route.distance,
+    elevationGain: route.elevationGain,
+    duration: route.duration,
+    color: route.color,
+    userId: route.userId,
+    type: route.type,
+    isRoundTrip: route.isRoundTrip,
+    countries: route.countries?.length ? route.countries : routeCountryNames(route),
+    hasTcx: route.hasTcx,
+    strava: route.strava,
+    coordinates: [],
+  };
+}
+
+function deserializeRouteSummary(id: string, data: any): RouteSummary {
+  const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
+  const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
+  const countryCoordinates = rawCoordinates
+    .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
+    .map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]);
+
+  return {
+    id,
+    name: data.name || "Untitled route",
+    date: data.date || new Date(0).toISOString(),
+    distance: typeof data.distance === "number" ? data.distance : 0,
+    elevationGain: typeof data.elevationGain === "number" ? data.elevationGain : 0,
+    duration: data.duration,
+    color: data.color || "#fc4c02",
+    userId: data.userId,
+    type: data.type,
+    isRoundTrip: data.isRoundTrip,
+    countries: routeCountriesFromData(data, countryCoordinates),
+    hasTcx: data.hasTcx,
+    strava: data.strava,
+    coordinates: [],
+  };
+}
+
+export function useGPXRoutes(userId: string | null, options: { loadRoutes?: boolean } = {}) {
+  const loadRoutes = options.loadRoutes ?? true;
   const isStorageObjectNotFound = (error: unknown) => {
     const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
     const message = error instanceof Error ? error.message : "";
@@ -52,6 +125,7 @@ export function useGPXRoutes(userId: string | null) {
   const cacheRoutes = useCallback((routesToCache: GPXRoute[]) => {
     const maxCacheBytes = 2_500_000;
     try {
+      localStorage.setItem("gpx-route-summaries", JSON.stringify(routesToCache.map(summarizeRoute)));
       const stripped = routesToCache.map(stripRouteCache);
       let payload = JSON.stringify(stripped);
       if (payload.length > maxCacheBytes) {
@@ -70,6 +144,7 @@ export function useGPXRoutes(userId: string | null) {
   const serializeRoute = useCallback((route: GPXRoute) => {
     const payload: any = {
       ...route,
+      countries: route.countries?.length ? route.countries : routeCountryNames(route),
       coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
     };
 
@@ -95,19 +170,29 @@ export function useGPXRoutes(userId: string | null) {
     return payload;
   }, []);
 
-  const deserializeRoute = useCallback((id: string, data: any): GPXRoute => ({
-    ...data,
-    id,
-    coordinates: data.coordinates.map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]),
-    samples: Array.isArray(data.samples)
-      ? data.samples.map((sample: any) => ({
-          ...sample,
-          coordinate: Array.isArray(sample.coordinate)
-            ? sample.coordinate
-            : [sample.coordinate.lon, sample.coordinate.lat],
-        }))
-      : undefined,
-  } as GPXRoute), []);
+  const deserializeRoute = useCallback((id: string, data: any): GPXRoute => {
+    const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
+    const coordinates = rawCoordinates.map((c) => [c.lon, c.lat] as [number, number]);
+    const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
+    const countryCoordinates = rawCoordinates
+      .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
+      .map((c) => [c.lon, c.lat] as [number, number]);
+
+    return {
+      ...data,
+      id,
+      coordinates,
+      countries: routeCountriesFromData(data, countryCoordinates),
+      samples: Array.isArray(data.samples)
+        ? data.samples.map((sample: any) => ({
+            ...sample,
+            coordinate: Array.isArray(sample.coordinate)
+              ? sample.coordinate
+              : [sample.coordinate.lon, sample.coordinate.lat],
+          }))
+        : undefined,
+    } as GPXRoute;
+  }, []);
 
   const mergeMetricSamples = useCallback((parsed: ReturnType<typeof parseGPXFile>, tcxText?: string): GPXRoute["samples"] => {
     const samples = parsed.samples.map((sample) => ({
@@ -155,6 +240,7 @@ export function useGPXRoutes(userId: string | null) {
 
   // Load from localStorage on mount
   useEffect(() => {
+    if (!loadRoutes) return;
     const stored = localStorage.getItem("gpx-routes");
     if (stored) {
       try {
@@ -162,11 +248,12 @@ export function useGPXRoutes(userId: string | null) {
         if (Array.isArray(parsed)) setRoutes(parsed);
       } catch {}
     }
-  }, []);
+  }, [loadRoutes]);
 
   // Sync from Firestore when user is available — always overwrite local state
   // so a new user never sees another account's routes from localStorage
   useEffect(() => {
+    if (!loadRoutes) return;
     if (!userId) {
       setRoutes([]);
       return;
@@ -191,7 +278,7 @@ export function useGPXRoutes(userId: string | null) {
       }
     };
     load();
-  }, [userId, deserializeRoute, cacheRoutes]);
+  }, [userId, deserializeRoute, cacheRoutes, loadRoutes]);
 
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
     cacheRoutes(newRoutes);
@@ -324,6 +411,54 @@ export function useGPXRoutes(userId: string | null) {
   );
 
   return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading };
+}
+
+export function useRouteSummaries(userId: string | null) {
+  const [routes, setRoutes] = useState<RouteSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const cacheSummaries = useCallback((summaries: RouteSummary[]) => {
+    try {
+      localStorage.setItem("gpx-route-summaries", JSON.stringify(summaries));
+    } catch {
+      localStorage.removeItem("gpx-route-summaries");
+    }
+  }, []);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("gpx-route-summaries");
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) setRoutes(parsed);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!userId) {
+      setRoutes([]);
+      return;
+    }
+    const load = async () => {
+      if (!db) return;
+      setLoading(true);
+      try {
+        const q = query(collection(db, "routes"), where("userId", "==", userId));
+        const snap = await getDocs(q);
+        const summaries = snap.docs.map((d) => deserializeRouteSummary(d.id, d.data()));
+        summaries.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
+        setRoutes(summaries);
+        cacheSummaries(summaries);
+      } catch (e) {
+        console.error("Firestore summary load error", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [userId, cacheSummaries]);
+
+  return { routes, loading };
 }
 
 export function useRouteStats(routes: GPXRoute[]) {
