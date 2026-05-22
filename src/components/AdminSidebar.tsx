@@ -15,8 +15,7 @@ export function AdminSidebar({ user, activeView, onViewChange, onLogout }: Admin
   const [collapsed, setCollapsed] = useState(false);
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: "dashboard", sublabel: "Stats overview" },
-    { id: "routes", label: "Routes", icon: "map", sublabel: "All uploaded routes" },
+    { id: "routes", label: "Routes", icon: "map", sublabel: "All routes overview" },
     { id: "users", label: "Users", icon: "group", sublabel: "Registered users" },
   ];
 

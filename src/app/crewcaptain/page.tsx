@@ -122,21 +122,21 @@ function RouteMapCanvas({ routes, activeType }: { routes: RouteSummary[]; active
     const canvasEl = canvasRef.current;
     if (!canvasEl) { console.log("[Map] no canvas yet"); return; }
     const filtered = activeType === "all" ? routes : routes.filter((r) => r.type === activeType);
-    console.log("[Map] rendering", filtered.length, "routes, activeType=", activeType, "canvas size:", canvasEl.width, "x", canvasEl.height);
+
     const ctx = canvasEl.getContext("2d");
     if (!ctx) return;
     const W = canvasEl.width;
     const H = canvasEl.height;
     ctx.clearRect(0, 0, W, H);
     if (filtered.length === 0) {
-      console.log("[Map] no routes to draw");
+  
       ctx.fillStyle = "rgb(99, 115, 139)";
       ctx.font = "14px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("No routes for this filter", W / 2, H / 2);
       return;
     }
-    console.log("[Map] coordinate bounds: lat", minLat, "-", maxLat, "lon", minLon, "-", maxLon);
+
     let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
     for (const route of filtered) {
       for (const [, lat] of route.coordinates) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat; }
@@ -312,15 +312,18 @@ function RoutesView({ user }: { user: User }) {
 
   return (
     <div className="flex-1 overflow-y-auto px-4 pt-6 pb-8 custom-scrollbar">
-      <div className="flex items-center gap-4 mb-6">
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-4">
         <div className="w-12 h-12 rounded-2xl bg-primary-container flex items-center justify-center shrink-0 shadow-card">
           <Icon name="map" filled className="text-on-primary-container text-2xl" />
         </div>
         <div>
           <h1 className="text-2xl font-extrabold text-on-surface font-headline">Routes</h1>
-          <p className="text-sm text-on-surface-variant">All uploaded routes</p>
+          <p className="text-sm text-on-surface-variant">All uploaded routes on the platform</p>
         </div>
       </div>
+
+      {/* Filter buttons */}
       <div className="flex items-center gap-1.5 mb-4">
         {["all", "road", "trail", "mixed"].map((type) => (
           <button key={type} onClick={() => setActiveType(type)}
@@ -328,28 +331,57 @@ function RoutesView({ user }: { user: User }) {
             {type}
           </button>
         ))}
+        <span className="ml-auto text-[10px] text-on-surface-variant">{routes.length} route{routes.length !== 1 ? "s" : ""}</span>
       </div>
+
+      {/* Route list */}
       {loading ? (
-        <div className="h-64 bg-surface-container rounded-2xl animate-pulse" />
+        <div className="h-40 bg-surface-container rounded-2xl animate-pulse mb-4" />
+      ) : routes.length === 0 ? (
+        <div className="h-40 bg-surface-container rounded-2xl flex items-center justify-center mb-4">
+          <p className="text-on-surface-variant text-sm">No routes found</p>
+        </div>
       ) : (
-        <div className="space-y-2">
-          {routes.map((route) => (
-            <div key={route.id} className="bg-surface-container rounded-xl px-3 py-2.5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center border border-outline-variant/20" style={{backgroundColor: TYPE_COLORS[route.type] + "33"}}>
-                  <Icon name="route" className="text-on-surface-variant text-base" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
-                  <p className="text-[10px] text-on-surface-variant uppercase">{route.type}</p>
-                </div>
-              </div>
-              <p className="text-[10px] text-on-surface-variant">{route.coordinates.length} pts</p>
-            </div>
-          ))}
+        <div className="bg-surface-container rounded-xl overflow-hidden mb-4">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-outline-variant/20">
+                <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Name</th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Type</th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              {routes.map((route) => (
+                <tr key={route.id} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-high/50 transition-colors">
+                  <td className="px-3 py-2.5">
+                    <span className="font-semibold text-on-surface truncate block max-w-xs">{route.name}</span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{backgroundColor: TYPE_COLORS[route.type]}} />
+                      <span className="text-[10px] font-bold uppercase">{route.type}</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-on-surface-variant text-xs">{route.coordinates.length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-      <p className="text-[10px] text-on-surface-variant mt-3 text-right">{routes.length} route{routes.length !== 1 ? "s" : ""} total</p>
+
+      {/* Map */}
+      <div className="rounded-2xl overflow-hidden bg-[#1e222f]" style={{minHeight: "400px"}}>
+        {loading ? (
+          <div className="h-80 bg-surface-container animate-pulse" />
+        ) : (
+          <RouteMapCanvas routes={routes} activeType={activeType} />
+        )}
+      </div>
+      <p className="text-[10px] text-on-surface-variant mt-2 text-right">
+        Showing {routes.length} route{routes.length !== 1 ? "s" : ""}{activeType !== "all" ? ` (${activeType})` : ""}
+      </p>
     </div>
   );
 }
@@ -367,6 +399,7 @@ interface UserSummary {
 
 function UsersView({ user }: { user: User }) {
   const [users, setUsers] = useState<UserSummary[]>([]);
+  const [deletedRouteCount, setDeletedRouteCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -376,6 +409,7 @@ function UsersView({ user }: { user: User }) {
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
+        setDeletedRouteCount(data.deletedRouteCount || 0);
       }
       setLoading(false);
     };
@@ -416,24 +450,41 @@ function UsersView({ user }: { user: User }) {
                 {users.map((u) => (
                   <tr key={u.id} className="border-b border-outline-variant/10 last:border-0 hover:bg-surface-container-high/50 transition-colors">
                     <td className="px-3 py-2.5">
-                      <span className="font-semibold text-on-surface">{u.username}</span>
+                      <span className={`font-semibold ${u.username !== "Unknown" ? "text-on-surface" : "text-on-surface-variant italic"}`}>{u.username || "Unknown"}</span>
                     </td>
-                    <td className="px-3 py-2.5 text-on-surface-variant text-xs">{u.email}</td>
+                    <td className="px-3 py-2.5 text-on-surface-variant text-xs">{u.email || <span className="italic">No email</span>}</td>
                     <td className="px-3 py-2.5 text-right">
                       <span className="font-bold text-primary">{u.routeCount}</span>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold ${u.stravaConnected ? "bg-green-400/20 text-green-400" : "bg-surface-container-high text-on-surface-variant/50"}`}>
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${u.stravaConnected ? "bg-green-400/20 text-green-400" : "bg-surface-container-high text-on-surface-variant/40"}`}>
                         {u.stravaConnected ? "Y" : "N"}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold ${u.isAdmin ? "bg-primary/20 text-primary" : "bg-surface-container-high text-on-surface-variant/50"}`}>
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${u.isAdmin ? "bg-primary/20 text-primary" : "bg-surface-container-high text-on-surface-variant/40"}`}>
                         {u.isAdmin ? "Y" : "N"}
                       </span>
                     </td>
                   </tr>
                 ))}
+                {deletedRouteCount > 0 && (
+                  <tr className="border-t border-dashed border-outline-variant/30 bg-surface-container-high/30">
+                    <td className="px-3 py-2.5">
+                      <span className="font-semibold text-on-surface-variant">Deleted users</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-on-surface-variant/50 text-xs italic">Account removed</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="font-bold text-on-surface-variant">{deletedRouteCount}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant/40">\u2014</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold bg-surface-container-high text-on-surface-variant/40">\u2014</span>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -447,7 +498,7 @@ function UsersView({ user }: { user: User }) {
 // Main Page
 export default function CrewCaptainPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<string>("dashboard");
+  const [activeView, setActiveView] = useState<string>("routes");
 
   useEffect(() => {
     if (auth?.currentUser && auth.currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
@@ -469,7 +520,6 @@ export default function CrewCaptainPage() {
     <div className="flex h-screen overflow-hidden bg-background">
       <AdminSidebar user={user} activeView={activeView} onViewChange={setActiveView} onLogout={handleLogout} />
       <main className="flex-1 flex flex-col overflow-hidden">
-        {activeView === "dashboard" && <DashboardView user={user} />}
         {activeView === "routes" && <RoutesView user={user} />}
         {activeView === "users" && <UsersView user={user} />}
       </main>
