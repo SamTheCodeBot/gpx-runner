@@ -571,8 +571,6 @@ export default function Map({
     ] as [number, number];
   };
 
-  // Simplify polyline coordinates to reduce rendering overhead
-  // when displaying many routes (take every Nth point)
   const simplifyPositions = (coords: [number, number][], maxPoints = 200): [number, number][] => {
     if (coords.length <= maxPoints) return coords;
     const step = Math.ceil(coords.length / maxPoints);
@@ -592,12 +590,8 @@ export default function Map({
       }];
     }
 
-    // For multiple routes, simplify heavily to reduce DOM overhead
-    const maxTotalPoints = 600;
-    const maxPerRoute = Math.max(10, Math.floor(maxTotalPoints / routes.length));
-
     return routes.map((route) => ({
-      positions: simplifyPositions(route.coordinates, maxPerRoute).map(([lon, lat]) => [lat, lon] as [number, number]),
+      positions: simplifyPositions(route.coordinates, 500).map(([lon, lat]) => [lat, lon] as [number, number]),
       color: route.type === "trail" ? "rgb(18 221 251)" : route.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
       weight: 1.5,
       opacity: 0.5,
