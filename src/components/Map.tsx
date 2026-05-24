@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
+// Use canvas renderer for much faster rendering of many polylines
+const canvasRenderer = L.canvas({ padding: 0.5 });
 import { GPXRoute, RouteSuggestion } from "@/app/types";
 
 interface MapProps {
@@ -569,23 +571,36 @@ export default function Map({
     ] as [number, number];
   };
 
+  // Simplify polyline coordinates to reduce rendering overhead
+  // when displaying many routes (take every Nth point)
+  const simplifyPositions = (coords: [number, number][], maxPoints = 200): [number, number][] => {
+    if (coords.length <= maxPoints) return coords;
+    const step = Math.ceil(coords.length / maxPoints);
+    return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+  };
+
+
   const getHeatmapRoutes = () => {
     if (!showHeatmap || routes.length === 0) return [];
 
     if (selectedRoute) {
       return [{
-        positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
+        positions: simplifyPositions(selectedRoute.coordinates, 500).map(([lon, lat]) => [lat, lon] as [number, number]),
         color: selectedRoute.type === "trail" ? "rgb(18 221 251)" : selectedRoute.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
         weight: 4,
         opacity: 1,
       }];
     }
 
+    // For multiple routes, simplify heavily to reduce DOM overhead
+    const maxTotalPoints = 600;
+    const maxPerRoute = Math.max(10, Math.floor(maxTotalPoints / routes.length));
+
     return routes.map((route) => ({
-      positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
+      positions: simplifyPositions(route.coordinates, maxPerRoute).map(([lon, lat]) => [lat, lon] as [number, number]),
       color: route.type === "trail" ? "rgb(18 221 251)" : route.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
-      weight: 2,
-      opacity: 0.6,
+      weight: 1.5,
+      opacity: 0.5,
     }));
   };
 
@@ -627,6 +642,7 @@ export default function Map({
       style={{ height: "100%", width: "100%", background: darkMode ? "#111113" : "#f4f4f5" }}
       zoomControl={true}
       dragging={!isSelectingStartPoint}
+      renderer={canvasRenderer}
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
 
+export const dynamic = "force-dynamic";
+
 const ALLOWED_ADMIN_EMAIL = "mago@osterhult.com";
 
 export async function GET(req: NextRequest) {
