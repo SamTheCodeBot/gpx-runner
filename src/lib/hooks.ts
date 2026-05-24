@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
@@ -628,6 +628,11 @@ export function useUserProfile(userId: string | null) {
   const loadProfile = useCallback(async () => {
     if (!db || !userId) return;
     try {
+      const direct = await getDoc(doc(db, "userProfiles", userId));
+      if (direct.exists()) {
+        setProfile(direct.data() as import("@/app/types").UserProfile);
+        return;
+      }
       const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
       if (!snap.empty) {
         setProfile(snap.docs[0].data() as import("@/app/types").UserProfile);

@@ -26,8 +26,36 @@ export async function GET(req: NextRequest) {
 
     // Fire all reads in parallel — single round trip to Firestore
     const [routesSnap, profileSnap] = await Promise.all([
-      db.collection("routes").where("userId", "==", userId).get(),
-      db.collection("userProfiles").where("userId", "==", userId).get(),
+      db.collection("routes")
+        .where("userId", "==", userId)
+        .select(
+          "name",
+          "date",
+          "distance",
+          "elevationGain",
+          "duration",
+          "color",
+          "type",
+          "isRoundTrip",
+          "countries",
+          "hasTcx",
+          "strava",
+        )
+        .get(),
+      db.collection("userProfiles")
+        .where("userId", "==", userId)
+        .select(
+          "username",
+          "displayName",
+          "avatar",
+          "joinedAt",
+          "totalRuns",
+          "totalDistance",
+          "wishlisted",
+          "favorites",
+          "strava",
+        )
+        .get(),
     ]);
 
     const routes = routesSnap.docs.map((doc) => {

@@ -23,7 +23,21 @@ export async function GET(req: NextRequest) {
     const userId = decodedToken.uid;
     const db = adminDb();
 
-    const q = db.collection("routes").where("userId", "==", userId);
+    const q = db.collection("routes")
+      .where("userId", "==", userId)
+      .select(
+        "name",
+        "date",
+        "distance",
+        "elevationGain",
+        "duration",
+        "color",
+        "type",
+        "isRoundTrip",
+        "countries",
+        "hasTcx",
+        "strava",
+      );
     const snap = await q.get();
 
     // Return only the fields needed for list rendering
