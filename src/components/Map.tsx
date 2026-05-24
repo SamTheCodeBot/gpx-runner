@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 // Use canvas renderer for much faster rendering of many polylines
@@ -529,6 +529,12 @@ function PersonalHeatmapCanvas({ routes, enabled }: { routes: GPXRoute[]; enable
   return null;
 }
 
+function simplifyPositions(coords: [number, number][], maxPoints = 200): [number, number][] {
+  if (coords.length <= maxPoints) return coords;
+  const step = Math.ceil(coords.length / maxPoints);
+  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+}
+
 export default function Map({
   routes,
   selectedRoute,
@@ -571,14 +577,7 @@ export default function Map({
     ] as [number, number];
   };
 
-  const simplifyPositions = (coords: [number, number][], maxPoints = 200): [number, number][] => {
-    if (coords.length <= maxPoints) return coords;
-    const step = Math.ceil(coords.length / maxPoints);
-    return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
-  };
-
-
-  const getHeatmapRoutes = () => {
+  const heatmapRoutes = useMemo(() => {
     if (!showHeatmap || routes.length === 0) return [];
 
     if (selectedRoute) {
@@ -596,7 +595,7 @@ export default function Map({
       weight: 1.5,
       opacity: 0.5,
     }));
-  };
+  }, [routes, selectedRoute, showHeatmap]);
 
   const activeRouteCoords = selectedRoute?.coordinates || suggestedRoute?.coordinates || [];
   const kmMarkers = getKilometerMarkers(activeRouteCoords);
@@ -681,7 +680,7 @@ export default function Map({
       )}
 
       {/* Standard heatmap */}
-      {getHeatmapRoutes().map((route, index) => (
+      {heatmapRoutes.map((route, index) => (
         <Polyline
           key={`heatmap-${index}`}
           positions={route.positions}

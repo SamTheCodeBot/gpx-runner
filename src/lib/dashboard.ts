@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { auth as firebaseAuth } from "@/lib/firebase";
 
+const DASHBOARD_CACHE_VERSION = 2;
+const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
+
 export interface DashboardRoute {
   id: string;
   name: string;
@@ -45,6 +48,17 @@ interface DashboardData {
   favorites: string[];
 }
 
+interface DashboardCachePayload {
+  version: number;
+  userId: string;
+  cachedAt: number;
+  data: DashboardData;
+}
+
+function dashboardCacheKey(userId: string) {
+  return `gpx-dashboard-cache:${DASHBOARD_CACHE_VERSION}:${userId}`;
+}
+
 async function fetchDashboard(): Promise<DashboardData> {
   const user = firebaseAuth?.currentUser;
   if (!user) throw new Error("Not authenticated");
@@ -74,17 +88,28 @@ async function fetchDashboard(): Promise<DashboardData> {
 }
 
 // Persist to localStorage for fast subsequent loads
-function cacheDashboard(data: DashboardData) {
+function cacheDashboard(userId: string, data: DashboardData) {
   try {
-    localStorage.setItem("gpx-dashboard-cache", JSON.stringify(data));
+    const payload: DashboardCachePayload = {
+      version: DASHBOARD_CACHE_VERSION,
+      userId,
+      cachedAt: Date.now(),
+      data,
+    };
+    localStorage.setItem(dashboardCacheKey(userId), JSON.stringify(payload));
   } catch {}
 }
 
-function loadCachedDashboard(): DashboardData | null {
+function loadCachedDashboard(userId: string): { data: DashboardData; fresh: boolean } | null {
   try {
-    const stored = localStorage.getItem("gpx-dashboard-cache");
+    const stored = localStorage.getItem(dashboardCacheKey(userId));
     if (!stored) return null;
-    return JSON.parse(stored) as DashboardData;
+    const payload = JSON.parse(stored) as DashboardCachePayload;
+    if (payload.version !== DASHBOARD_CACHE_VERSION || payload.userId !== userId) return null;
+    return {
+      data: payload.data,
+      fresh: Date.now() - payload.cachedAt < DASHBOARD_CACHE_TTL_MS,
+    };
   } catch {
     return null;
   }
@@ -104,29 +129,20 @@ export function useDashboard(userId: string | null) {
     }
 
     // Show cached data immediately for fast first paint
-    const cached = loadCachedDashboard();
+    const cached = loadCachedDashboard(userId);
     if (cached) {
-      setData(cached);
+      setData(cached.data);
       setLoading(false);
-      // Refresh in background
-      fetchDashboard()
-        .then((fresh) => {
-          cacheDashboard(fresh);
-          setData(fresh);
-        })
-        .catch((e) => {
-          console.warn("[useDashboard] background refresh failed", e);
-        });
-      return;
+      if (cached.fresh) return;
     }
 
-    // No cache — must fetch from API
-    setLoading(true);
+    // No cache, or stale cache — fetch from API. Stale data stays visible.
+    if (!cached) setLoading(true);
     setError(null);
 
     fetchDashboard()
       .then((fresh) => {
-        cacheDashboard(fresh);
+        cacheDashboard(userId, fresh);
         setData(fresh);
         setLoading(false);
       })
@@ -142,7 +158,7 @@ export function useDashboard(userId: string | null) {
     setLoading(true);
     try {
       const fresh = await fetchDashboard();
-      cacheDashboard(fresh);
+      cacheDashboard(userId, fresh);
       setData(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Refresh failed");
