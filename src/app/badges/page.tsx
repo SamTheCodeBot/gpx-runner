@@ -2,12 +2,13 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
-import { useGPXRoutes, useRouteSummaries, useUserProfile, type RouteSummary } from "@/lib/hooks";
+import { useGPXRoutes, type RouteSummary } from "@/lib/hooks";
+import { useDashboard } from "@/lib/dashboard";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
 import { BADGE_DEFINITIONS, BadgeContext } from "@/lib/badges";
 import { routeCountryNames } from "@/lib/countries";
-import type { GPXRoute } from "@/app/types";
+import type { GPXRoute, UserProfile } from "@/app/types";
 import Link from "next/link";
 
 const TIER_CONFIG = {
@@ -214,11 +215,13 @@ export default function BadgesPage() {
   const pendingUpload = pendingUploads[0] ?? null;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const { routes: routeSummaries } = useRouteSummaries(user?.uid ?? null);
+  const { data: dashboardData, loading: dashboardLoading } = useDashboard(user?.uid ?? null);
   const { routes: uploadRoutes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null, { loadRoutes: false });
-  const { profile, loading: profileLoading } = useUserProfile(user?.uid ?? null);
 
-  const routes = routeSummaries;
+  const routes = useMemo(() => dashboardData?.routes ?? [], [dashboardData?.routes]);
+  const publicProfile = useMemo(() => (
+    dashboardData?.profile ? { ...dashboardData.profile, strava: undefined } as UserProfile : null
+  ), [dashboardData?.profile]);
   const ctx = useMemo(() => computeBadgeContext(routes, []), [routes]);
 
   const earnedIds = useMemo(() => {
@@ -299,8 +302,8 @@ export default function BadgesPage() {
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar
         user={user}
-        profile={profile}
-        profileLoading={profileLoading}
+        profile={publicProfile}
+        profileLoading={dashboardLoading}
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}

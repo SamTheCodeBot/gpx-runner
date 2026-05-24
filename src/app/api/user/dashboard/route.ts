@@ -93,7 +93,14 @@ export async function GET(req: NextRequest) {
         totalDistance: profileData.totalDistance || 0,
         wishlisted: profileData.wishlisted || [],
         favorites: profileData.favorites || [],
-        strava: profileData.strava || null,
+        strava: profileData.strava ? {
+          athleteId: profileData.strava.athleteId,
+          athleteName: profileData.strava.athleteName,
+          scope: profileData.strava.scope,
+          expiresAt: profileData.strava.expiresAt,
+          connectedAt: profileData.strava.connectedAt,
+          updatedAt: profileData.strava.updatedAt,
+        } : null,
       };
       favorites = profileData.favorites || [];
     }

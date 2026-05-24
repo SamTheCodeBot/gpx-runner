@@ -15,7 +15,8 @@ export interface DashboardRoute {
   isRoundTrip: boolean;
   countries: string[];
   hasTcx: boolean;
-  strava: { activityId: number; sportType?: string; syncedAt: string } | null;
+  strava?: { activityId: number; sportType?: string; syncedAt: string };
+  coordinates: [number, number][];
 }
 
 export interface DashboardProfile {
@@ -28,16 +29,14 @@ export interface DashboardProfile {
   totalDistance: number;
   wishlisted: string[];
   favorites: string[];
-  strava: {
+  strava?: {
     athleteId: number;
     athleteName?: string;
     scope: string;
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    connectedAt: string;
-    updatedAt: string;
-  } | null;
+    expiresAt?: number;
+    connectedAt?: string;
+    updatedAt?: string;
+  };
 }
 
 interface DashboardData {
@@ -60,7 +59,18 @@ async function fetchDashboard(): Promise<DashboardData> {
     throw new Error(`Dashboard fetch failed: ${res.status}`);
   }
 
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    routes: Array.isArray(data.routes)
+      ? data.routes.map((route: DashboardRoute) => ({
+          ...route,
+          coordinates: route.coordinates ?? [],
+          strava: route.strava ?? undefined,
+        }))
+      : [],
+    favorites: Array.isArray(data.favorites) ? data.favorites : [],
+  };
 }
 
 // Persist to localStorage for fast subsequent loads
