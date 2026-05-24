@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
@@ -440,17 +440,24 @@ export function useRouteSummaries(userId: string | null) {
       return;
     }
     const load = async () => {
-      if (!db) return;
+      const user = firebaseAuth?.currentUser;
+      if (!user) return;
       setLoading(true);
       try {
-        const q = query(collection(db, "routes"), where("userId", "==", userId));
-        const snap = await getDocs(q);
-        const summaries = snap.docs.map((d) => deserializeRouteSummary(d.id, d.data()));
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/routes/summaries", {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!res.ok) throw new Error(`Route summary fetch failed: ${res.status}`);
+        const data = await res.json();
+        const summaries: RouteSummary[] = Array.isArray(data.routes)
+          ? data.routes.map((route: RouteSummary) => ({ ...route, coordinates: route.coordinates ?? [] }))
+          : [];
         summaries.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
         setRoutes(summaries);
         cacheSummaries(summaries);
       } catch (e) {
-        console.error("Firestore summary load error", e);
+        console.error("Route summary load error", e);
       } finally {
         setLoading(false);
       }
