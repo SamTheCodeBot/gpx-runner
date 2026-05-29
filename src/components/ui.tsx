@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface IconProps {
   name: string;
@@ -63,15 +63,13 @@ interface RouteRowProps {
   onDelete: () => void;
   onDownload: () => void;
   onEdit: () => void;
-  wishlisted?: boolean;
   isFavorite?: boolean;
-  onToggleWishlist?: (routeId: string) => void;
   onToggleFavorite?: (routeId: string) => void;
 }
 
 export function RouteRow({
   route, selected, onSelect, onDelete, onDownload, onEdit,
-  wishlisted, isFavorite, onToggleWishlist, onToggleFavorite,
+  isFavorite, onToggleFavorite,
 }: RouteRowProps) {
   const date = new Date(route.date);
   const distKm = (route.distance / 1000).toFixed(1);
@@ -90,7 +88,10 @@ export function RouteRow({
         style={{ backgroundColor: route.type === 'trail' ? 'rgb(18 221 251)' : route.type === 'mixed' ? 'rgb(197 45 255)' : 'rgb(255 65 164)' }}
       />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {isFavorite && <Icon name="star" filled className="text-yellow-500 text-sm shrink-0" />}
+          <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
+        </div>
         <p className="text-[10px] text-on-surface-variant mt-0.5">
           {date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
           &nbsp;·&nbsp;{distKm} km&nbsp;·&nbsp;{elevM}m ↑&nbsp;
@@ -108,15 +109,6 @@ export function RouteRow({
             <Icon name={isFavorite ? "star" : "star_outline"} className="text-sm" />
           </button>
         )}
-        {onToggleWishlist && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleWishlist(route.id); }}
-            className={`p-1.5 rounded-lg transition-colors ${wishlisted ? "text-primary" : "text-on-surface-variant hover:text-primary"} hover:bg-surface-container-highest`}
-            title={wishlisted ? "Remove from wishlist" : "Save to wishlist"}
-          >
-            <Icon name={wishlisted ? "bookmark" : "bookmark_add"} className="text-sm" />
-          </button>
-        )}
         <button
           onClick={(e) => { e.stopPropagation(); onEdit(); }}
           className="p-1.5 rounded-lg hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"
@@ -130,6 +122,16 @@ export function RouteRow({
           title="Download GPX"
         >
           <Icon name="download" className="text-sm" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm(`Delete "${route.name}" permanently?\nThis cannot be undone.`)) onDelete();
+          }}
+          className="p-1.5 rounded-lg hover:bg-error-container text-on-surface-variant hover:text-error transition-colors"
+          title="Delete route"
+        >
+          <Icon name="delete" className="text-sm" />
         </button>
       </div>
     </div>
@@ -147,6 +149,11 @@ interface UploadModalProps {
 export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
   const [name, setName] = useState(route.name || "");
   const [type, setType] = useState<string>("road");
+
+  useEffect(() => {
+    setName(route.name || "");
+    setType(route.type || "road");
+  }, [route.id, route.name, route.type]);
 
   const accept = () => {
     if (!name.trim()) return;
@@ -189,10 +196,10 @@ export function UploadModal({ route, onAccept, onCancel }: UploadModalProps) {
           </div>
         </div>
         <div className="flex gap-2 mt-5">
-          <button onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onCancel} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+          <button type="button" onClick={accept} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             Save
           </button>
         </div>
@@ -226,7 +233,7 @@ export function EditModal({ route, onSave, onClose, onDelete }: EditModalProps) 
       <div className="relative bg-surface-container-lowest rounded-3xl shadow-xl w-full max-w-sm p-6 animate-fade-in">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-extrabold text-primary font-headline">Edit Route</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
             <Icon name="close" className="text-on-surface-variant text-sm" />
           </button>
         </div>
@@ -253,14 +260,15 @@ export function EditModal({ route, onSave, onClose, onDelete }: EditModalProps) 
           </div>
         </div>
         <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={save} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity">
+          <button type="button" onClick={save} disabled={!name.trim()} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             Save
           </button>
         </div>
         <button
+          type="button"
           onClick={() => { if (confirm("Delete this route permanently?\nThis cannot be undone.")) { onDelete(); onClose(); } }}
           className="w-full mt-3 py-2 border border-error/40 text-error/70 rounded-xl text-xs font-medium hover:bg-error-container hover:border-error/60 hover:text-error transition-colors"
         >

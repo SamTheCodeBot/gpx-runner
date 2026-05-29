@@ -1,3 +1,11 @@
+export interface RouteMetricSample {
+  coordinate: [number, number]; // [lon, lat]
+  elevation?: number;
+  time?: string;
+  heartRate?: number;
+  paceMinPerKm?: number;
+}
+
 export interface GPXRoute {
   id: string;
   name: string;
@@ -9,10 +17,18 @@ export interface GPXRoute {
   color: string;
   userId?: string; // Firebase user ID for cloud sync
   type?: 'road' | 'trail' | 'mixed'; // Route type tag
+  countries?: string[];
   isWishlisted?: boolean;
   isFavorite?: boolean;
   isRoundTrip?: boolean;
   startPoint?: [number, number];
+  samples?: RouteMetricSample[];
+  hasTcx?: boolean;
+  strava?: {
+    activityId: number;
+    sportType?: string;
+    syncedAt: string;
+  };
 }
 
 export interface RouteStats {
@@ -23,10 +39,12 @@ export interface RouteStats {
 }
 
 export interface RouteFilter {
-  month?: string; // YYYY-MM
+  year?: string; // YYYY
+  month?: string; // MM
   minDistance?: number; // km
   maxDistance?: number; // km
   type?: 'road' | 'trail' | 'mixed' | 'all'; // Filter by route type
+  country?: string;
 }
 
 export interface RouteSuggestionRequest {
@@ -59,4 +77,14 @@ export interface UserProfile {
   userId?: string; // Firebase UID (stored in document)
   wishlisted?: string[]; // array of route IDs
   favorites?: string[]; // array of route IDs
+  strava?: {
+    athleteId: number;
+    athleteName?: string;
+    scope: string;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    connectedAt: string;
+    updatedAt: string;
+  };
 }

@@ -3,7 +3,8 @@
 import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useWishlist, useFavorites } from "@/lib/hooks";
+import { routeCountryNames } from "@/lib/countries";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -31,16 +32,24 @@ export default function Home() {
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
-  const [pendingUpload, setPendingUpload]   = useState<GPXRoute | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<GPXRoute[]>([]);
+  const pendingUpload = pendingUploads[0] ?? null;
   const [showDrawer, setShowDrawer]          = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery]       = useState("");
   const [showFilters, setShowFilters]      = useState(false);
-  const [filter, setFilter]                = useState<{ month?: string; type?: string; list?: "all" | "favorites" | "wishlist" }>({});
+  const [filter, setFilter]                = useState<{ year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }>({});
   const [username, setUsername]             = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [routesPanelCollapsed, setRoutesPanelCollapsed] = useState(false);
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const filteredRoutes = useRouteFilter(routes, filter, searchQuery);
+  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
+  const listFilteredRoutes = useMemo(() => {
+    if (filter.list === "favorites") return routes.filter((route) => favorites.includes(route.id));
+    return routes;
+  }, [routes, filter.list, favorites]);
+  const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   const stats = useMemo(() => {
@@ -55,8 +64,9 @@ export default function Home() {
     };
   }, [filteredRoutes]);
 
-  const { wishlist, toggleWishlist } = useWishlist(user?.uid ?? null);
-  const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
+  const countryOptions = useMemo(() => (
+    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [routes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -104,26 +114,38 @@ export default function Home() {
     if (!files.length) return;
     const newRoutes = await uploadFiles(files, routes);
     if (newRoutes.length > 0) {
-      setPendingUpload(newRoutes[0]);
+      setPendingUploads(newRoutes);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const acceptUpload = (name: string, type: string) => {
+  const handleRouteUpload = async (gpxFiles: File[], tcxFiles: File[]) => {
+    if (!gpxFiles.length) return;
+    if (tcxFiles.length > 0) {
+      console.info("[route upload] TCX files selected for future metrics import", tcxFiles.map((file) => file.name));
+    }
+    const newRoutes = await uploadFiles(gpxFiles, routes, tcxFiles);
+    if (newRoutes.length > 0) {
+      setPendingUploads(newRoutes);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const acceptUpload = async (name: string, type: string) => {
     if (!pendingUpload) return;
     const named: GPXRoute = { ...pendingUpload, name, type: type as "road" | "trail" | "mixed" };
     saveRoutes([...routes, named]);
     setSelectedRoute(named);
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
     if (named.id && user?.uid) {
-      const { doc, updateDoc } = require("firebase/firestore");
-      const { db } = require("@/lib/firebase");
+      const { doc, updateDoc } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
       if (db) updateDoc(doc(db, "routes", named.id), { name, type }).catch(console.error);
     }
   };
 
   const cancelUpload = () => {
-    setPendingUpload(null);
+    setPendingUploads((pending) => pending.slice(1));
   };
 
   const handleDeleteRoute = (id: string) => {
@@ -139,10 +161,6 @@ export default function Home() {
 
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
-  const handleSaveToWishlist = async (routeId: string) => {
-    await toggleWishlist(routeId);
-  };
-
   const handleToggleFavorite = async (routeId: string) => {
     await toggleFavorite(routeId);
   };
@@ -151,8 +169,11 @@ export default function Home() {
     // No-op — kept for compatibility with MapSection interface
   };
 
+  const getYearOptions = () =>
+    Array.from(new Set(routes.map((r) => r.date.substring(0, 4)).filter(Boolean))).sort().reverse();
+
   const getMonthOptions = () =>
-    Array.from(new Set(routes.map((r) => r.date.substring(0, 7)))).sort().reverse();
+    Array.from(new Set(routes.map((r) => r.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading) {
@@ -188,6 +209,9 @@ export default function Home() {
         onLogout={handleLogout}
         fileInputRef={fileInputRef}
         onFileUpload={handleFileUpload}
+        onRouteUpload={handleRouteUpload}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
       />
 
       {/* Main content */}
@@ -217,7 +241,9 @@ export default function Home() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
           {/* ── Routes panel ── */}
-          <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none">
+          <div
+            className={`flex-1 overflow-y-auto px-4 pt-5 pb-4 md:pt-4 space-y-5 custom-scrollbar order-2 md:order-none transition-all duration-300 ease-out ${routesPanelCollapsed ? "md:flex-none md:w-0 md:p-0 md:opacity-0 md:pointer-events-none" : "md:p-6 md:opacity-100"}`}
+          >
 
             <StatsBar stats={stats} />
 
@@ -230,22 +256,23 @@ export default function Home() {
               filter={filter}
               setFilter={setFilter}
               setShowFilters={setShowFilters}
+              getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
+              countryOptions={countryOptions}
               onSelectRoute={setSelectedRoute}
               onDeleteRoute={handleDeleteRoute}
               onDownloadRoute={handleDownload}
               onEditRoute={setEditingRoute}
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
-              wishlist={wishlist}
+              onRouteUpload={handleRouteUpload}
               favorites={favorites}
-              onToggleWishlist={handleSaveToWishlist}
               onToggleFavorite={handleToggleFavorite}
             />
           </div>
 
           {/* ── Map panel ── */}
-          <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
+          <div className={`w-full order-1 md:order-none relative transition-all duration-300 ease-out ${routesPanelCollapsed ? "md:flex-1" : "md:w-1/2 md:shrink-0"}`}>
             {/* Floating search overlay on mobile */}
             {mobileSearchOpen && (
               <div className="absolute top-2 left-2 right-2 z-30 flex items-center gap-2 md:hidden">
@@ -266,12 +293,23 @@ export default function Home() {
               </div>
             )}
 
+            <button
+              type="button"
+              onClick={() => setRoutesPanelCollapsed((collapsed) => !collapsed)}
+              className="hidden md:flex absolute top-6 left-0 z-30 h-10 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-primary shadow-card hover:bg-surface-container transition-colors"
+              title={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+              aria-label={routesPanelCollapsed ? "Show route list" : "Hide route list"}
+            >
+              <Icon name={routesPanelCollapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
+            </button>
+
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}
                 suggestedRoute={null}
                 showHeatmap={showHeatmap}
+                fitAllRoutes={Boolean(filter.country)}
                 showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
                 onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
@@ -279,6 +317,7 @@ export default function Home() {
                 selectedStartPoint={null}
                 isSelectingStartPoint={false}
                 onMapClick={handleMapClick}
+                showPersonalHeatmapControl={false}
               />
             </div>
 
@@ -299,22 +338,38 @@ export default function Home() {
                 </div>
                 {showPersonalHeatmap && (
                   <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 215 0)" }} />
-                    <span className="text-[9px] text-on-surface-variant">Heat</span>
+                    <div
+                      className="w-4 h-2 rounded-full"
+                      style={{ background: "linear-gradient(90deg, rgb(255 190 224), rgb(255 65 164), rgb(151 17 86))" }}
+                    />
+                    <span className="text-[9px] text-on-surface-variant">Freq</span>
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => setShowHeatmap(!showHeatmap)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                  showHeatmap
-                    ? "bg-primary text-on-primary"
-                    : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-                }`}
-              >
-                <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                {showHeatmap ? "Hide" : "Show"}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showPersonalHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="whatshot" className="text-[10px] inline mr-0.5" />
+                  {showPersonalHeatmap ? "Freq" : "Freq"}
+                </button>
+                <button
+                  onClick={() => setShowHeatmap(!showHeatmap)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                    showHeatmap
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
+                  {showHeatmap ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -330,6 +385,7 @@ export default function Home() {
           onLogout={handleLogout}
           fileInputRef={fileInputRef}
           onFileUpload={handleFileUpload}
+          onRouteUpload={handleRouteUpload}
         />
       </main>
 
@@ -346,6 +402,7 @@ export default function Home() {
       {/* Post-upload naming modal */}
       {pendingUpload && (
         <UploadModal
+          key={pendingUpload.id}
           route={pendingUpload}
           onAccept={acceptUpload}
           onCancel={cancelUpload}

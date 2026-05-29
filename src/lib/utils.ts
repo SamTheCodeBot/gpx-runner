@@ -30,6 +30,12 @@ export interface ParsedGPX {
   coordinates: [number, number][]; // [lon, lat]
   distance: number;
   elevationGain: number;
+  samples: {
+    coordinate: [number, number];
+    elevation?: number;
+    time?: string;
+    distanceM: number;
+  }[];
 }
 
 export function parseGPXFile(text: string, fallbackName: string): ParsedGPX {
@@ -37,29 +43,85 @@ export function parseGPXFile(text: string, fallbackName: string): ParsedGPX {
   const trkpts = xml.querySelectorAll("trkpt");
 
   const coordinates: [number, number][] = [];
+  const samples: ParsedGPX["samples"] = [];
   let elevationGain = 0;
   let lastElevation: number | null = null;
+  let distance = 0;
 
-  trkpts.forEach((pt) => {
+  trkpts.forEach((pt, index) => {
     const lat = parseFloat(pt.getAttribute("lat") || "0");
     const lon = parseFloat(pt.getAttribute("lon") || "0");
     const ele = parseFloat(pt.querySelector("ele")?.textContent || "0");
-    coordinates.push([lon, lat]);
-    if (lastElevation !== null && ele > lastElevation) {
-      elevationGain += ele - lastElevation;
+    const coordinate: [number, number] = [lon, lat];
+    if (index > 0) {
+      const previous = coordinates[index - 1];
+      distance += haversine(previous[1], previous[0], lat, lon);
     }
+    coordinates.push(coordinate);
+    if (lastElevation !== null && ele > lastElevation) elevationGain += ele - lastElevation;
     lastElevation = ele;
+    samples.push({
+      coordinate,
+      elevation: Number.isFinite(ele) ? ele : undefined,
+      time: pt.querySelector("time")?.textContent || undefined,
+      distanceM: distance,
+    });
   });
-
-  let distance = 0;
-  for (let i = 1; i < coordinates.length; i++) {
-    distance += haversine(coordinates[i - 1][1], coordinates[i - 1][0], coordinates[i][1], coordinates[i][0]);
-  }
 
   const dateStr = xml.querySelector("time")?.textContent || new Date().toISOString();
   const name = xml.querySelector("name")?.textContent || fallbackName;
 
-  return { name, date: new Date(dateStr).toISOString(), coordinates, distance, elevationGain };
+  return { name, date: new Date(dateStr).toISOString(), coordinates, distance, elevationGain, samples };
+}
+
+export interface ParsedTCXSample {
+  coordinate: [number, number];
+  elevation?: number;
+  time?: string;
+  heartRate?: number;
+  paceMinPerKm?: number;
+}
+
+export function parseTCXFile(text: string): ParsedTCXSample[] {
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  const points = Array.from(xml.querySelectorAll("Trackpoint"));
+  const samples: ParsedTCXSample[] = [];
+  let previous: { coordinate: [number, number]; timeMs: number } | null = null;
+
+  for (const point of points) {
+    const latText = point.querySelector("Position LatitudeDegrees")?.textContent;
+    const lonText = point.querySelector("Position LongitudeDegrees")?.textContent;
+    if (!latText || !lonText) continue;
+
+    const lat = parseFloat(latText);
+    const lon = parseFloat(lonText);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const time = point.querySelector("Time")?.textContent || undefined;
+    const timeMs = time ? new Date(time).valueOf() : NaN;
+    const elevation = parseFloat(point.querySelector("AltitudeMeters")?.textContent || "");
+    const heartRate = parseFloat(point.querySelector("HeartRateBpm Value")?.textContent || "");
+
+    let paceMinPerKm: number | undefined;
+    const coordinate: [number, number] = [lon, lat];
+    if (previous && Number.isFinite(timeMs)) {
+      const seconds = (timeMs - previous.timeMs) / 1000;
+      const meters = haversine(previous.coordinate[1], previous.coordinate[0], lat, lon);
+      if (seconds > 0 && meters > 1) paceMinPerKm = seconds / 60 / (meters / 1000);
+    }
+
+    samples.push({
+      coordinate,
+      elevation: Number.isFinite(elevation) ? elevation : undefined,
+      time,
+      heartRate: Number.isFinite(heartRate) ? heartRate : undefined,
+      paceMinPerKm,
+    });
+
+    if (Number.isFinite(timeMs)) previous = { coordinate, timeMs };
+  }
+
+  return samples;
 }
 
 export function downloadGPXFile(route: { name: string; coordinates: [number, number][] }) {

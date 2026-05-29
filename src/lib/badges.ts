@@ -22,11 +22,22 @@ export interface BadgeContext {
   routeCountries: Map<string, Set<string>>; // routeId → Set of countries
   clubMemberships: string[];
   hasRunClub: boolean;
+  routeTypes: Set<string>;
   maxRunsOnSingleRoute: number;
   longestRunKm: number;
   totalCountries: Set<string>; // unique countries across all routes
   currentStreak: number; // consecutive days with runs
   longestStreak: number;
+  routesWithTcx: number;
+  roundTripRuns: number;
+  uniqueRouteFingerprints: number;
+  distinctAreas: number;
+  hasWeekendPair: boolean;
+  hasFullCalendarYear: boolean;
+  hasWinterSeason: boolean;
+  hasSummerSeason: boolean;
+  earlyRuns: number;
+  nightRuns: number;
 }
 
 export const BADGE_DEFINITIONS: BadgeDefinition[] = [
@@ -59,6 +70,15 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     progress: (c) => `${c.totalDistanceKm.toFixed(0)} / 1,000 km`,
   },
   {
+    id: "dist-2500",
+    name: "Distance Collector",
+    description: "Run a total of 2,500 km",
+    icon: "route",
+    tier: "gold",
+    check: (c) => c.totalDistanceKm >= 2500,
+    progress: (c) => `${c.totalDistanceKm.toFixed(0)} / 2,500 km`,
+  },
+  {
     id: "dist-5000",
     name: "Ultra Voyager",
     description: "Run a total of 5,000 km — equivalent to Oslo→Tokyo",
@@ -75,6 +95,15 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     tier: "platinum",
     check: (c) => c.totalDistanceKm >= 10000,
     progress: (c) => `${c.totalDistanceKm.toFixed(0)} / 10,000 km`,
+  },
+  {
+    id: "dist-25000",
+    name: "Lifetime Engine",
+    description: "Run a lifetime total of 25,000 km",
+    icon: "all_inclusive",
+    tier: "platinum",
+    check: (c) => c.totalDistanceKm >= 25000,
+    progress: (c) => `${c.totalDistanceKm.toFixed(0)} / 25,000 km`,
   },
 
   // ── Elevation milestones ──────────────────────────────────────────────
@@ -104,6 +133,24 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     tier: "gold",
     check: (c) => c.totalElevationM >= 10000,
     progress: (c) => `${c.totalElevationM.toFixed(0)} / 10,000 m`,
+  },
+  {
+    id: "elev-25000",
+    name: "Vertical Beast",
+    description: "Accumulate 25,000 m of elevation gain",
+    icon: "landscape",
+    tier: "platinum",
+    check: (c) => c.totalElevationM >= 25000,
+    progress: (c) => `${c.totalElevationM.toFixed(0)} / 25,000 m`,
+  },
+  {
+    id: "elev-50000",
+    name: "Sky Chaser",
+    description: "Accumulate 50,000 m of elevation gain",
+    icon: "filter_hdr",
+    tier: "platinum",
+    check: (c) => c.totalElevationM >= 50000,
+    progress: (c) => `${c.totalElevationM.toFixed(0)} / 50,000 m`,
   },
 
   // ── Run count milestones ──────────────────────────────────────────────
@@ -135,6 +182,15 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     progress: (c) => `${c.totalRuns} / 100 runs`,
   },
   {
+    id: "runs-200",
+    name: "Run Machine",
+    description: "Log 200 runs",
+    icon: "directions_run",
+    tier: "gold",
+    check: (c) => c.totalRuns >= 200,
+    progress: (c) => `${c.totalRuns} / 200 runs`,
+  },
+  {
     id: "runs-365",
     name: "Daily Devotion",
     description: "Log 365 runs — one for every day of the year",
@@ -142,6 +198,15 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     tier: "platinum",
     check: (c) => c.totalRuns >= 365,
     progress: (c) => `${c.totalRuns} / 365 runs`,
+  },
+  {
+    id: "runs-1000",
+    name: "Four Digit Runner",
+    description: "Log 1,000 runs",
+    icon: "workspace_premium",
+    tier: "platinum",
+    check: (c) => c.totalRuns >= 1000,
+    progress: (c) => `${c.totalRuns} / 1,000 runs`,
   },
 
   // ── Country / cross-border badges ────────────────────────────────────
@@ -187,7 +252,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Run between two different countries in a single run",
     icon: "swap_horiz",
     tier: "gold",
-    check: (c) => false, // Requires route-level country detection — stub for future
+    check: (c) => Array.from(c.routeCountries.values()).some((countries) => countries.size >= 2),
     progress: () => "Run between two countries",
   },
 
@@ -219,6 +284,60 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     check: (c) => c.longestStreak >= 100,
     progress: (c) => `Best streak: ${c.longestStreak} days`,
   },
+  {
+    id: "weekend-warrior",
+    name: "Weekend Warrior",
+    description: "Run on both Saturday and Sunday in the same weekend",
+    icon: "weekend",
+    tier: "bronze",
+    check: (c) => c.hasWeekendPair,
+    progress: () => "Run on Saturday and Sunday",
+  },
+  {
+    id: "calendar-year",
+    name: "Month Completer",
+    description: "Run at least once in every month of a calendar year",
+    icon: "event_available",
+    tier: "gold",
+    check: (c) => c.hasFullCalendarYear,
+    progress: () => "Run in all 12 months of one year",
+  },
+  {
+    id: "winter-runner",
+    name: "Winter Runner",
+    description: "Run in December, January, and February",
+    icon: "ac_unit",
+    tier: "silver",
+    check: (c) => c.hasWinterSeason,
+    progress: () => "Run in Dec, Jan, and Feb",
+  },
+  {
+    id: "summer-runner",
+    name: "Summer Streaker",
+    description: "Run in June, July, and August",
+    icon: "wb_sunny",
+    tier: "silver",
+    check: (c) => c.hasSummerSeason,
+    progress: () => "Run in Jun, Jul, and Aug",
+  },
+  {
+    id: "early-bird",
+    name: "Early Bird",
+    description: "Log a run that starts before 07:00",
+    icon: "wb_twilight",
+    tier: "bronze",
+    check: (c) => c.earlyRuns >= 1,
+    progress: () => "Start a run before 07:00",
+  },
+  {
+    id: "night-runner",
+    name: "Night Runner",
+    description: "Log a run that starts after 21:00",
+    icon: "dark_mode",
+    tier: "bronze",
+    check: (c) => c.nightRuns >= 1,
+    progress: () => "Start a run after 21:00",
+  },
 
   // ── Repeated route / consistency badges ─────────────────────────────
   {
@@ -248,8 +367,44 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     check: (c) => c.maxRunsOnSingleRoute >= 25,
     progress: (c) => `Most repeats: ${c.maxRunsOnSingleRoute}×`,
   },
+  {
+    id: "fresh-paths",
+    name: "Fresh Paths",
+    description: "Log 10 distinct route shapes",
+    icon: "explore",
+    tier: "silver",
+    check: (c) => c.uniqueRouteFingerprints >= 10,
+    progress: (c) => `${c.uniqueRouteFingerprints} / 10 unique routes`,
+  },
+  {
+    id: "area-10",
+    name: "Explorer Mode",
+    description: "Run in 10 distinct areas",
+    icon: "travel_explore",
+    tier: "gold",
+    check: (c) => c.distinctAreas >= 10,
+    progress: (c) => `${c.distinctAreas} / 10 areas`,
+  },
 
   // ── Single run distance ──────────────────────────────────────────────
+  {
+    id: "single-5",
+    name: "First 5K",
+    description: "Complete a single run of 5 km or more",
+    icon: "sprint",
+    tier: "bronze",
+    check: (c) => c.longestRunKm >= 5,
+    progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
+  },
+  {
+    id: "single-10",
+    name: "First 10K",
+    description: "Complete a single run of 10 km or more",
+    icon: "sprint",
+    tier: "bronze",
+    check: (c) => c.longestRunKm >= 10,
+    progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
+  },
   {
     id: "single-21",
     name: "Half Marathon Hero",
@@ -269,6 +424,15 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
   },
   {
+    id: "single-50",
+    name: "Ultra Starter",
+    description: "Complete a single run of 50 km or more",
+    icon: "sprint",
+    tier: "platinum",
+    check: (c) => c.longestRunKm >= 50,
+    progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
+  },
+  {
     id: "single-100",
     name: "Century Run",
     description: "Complete a 100 km run in a single go",
@@ -278,35 +442,6 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     progress: (c) => `Longest run: ${c.longestRunKm.toFixed(1)} km`,
   },
 
-  // ── Club badges ─────────────────────────────────────────────────────
-  {
-    id: "club-join",
-    name: "Social Strider",
-    description: "Join a run club",
-    icon: "groups",
-    tier: "bronze",
-    check: (c) => c.clubMemberships.length >= 1,
-    progress: (c) => `${c.clubMemberships.length} / 1 club`,
-  },
-  {
-    id: "club-3",
-    name: "Club Collector",
-    description: "Join 3 different run clubs",
-    icon: "groups",
-    tier: "silver",
-    check: (c) => c.clubMemberships.length >= 3,
-    progress: (c) => `${c.clubMemberships.length} / 3 clubs`,
-  },
-  {
-    id: "club-lead",
-    name: "Club Captain",
-    description: "Create or lead a run club",
-    icon: "military_tech",
-    tier: "gold",
-    check: (c) => c.hasRunClub,
-    progress: () => "Lead a run club",
-  },
-
   // ── Variety badges ─────────────────────────────────────────────────
   {
     id: "type-road",
@@ -314,7 +449,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log your first road run",
     icon: "directions_bike",
     tier: "bronze",
-    check: () => false, // Requires type tracking — stub
+    check: (c) => c.routeTypes.has("road"),
     progress: () => "Log a road run",
   },
   {
@@ -323,7 +458,7 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log your first trail run",
     icon: "hiking",
     tier: "bronze",
-    check: () => false,
+    check: (c) => c.routeTypes.has("trail"),
     progress: () => "Log a trail run",
   },
   {
@@ -332,8 +467,44 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     description: "Log a mixed road/trail run",
     icon: "terrain",
     tier: "bronze",
-    check: () => false,
+    check: (c) => c.routeTypes.has("mixed"),
     progress: () => "Log a mixed run",
+  },
+  {
+    id: "round-trip-1",
+    name: "Round Tripper",
+    description: "Complete one round-trip route",
+    icon: "sync",
+    tier: "bronze",
+    check: (c) => c.roundTripRuns >= 1,
+    progress: (c) => `${c.roundTripRuns} / 1 round trip`,
+  },
+  {
+    id: "round-trip-10",
+    name: "Loop Lover",
+    description: "Complete 10 round-trip routes",
+    icon: "all_inclusive",
+    tier: "silver",
+    check: (c) => c.roundTripRuns >= 10,
+    progress: (c) => `${c.roundTripRuns} / 10 round trips`,
+  },
+  {
+    id: "tcx-1",
+    name: "Data Nerd",
+    description: "Upload a route with TCX metrics",
+    icon: "monitor_heart",
+    tier: "bronze",
+    check: (c) => c.routesWithTcx >= 1,
+    progress: (c) => `${c.routesWithTcx} / 1 TCX route`,
+  },
+  {
+    id: "tcx-10",
+    name: "Metric Master",
+    description: "Upload 10 routes with TCX metrics",
+    icon: "query_stats",
+    tier: "silver",
+    check: (c) => c.routesWithTcx >= 10,
+    progress: (c) => `${c.routesWithTcx} / 10 TCX routes`,
   },
 ];
 
