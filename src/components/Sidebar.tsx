@@ -317,6 +317,18 @@ export function Sidebar({
           </div>}
         </Link>
 
+        <Link
+          href="/familiarity"
+          className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl transition-colors ${isActive("/familiarity") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}
+          title="Route Familiarity"
+        >
+          <Icon name="compare_arrows" filled={isActive("/familiarity")} className="text-base" />
+          {!collapsed && <div>
+            <span className="font-semibold text-sm">Route Familiarity</span>
+            <span className="block text-[10px] text-on-primary/50">Compare GPX</span>
+          </div>}
+        </Link>
+
         <a
           className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl text-on-primary/80 hover:bg-primary-container/60 transition-colors`}
           href="/badges"
@@ -450,6 +462,14 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             <div>
               <span className="font-semibold text-sm">Route Suggestions</span>
               <span className="block text-[10px] text-on-primary/50">Generate loops</span>
+            </div>
+          </Link>
+
+          <Link href="/familiarity" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/familiarity") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
+            <Icon name="compare_arrows" filled={isActive("/familiarity")} className="text-base" />
+            <div>
+              <span className="font-semibold text-sm">Route Familiarity</span>
+              <span className="block text-[10px] text-on-primary/50">Compare GPX</span>
             </div>
           </Link>
 
