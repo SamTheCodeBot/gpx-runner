@@ -127,7 +127,7 @@ export default function SuggestPage() {
           <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
-                <Icon name="explore" className="text-primary text-xl" />
+                <Icon name="explore" filled className="text-on-primary-container text-xl" />
               </div>
               <div>
                 <h2 className="text-xl font-extrabold text-on-surface">Route Suggestions</h2>
