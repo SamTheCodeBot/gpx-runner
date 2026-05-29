@@ -4,6 +4,36 @@ import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
 
 export const dynamic = "force-dynamic";
 
+function compactCoordinates(rawCoordinates: unknown): [number, number][] {
+  if (!Array.isArray(rawCoordinates)) return [];
+
+  const coordinates = rawCoordinates
+    .map((coordinate) => {
+      if (Array.isArray(coordinate) && typeof coordinate[0] === "number" && typeof coordinate[1] === "number") {
+        return [coordinate[0], coordinate[1]] as [number, number];
+      }
+      if (
+        coordinate &&
+        typeof coordinate === "object" &&
+        "lat" in coordinate &&
+        "lon" in coordinate &&
+        typeof coordinate.lat === "number" &&
+        typeof coordinate.lon === "number"
+      ) {
+        return [coordinate.lon, coordinate.lat] as [number, number];
+      }
+      return null;
+    })
+    .filter((coordinate): coordinate is [number, number] => coordinate !== null);
+
+  if (coordinates.length <= 50) return coordinates;
+
+  const step = Math.ceil(coordinates.length / 50);
+  return coordinates.filter((_, index) => (
+    index === 0 || index === coordinates.length - 1 || index % step === 0
+  ));
+}
+
 // GET /api/user/dashboard - all initial data in one round trip
 // Returns { profile, routes, favorites } to replace 3+ sequential Firestore queries
 export async function GET(req: NextRequest) {
@@ -38,6 +68,7 @@ export async function GET(req: NextRequest) {
           "type",
           "isRoundTrip",
           "countries",
+          "coordinates",
           "hasTcx",
           "strava",
         )
@@ -71,6 +102,7 @@ export async function GET(req: NextRequest) {
         type: d.type || "road",
         isRoundTrip: d.isRoundTrip ?? false,
         countries: d.countries || [],
+        coordinates: compactCoordinates(d.coordinates),
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
       };

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { auth as firebaseAuth } from "@/lib/firebase";
 
-const DASHBOARD_CACHE_VERSION = 2;
+const DASHBOARD_CACHE_VERSION = 3;
 const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export interface DashboardRoute {
