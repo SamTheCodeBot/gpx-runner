@@ -310,6 +310,20 @@ export default function FamiliarityPage() {
                     </div>
                   </div>
                 </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-surface-container-lowest px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-6 rounded-full bg-[#16a34a]" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Familiar</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-6 rounded-full bg-[#f59e0b]" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Partial</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-6 rounded-full bg-[#f97316]" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Unfamiliar</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -330,6 +344,7 @@ export default function FamiliarityPage() {
                 isSelectingStartPoint={false}
                 onMapClick={() => {}}
                 showPersonalHeatmapControl={false}
+                familiaritySegments={result?.segments}
               />
             </div>
           </div>
