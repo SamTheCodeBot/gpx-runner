@@ -6,6 +6,7 @@ type SuggestionRequest = {
   avoidFamiliar?: boolean;
   centerLat?: number;
   centerLon?: number;
+  routeType?: 'road' | 'trail' | 'mixed';
   existingRoutes?: { coordinates?: [number, number][] }[];
 };
 
@@ -17,15 +18,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid route request' }, { status: 400 });
     }
 
+    const targetDistanceKm = Number(body.distance);
     const result = await generateTrainingRoutes({
       start: { lat: Number(body.centerLat), lng: Number(body.centerLon) },
-      targetDistanceKm: Number(body.distance),
-      toleranceKm: 0.5,
+      targetDistanceKm,
+      toleranceKm: Math.max(0.75, targetDistanceKm * 0.15),
       familiarityMode: body.avoidFamiliar ? 'new' : 'familiar',
       routeCollections: (body.existingRoutes ?? []).map((route) =>
         (route.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
       ),
-      maxCandidates: 20,
+      maxCandidates: 36,
       alternatives: 3,
     });
 
@@ -40,6 +42,7 @@ export async function POST(request: NextRequest) {
       elevationGain: 0,
       name: `${body.avoidFamiliar ? 'New' : 'Familiar'} Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
       isRoundTrip: true,
+      type: body.routeType ?? 'mixed',
       startPoint: [Number(body.centerLon), Number(body.centerLat)] as [number, number],
       familiarityScore: Math.round(best.familiarityRatio * 100),
       debug: best.debug,

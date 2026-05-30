@@ -1,9 +1,8 @@
 import { generateRoutes } from "../engine/generateRoute";
-import { OsmRoutingProvider } from "../engine/providers/osrm";
+import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
 import { GenerateRouteInput } from "../types";
 
 export async function generateTrainingRoutes(input: GenerateRouteInput) {
-  const osrmUrl = process.env.OSRM_URL ?? "";
-  const provider = new OsmRoutingProvider(osrmUrl);
+  const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
   return generateRoutes(provider, input);
 }

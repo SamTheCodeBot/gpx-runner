@@ -616,9 +616,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     async (
       startPoint: [number, number] | null,
       routes: GPXRoute[],
-      source: "my-routes" | "mapbox" | "both" = "my-routes",
-      routeType: "road" | "trail" | "mixed" = "mixed",
-      mapboxApiKey: string = ""
+      routeType: "road" | "trail" | "mixed" = "mixed"
     ) => {
       setIsSuggesting(true);
       setSuggestionError(null);
@@ -634,7 +632,6 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
-        const { generateFromMapbox } = await import("@/lib/route-providers");
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
 
@@ -653,7 +650,9 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               centerLat: lat,
               centerLon: lon,
               routeType,
-              existingRoutes: typedRoutes.map((route) => ({ coordinates: route.coordinates })),
+              existingRoutes: typedRoutes.map((route) => ({
+                coordinates: compactRouteCoordinates(route.coordinates),
+              })),
             }),
             signal: controller.signal,
           });
@@ -667,7 +666,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             coordinates: data.coordinates,
             distance: data.distance,
             elevationGain: data.elevationGain || 0,
-            type: routeType,
+            type: data.type || routeType,
           };
         };
 
@@ -680,23 +679,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
         } | null = null;
 
         try {
-          if (source === "my-routes") {
-            result = await generateFromServer();
-          } else if (source === "mapbox") {
-            if (!mapboxApiKey) throw new Error("Mapbox API key required");
-            result = await generateFromMapbox([lon, lat], suggestDistance, routeType, mapboxApiKey, controller.signal);
-          } else {
-            // "both" — prefer OSRM-backed suggestions, then try Mapbox if configured.
-            try {
-              result = await generateFromServer();
-            } catch (serverError) {
-              if (mapboxApiKey) {
-                result = await generateFromMapbox([lon, lat], suggestDistance, routeType, mapboxApiKey, controller.signal);
-              } else {
-                throw serverError;
-              }
-            }
-          }
+          result = await generateFromServer();
 
           if (result) {
             setSuggestedRoute({
@@ -735,6 +718,28 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
       setSuggestionError(null);
     },
   };
+}
+
+function compactRouteCoordinates(coordinates: [number, number][]): [number, number][] {
+  if (coordinates.length <= 2) return coordinates;
+
+  const compacted: [number, number][] = [coordinates[0]];
+  let last = coordinates[0];
+
+  for (let i = 1; i < coordinates.length - 1; i += 1) {
+    const current = coordinates[i];
+    if (haversine(last[1], last[0], current[1], current[0]) >= 25) {
+      compacted.push(current);
+      last = current;
+    }
+  }
+
+  const finalPoint = coordinates[coordinates.length - 1];
+  if (compacted[compacted.length - 1] !== finalPoint) {
+    compacted.push(finalPoint);
+  }
+
+  return compacted;
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 

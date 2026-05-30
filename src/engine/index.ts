@@ -27,6 +27,7 @@ export type GenerateRouteInput = {
   toleranceKm?: number;
   familiarityMode?: FamiliarityMode;
   gpxFiles?: string[];
+  routeCollections?: LatLng[][];
   maxCandidates?: number;
   alternatives?: number;
 };

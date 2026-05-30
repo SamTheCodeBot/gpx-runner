@@ -25,8 +25,10 @@ export async function generateRoutes(
   const toleranceMeters = toleranceKm * 1000;
   const targetFamiliarityRange = familiarityRangeForMode(familiarityMode);
 
-  const parsedTracks = (input.gpxFiles ?? [])
-    .map((gpx) => parseGpxToTrackPoints(gpx))
+  const parsedTracks = [
+    ...(input.routeCollections ?? []),
+    ...(input.gpxFiles ?? []).map((gpx) => parseGpxToTrackPoints(gpx)),
+  ]
     .filter((track) => track.length >= 2);
   const familiarityIndex = buildFamiliarityIndex(parsedTracks);
   const familiarGraph = buildFamiliarGraph(parsedTracks, input.start);
