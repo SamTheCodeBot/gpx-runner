@@ -651,7 +651,6 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               avoidFamiliar,
               centerLat: lat,
               centerLon: lon,
-              routeType: options.routeType ?? "mixed",
               preferQuiet: options.preferQuiet ?? false,
               preferGreen: options.preferGreen ?? false,
               elevationPreference: options.elevationPreference ?? "any",
@@ -669,7 +668,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             distance: data.distance,
             elevationGain: data.elevationGain || 0,
             samples: Array.isArray(data.samples) ? data.samples : undefined,
-            type: data.type || options.routeType || "mixed",
+            type: data.type || "mixed",
           };
         };
 

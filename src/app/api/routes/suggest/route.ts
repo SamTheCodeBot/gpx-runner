@@ -6,7 +6,6 @@ type SuggestionRequest = {
   avoidFamiliar?: boolean;
   centerLat?: number;
   centerLon?: number;
-  routeType?: 'road' | 'trail' | 'mixed';
   preferQuiet?: boolean;
   preferGreen?: boolean;
   elevationPreference?: 'any' | 'hilly' | 'flat';
@@ -28,7 +27,7 @@ export async function POST(request: NextRequest) {
       targetDistanceKm,
       toleranceKm: 0.5,
       alternatives: 3,
-      routeStyle: body.routeType ?? 'mixed',
+      routeStyle: 'mixed',
       preferQuiet: Boolean(body.preferQuiet),
       preferGreen: Boolean(body.preferGreen),
       elevationPreference: body.elevationPreference ?? 'any',
@@ -49,7 +48,7 @@ export async function POST(request: NextRequest) {
       })),
       name: `Suggested Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
       isRoundTrip: true,
-      type: body.routeType ?? 'mixed',
+      type: 'mixed',
       startPoint: [Number(body.centerLon), Number(body.centerLat)] as [number, number],
       debug: best.debug,
       source: 'openrouteservice-round-trip',

@@ -27,7 +27,6 @@ export default function SuggestPage() {
   const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
-  const [routeStyle, setRouteStyle] = useState<"road" | "mixed" | "trail">("mixed");
   const [preferQuiet, setPreferQuiet] = useState(true);
   const [preferGreen, setPreferGreen] = useState(false);
   const [elevationPreference, setElevationPreference] = useState<"any" | "hilly" | "flat">("any");
@@ -89,7 +88,6 @@ export default function SuggestPage() {
 
   const handleGenerate = () => {
     getSuggestion(selectedStartPoint, routes, {
-      routeType: routeStyle,
       preferQuiet,
       preferGreen,
       elevationPreference,
@@ -170,30 +168,6 @@ export default function SuggestPage() {
 
                 {/* Route preferences */}
                 <div className="space-y-3">
-                  <div>
-                    <span className="text-xs font-medium text-on-surface-variant">Route style</span>
-                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
-                      {[
-                        { value: "road", label: "Road" },
-                        { value: "mixed", label: "Mixed" },
-                        { value: "trail", label: "Trail" },
-                      ].map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setRouteStyle(option.value as typeof routeStyle)}
-                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                            routeStyle === option.value
-                              ? "bg-primary text-on-primary"
-                              : "text-on-surface-variant hover:bg-surface-container"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   <div>
                     <span className="text-xs font-medium text-on-surface-variant">Elevation</span>
                     <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
@@ -280,13 +254,6 @@ export default function SuggestPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <Icon name="check_circle" filled className="text-secondary text-base" />
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
-                    {suggestedRoute.type && (
-                      <span className={`ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                        suggestedRoute.type === "road" ? "bg-pink-100 text-pink-700"
-                          : suggestedRoute.type === "trail" ? "bg-cyan-100 text-cyan-700"
-                          : "bg-purple-100 text-purple-700"
-                      }`}>{suggestedRoute.type}</span>
-                    )}
                   </div>
                   <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
                   <p className="text-xs text-on-surface-variant mt-0.5">
@@ -331,19 +298,9 @@ export default function SuggestPage() {
             </div>
             {/* Mobile map controls */}
             <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Road</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Trail</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Mixed</span>
-                </div>
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                <span className="text-[9px] text-on-surface-variant">Suggestion</span>
               </div>
               <button
                 onClick={() => setShowHeatmap(!showHeatmap)}
