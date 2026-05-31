@@ -607,6 +607,13 @@ export function useRouteFilter(
   return filtered;
 }
 
+type RouteSuggestionOptions = {
+  routeType?: "road" | "trail" | "mixed";
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  elevationPreference?: "any" | "hilly" | "flat";
+};
+
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -616,7 +623,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     async (
       startPoint: [number, number] | null,
       routes: GPXRoute[],
-      routeType: "road" | "trail" | "mixed" = "mixed"
+      options: RouteSuggestionOptions = {}
     ) => {
       setIsSuggesting(true);
       setSuggestionError(null);
@@ -644,7 +651,10 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               avoidFamiliar,
               centerLat: lat,
               centerLon: lon,
-              routeType,
+              routeType: options.routeType ?? "mixed",
+              preferQuiet: options.preferQuiet ?? false,
+              preferGreen: options.preferGreen ?? false,
+              elevationPreference: options.elevationPreference ?? "any",
             }),
             signal: controller.signal,
           });
@@ -658,7 +668,8 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             coordinates: data.coordinates,
             distance: data.distance,
             elevationGain: data.elevationGain || 0,
-            type: data.type || routeType,
+            samples: Array.isArray(data.samples) ? data.samples : undefined,
+            type: data.type || options.routeType || "mixed",
           };
         };
 
@@ -667,6 +678,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           coordinates: [number, number][];
           distance: number;
           elevationGain: number;
+          samples?: GPXRoute["samples"];
           type: "road" | "trail" | "mixed";
         } | null = null;
 
@@ -681,6 +693,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               coordinates: result.coordinates,
               distance: result.distance,
               elevationGain: result.elevationGain,
+              samples: result.samples,
               color: "#f472b6",
               isRoundTrip: true,
               type: result.type,

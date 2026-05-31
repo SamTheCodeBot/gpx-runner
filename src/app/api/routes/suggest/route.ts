@@ -7,6 +7,9 @@ type SuggestionRequest = {
   centerLat?: number;
   centerLon?: number;
   routeType?: 'road' | 'trail' | 'mixed';
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  elevationPreference?: 'any' | 'hilly' | 'flat';
   existingRoutes?: { coordinates?: [number, number][] }[];
 };
 
@@ -24,7 +27,11 @@ export async function POST(request: NextRequest) {
       start,
       targetDistanceKm,
       toleranceKm: 0.5,
-      alternatives: 3,
+      alternatives: 5,
+      routeStyle: body.routeType ?? 'mixed',
+      preferQuiet: Boolean(body.preferQuiet),
+      preferGreen: Boolean(body.preferGreen),
+      elevationPreference: body.elevationPreference ?? 'any',
     });
 
     const best = result.routes[0];
@@ -35,7 +42,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
       distance: best.distanceMeters,
-      elevationGain: 0,
+      elevationGain: best.elevationGainMeters,
+      samples: best.geometry.map((point) => ({
+        coordinate: [point.lng, point.lat] as [number, number],
+        elevation: point.elevation,
+      })),
       name: `Suggested Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
       isRoundTrip: true,
       type: body.routeType ?? 'mixed',

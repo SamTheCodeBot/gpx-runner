@@ -1,6 +1,7 @@
 export type LatLng = {
   lat: number;
   lng: number;
+  elevation?: number;
 };
 
 export type FamiliarityMode = "familiar" | "mixed" | "new";
@@ -39,6 +40,8 @@ export type RouteRequest = {
 export type RouteProviderResult = {
   geometry: LatLng[];
   distanceMeters: number;
+  elevationGainMeters?: number;
+  elevationLossMeters?: number;
 };
 
 export interface RouteProvider {

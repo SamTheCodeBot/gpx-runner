@@ -5,11 +5,18 @@ function encodeCoordinate(point: LatLng): [number, number] {
 }
 
 const API_TIMEOUT_MS = 10_000;
-const DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/foot-walking/geojson";
+const DIRECTIONS_BASE_URL = "https://api.openrouteservice.org/v2/directions";
+
+type OpenRouteServiceProfile = "foot-walking" | "foot-hiking";
+type RouteStyle = "road" | "mixed" | "trail";
 
 type OpenRouteServiceFeature = {
-  geometry?: { coordinates?: [number, number][] };
-  properties?: { summary?: { distance?: number } };
+  geometry?: { coordinates?: [number, number, number?][] };
+  properties?: {
+    summary?: { distance?: number };
+    ascent?: number;
+    descent?: number;
+  };
 };
 
 type OpenRouteServiceResponse = {
@@ -28,7 +35,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
     const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     try {
-      const response = await fetch(DIRECTIONS_URL, {
+      const response = await fetch(this.directionsUrl("mixed"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
@@ -55,7 +62,15 @@ export class OpenRouteServiceProvider implements RouteProvider {
     }
   }
 
-  async roundTrip(input: { start: LatLng; targetDistanceMeters: number; points?: number; seed?: number }): Promise<RouteProviderResult | null> {
+  async roundTrip(input: {
+    start: LatLng;
+    targetDistanceMeters: number;
+    points?: number;
+    seed?: number;
+    routeStyle?: RouteStyle;
+    preferQuiet?: boolean;
+    preferGreen?: boolean;
+  }): Promise<RouteProviderResult | null> {
     if (!this.apiKey) {
       throw new Error("Missing OPENROUTESERVICE_API_KEY");
     }
@@ -64,15 +79,15 @@ export class OpenRouteServiceProvider implements RouteProvider {
     const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     try {
-      const response = await fetch(DIRECTIONS_URL, {
+      const response = await fetch(this.directionsUrl(input.routeStyle), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
           coordinates: [encodeCoordinate(input.start)],
           instructions: false,
-          elevation: false,
+          elevation: true,
           options: {
-            avoid_features: ["ferries"],
+            ...this.routeOptions(input.routeStyle, input.preferQuiet, input.preferGreen),
             round_trip: {
               length: Math.round(input.targetDistanceMeters),
               points: input.points ?? 5,
@@ -103,6 +118,22 @@ export class OpenRouteServiceProvider implements RouteProvider {
     };
   }
 
+  private directionsUrl(routeStyle: RouteStyle = "mixed") {
+    const profile: OpenRouteServiceProfile = routeStyle === "trail" ? "foot-hiking" : "foot-walking";
+    return `${DIRECTIONS_BASE_URL}/${profile}/geojson`;
+  }
+
+  private routeOptions(routeStyle: RouteStyle = "mixed", preferQuiet = false, preferGreen = false) {
+    const weightings: Record<string, { factor: number }> = {};
+    if (preferQuiet) weightings.quiet = { factor: 1.0 };
+    if (preferGreen || routeStyle === "trail") weightings.green = { factor: routeStyle === "trail" ? 1.0 : 0.8 };
+
+    return {
+      avoid_features: routeStyle === "trail" ? ["ferries", "fords"] : ["ferries", "fords", "steps"],
+      ...(Object.keys(weightings).length > 0 ? { profile_params: { weightings } } : {}),
+    };
+  }
+
   private parseRoute(json: unknown): RouteProviderResult | null {
     const feature = (json as OpenRouteServiceResponse).features?.[0];
     const coords = feature?.geometry?.coordinates;
@@ -114,7 +145,13 @@ export class OpenRouteServiceProvider implements RouteProvider {
 
     return {
       distanceMeters: Number(distance),
-      geometry: coords.map(([lng, lat]) => ({ lat, lng })),
+      elevationGainMeters: Number.isFinite(feature.properties?.ascent) ? Number(feature.properties?.ascent) : undefined,
+      elevationLossMeters: Number.isFinite(feature.properties?.descent) ? Number(feature.properties?.descent) : undefined,
+      geometry: coords.map(([lng, lat, elevation]) => ({
+        lat,
+        lng,
+        elevation: Number.isFinite(elevation) ? Number(elevation) : undefined,
+      })),
     };
   }
 }

@@ -27,6 +27,10 @@ export default function SuggestPage() {
   const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
+  const [routeStyle, setRouteStyle] = useState<"road" | "mixed" | "trail">("mixed");
+  const [preferQuiet, setPreferQuiet] = useState(true);
+  const [preferGreen, setPreferGreen] = useState(false);
+  const [elevationPreference, setElevationPreference] = useState<"any" | "hilly" | "flat">("any");
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
@@ -84,7 +88,12 @@ export default function SuggestPage() {
   };
 
   const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes, "mixed");
+    getSuggestion(selectedStartPoint, routes, {
+      routeType: routeStyle,
+      preferQuiet,
+      preferGreen,
+      elevationPreference,
+    });
   };
 
   if (authLoading) {
@@ -159,6 +168,68 @@ export default function SuggestPage() {
                     onChange={e => setSuggestDistance(parseFloat(e.target.value))} className="w-full accent-primary" />
                 </div>
 
+                {/* Route preferences */}
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-xs font-medium text-on-surface-variant">Route style</span>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+                      {[
+                        { value: "road", label: "Road" },
+                        { value: "mixed", label: "Mixed" },
+                        { value: "trail", label: "Trail" },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setRouteStyle(option.value as typeof routeStyle)}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            routeStyle === option.value
+                              ? "bg-primary text-on-primary"
+                              : "text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-medium text-on-surface-variant">Elevation</span>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+                      {[
+                        { value: "any", label: "Any" },
+                        { value: "hilly", label: "Hilly" },
+                        { value: "flat", label: "Flat" },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setElevationPreference(option.value as typeof elevationPreference)}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            elevationPreference === option.value
+                              ? "bg-secondary text-on-secondary"
+                              : "text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-container-high rounded-xl">
+                      <span className="text-xs font-medium text-on-surface">Prefer quiet roads</span>
+                      <input type="checkbox" checked={preferQuiet} onChange={(e) => setPreferQuiet(e.target.checked)} className="accent-primary" />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-container-high rounded-xl">
+                      <span className="text-xs font-medium text-on-surface">Prefer green areas</span>
+                      <input type="checkbox" checked={preferGreen} onChange={(e) => setPreferGreen(e.target.checked)} className="accent-primary" />
+                    </label>
+                  </div>
+                </div>
+
                 {/* Start point */}
                 <div>
                   <div className="mb-1.5">
@@ -220,7 +291,7 @@ export default function SuggestPage() {
                   <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
                   <p className="text-xs text-on-surface-variant mt-0.5">
                     {(suggestedRoute.distance / 1000).toFixed(1)} km
-                    {suggestedRoute.elevationGain > 0 && ` · +${suggestedRoute.elevationGain}m`}
+                    {` · +${Math.round(suggestedRoute.elevationGain || 0)}m estimated climb`}
                   </p>
                   <div className="mt-3 flex items-center gap-2">
                     <button onClick={handleGenerate} disabled={isSuggesting}
