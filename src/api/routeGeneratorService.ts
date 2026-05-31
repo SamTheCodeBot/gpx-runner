@@ -39,12 +39,10 @@ export type RoundTripSuggestionResult = {
 const ROUND_TRIP_SEEDS = [
   11, 29, 47, 71, 89, 113, 137, 163,
   191, 223, 257, 293, 331, 373, 419, 467,
-  523, 587, 653, 727, 809, 887, 971, 1061,
-  1151, 1237, 1321, 1423, 1543, 1657, 1777, 1901,
-  2027, 2179, 2333, 2503, 2687, 2879, 3067, 3259,
+  523, 587, 653, 727,
 ];
 
-const ROUND_TRIP_BATCH_SIZE = 4;
+const ROUND_TRIP_BATCH_SIZE = 2;
 
 function pointsForDistance(targetMeters: number): number {
   if (targetMeters < 8_000) return 3;
@@ -128,66 +126,82 @@ export async function generateOpenRouteServiceRoundTrip(
   const closest: RoundTripSuggestionResult[] = [];
   let rejectedCount = 0;
   const points = pointsForDistance(targetMeters);
+  const phases: Array<{
+    requestMode: "preferred" | "basic" | "basic-no-elevation";
+    seeds: number[];
+  }> = [
+    { requestMode: "preferred", seeds: ROUND_TRIP_SEEDS.slice(0, 8) },
+    { requestMode: "basic", seeds: ROUND_TRIP_SEEDS.slice(0, 8) },
+    { requestMode: "basic-no-elevation", seeds: ROUND_TRIP_SEEDS.slice(0, 4) },
+  ];
 
-  for (let i = 0; i < ROUND_TRIP_SEEDS.length; i += ROUND_TRIP_BATCH_SIZE) {
-    const batch = ROUND_TRIP_SEEDS.slice(i, i + ROUND_TRIP_BATCH_SIZE);
-    const routes = await Promise.all(batch.map(async (seed) => {
-      const route = await provider.roundTrip({
-        start: input.start,
-        targetDistanceMeters: targetMeters,
-        points,
-        seed,
-        routeStyle: input.routeStyle,
-        preferQuiet: input.preferQuiet,
-        preferGreen: input.preferGreen,
-      });
+  for (const phase of phases) {
+    let phaseHadResponse = false;
 
-      if (!route || route.geometry.length < 2) return null;
-
-      const distanceDeltaMeters = Math.abs(route.distanceMeters - targetMeters);
-      const quality = routeQuality(route.geometry);
-      const gain = Math.round(route.elevationGainMeters ?? 0);
-      const elevScore = elevationScore(gain, input.targetDistanceKm, input.elevationPreference ?? "any");
-
-      return {
-        distanceMeters: route.distanceMeters,
-        elevationGainMeters: gain,
-        geometry: route.geometry,
-        debug: {
-          seed,
+    for (let i = 0; i < phase.seeds.length; i += ROUND_TRIP_BATCH_SIZE) {
+      const batch = phase.seeds.slice(i, i + ROUND_TRIP_BATCH_SIZE);
+      const routes = await Promise.all(batch.map(async (seed) => {
+        const route = await provider.roundTrip({
+          start: input.start,
+          targetDistanceMeters: targetMeters,
           points,
-          distanceDeltaMeters,
-          withinTolerance: distanceDeltaMeters <= toleranceMeters,
-          qualityPenalty: quality.penalty,
-          hairpins: quality.hairpins,
-          tinyLoops: quality.tinyLoops,
-          backtracks: quality.backtracks,
-          elevationScore: elevScore,
-        },
-        reject: quality.reject,
-      };
-    }));
+          seed,
+          routeStyle: input.routeStyle,
+          preferQuiet: input.preferQuiet,
+          preferGreen: input.preferGreen,
+          requestMode: phase.requestMode,
+        });
 
-    for (const result of routes) {
-      if (!result) {
-        rejectedCount += 1;
-        continue;
+        if (!route || route.geometry.length < 2) return null;
+
+        const distanceDeltaMeters = Math.abs(route.distanceMeters - targetMeters);
+        const quality = routeQuality(route.geometry);
+        const gain = Math.round(route.elevationGainMeters ?? 0);
+        const elevScore = elevationScore(gain, input.targetDistanceKm, input.elevationPreference ?? "any");
+
+        return {
+          distanceMeters: route.distanceMeters,
+          elevationGainMeters: gain,
+          geometry: route.geometry,
+          debug: {
+            seed,
+            points,
+            distanceDeltaMeters,
+            withinTolerance: distanceDeltaMeters <= toleranceMeters,
+            qualityPenalty: quality.penalty,
+            hairpins: quality.hairpins,
+            tinyLoops: quality.tinyLoops,
+            backtracks: quality.backtracks,
+            elevationScore: elevScore,
+          },
+          reject: quality.reject,
+        };
+      }));
+
+      for (const result of routes) {
+        if (!result) {
+          rejectedCount += 1;
+          continue;
+        }
+
+        phaseHadResponse = true;
+        const { reject, ...route } = result;
+        closest.push(route);
+        closest.sort((a, b) => {
+          const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
+          const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
+          return scoreA - scoreB;
+        });
+        closest.splice(Math.max(alternatives, 4));
+
+        if (!reject && route.debug.distanceDeltaMeters <= toleranceMeters) accepted.push(route);
+        else rejectedCount += 1;
       }
 
-      const { reject, ...route } = result;
-      closest.push(route);
-      closest.sort((a, b) => {
-        const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
-        const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
-        return scoreA - scoreB;
-      });
-      closest.splice(Math.max(alternatives, 8));
-
-      if (!reject && route.debug.distanceDeltaMeters <= toleranceMeters) accepted.push(route);
-      else rejectedCount += 1;
+      if (accepted.length > 0) break;
     }
 
-    if (accepted.length >= alternatives) break;
+    if (accepted.length > 0 || phaseHadResponse) break;
   }
 
   accepted.sort((a, b) => {

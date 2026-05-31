@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       start,
       targetDistanceKm,
       toleranceKm: 0.5,
-      alternatives: 5,
+      alternatives: 3,
       routeStyle: body.routeType ?? 'mixed',
       preferQuiet: Boolean(body.preferQuiet),
       preferGreen: Boolean(body.preferGreen),

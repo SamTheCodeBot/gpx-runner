@@ -31,6 +31,7 @@ type RoundTripInput = {
   routeStyle?: RouteStyle;
   preferQuiet?: boolean;
   preferGreen?: boolean;
+  requestMode?: "preferred" | "basic" | "basic-no-elevation";
 };
 
 export class OpenRouteServiceProvider implements RouteProvider {
@@ -77,35 +78,26 @@ export class OpenRouteServiceProvider implements RouteProvider {
       throw new Error("Missing OPENROUTESERVICE_API_KEY");
     }
 
-    const attempts = [
-      {
-        profile: input.routeStyle,
-        elevation: true,
-        options: this.routeOptions(input.routeStyle, input.preferQuiet, input.preferGreen),
-      },
-      {
-        profile: input.routeStyle,
-        elevation: true,
-        options: { avoid_features: ["ferries"] },
-      },
-      {
-        profile: "mixed" as RouteStyle,
-        elevation: true,
-        options: { avoid_features: ["ferries"] },
-      },
-      {
-        profile: "mixed" as RouteStyle,
-        elevation: false,
-        options: { avoid_features: ["ferries"] },
-      },
-    ];
+    const attempt =
+      input.requestMode === "basic-no-elevation"
+        ? {
+            profile: "mixed" as RouteStyle,
+            elevation: false,
+            options: { avoid_features: ["ferries"] },
+          }
+        : input.requestMode === "basic"
+          ? {
+              profile: "mixed" as RouteStyle,
+              elevation: true,
+              options: { avoid_features: ["ferries"] },
+            }
+          : {
+              profile: input.routeStyle,
+              elevation: true,
+              options: this.routeOptions(input.routeStyle, input.preferQuiet, input.preferGreen),
+            };
 
-    for (const attempt of attempts) {
-      const route = await this.requestRoundTrip(input, attempt);
-      if (route) return route;
-    }
-
-    return null;
+    return this.requestRoundTrip(input, attempt);
   }
 
   private headers() {
