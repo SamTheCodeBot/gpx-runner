@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const best = result.routes[0];
     if (!best) {
       const message = result.unsafeRejectedCount > 0
-        ? 'No safe low-traffic loop route found from this start point.'
+        ? 'No route found that avoids the highest-traffic roads from this start point.'
         : 'No loop route found from this start point.';
       return NextResponse.json({ error: message }, { status: 422 });
     }

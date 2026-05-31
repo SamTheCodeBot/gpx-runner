@@ -133,20 +133,19 @@ function trafficSafety(route: RouteProviderResult) {
   const distance = Math.max(1, route.distanceMeters);
 
   const unsafeRoads =
-    stateRoadMeters > 80 ||
-    veryNoisyMeters > 150 ||
-    noisyMeters / distance > 0.12 ||
-    roadMeters / distance > 0.38;
+    stateRoadMeters > 450 ||
+    veryNoisyMeters > 600 ||
+    noisyMeters / distance > 0.28;
 
   return {
     stateRoadMeters: Math.round(stateRoadMeters),
     roadMeters: Math.round(roadMeters),
     noisyMeters: Math.round(noisyMeters),
     trafficPenalty:
-      (stateRoadMeters / distance) * 220 +
-      (roadMeters / distance) * 65 +
-      (noisyMeters / distance) * 120 +
-      (veryNoisyMeters / distance) * 180,
+      (stateRoadMeters / distance) * 520 +
+      (roadMeters / distance) * 95 +
+      (noisyMeters / distance) * 240 +
+      (veryNoisyMeters / distance) * 360,
     unsafeRoads,
   };
 }
@@ -270,15 +269,13 @@ export async function generateOpenRouteServiceRoundTrip(
 
         phaseHadResponse = true;
         const { reject, ...route } = result;
-        if (!route.debug.unsafeRoads) {
-          closest.push(route);
-          closest.sort((a, b) => {
-            const scoreA = a.debug.directionPenalty + a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
-            const scoreB = b.debug.directionPenalty + b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
-            return scoreA - scoreB;
-          });
-          closest.splice(Math.max(alternatives, 4));
-        }
+        closest.push(route);
+        closest.sort((a, b) => {
+          const scoreA = a.debug.directionPenalty + a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
+          const scoreB = b.debug.directionPenalty + b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
+          return scoreA - scoreB;
+        });
+        closest.splice(Math.max(alternatives, 4));
 
         if (!reject && route.debug.distanceDeltaMeters <= toleranceMeters) accepted.push(route);
         else {
