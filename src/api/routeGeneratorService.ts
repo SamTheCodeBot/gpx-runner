@@ -1,6 +1,6 @@
 import { generateRoutes } from "../engine/generateRoute";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
-import { GenerateRouteInput, LatLng } from "../types";
+import { GenerateRouteInput, LatLng, RouteExtraSummary, RouteProviderResult } from "../types";
 import { haversineMeters } from "../engine/utils/geo";
 
 export async function generateTrainingRoutes(input: GenerateRouteInput) {
@@ -32,6 +32,11 @@ export type RoundTripSuggestionResult = {
     hairpins: number;
     tinyLoops: number;
     backtracks: number;
+    stateRoadMeters: number;
+    roadMeters: number;
+    noisyMeters: number;
+    trafficPenalty: number;
+    unsafeRoads: boolean;
     elevationScore: number;
   };
 };
@@ -65,7 +70,8 @@ function angleDelta(a: number, b: number): number {
   return delta > 180 ? 360 - delta : delta;
 }
 
-function routeQuality(points: LatLng[]) {
+function routeQuality(route: RouteProviderResult) {
+  const points = route.geometry;
   let hairpins = 0;
   let tinyLoops = 0;
   let backtracks = 0;
@@ -103,8 +109,42 @@ function routeQuality(points: LatLng[]) {
     hairpins,
     tinyLoops,
     backtracks,
-    penalty: hairpins * 18 + tinyLoops * 28 + backtracks * 12,
-    reject: hairpins >= 4 || tinyLoops >= 2 || backtracks >= 4,
+    ...trafficSafety(route),
+    geometryPenalty: hairpins * 18 + tinyLoops * 28 + backtracks * 12,
+    geometryReject: hairpins >= 4 || tinyLoops >= 2 || backtracks >= 4,
+  };
+}
+
+function summaryDistance(summary: RouteExtraSummary[] | undefined, predicate: (value: number) => boolean): number {
+  if (!Array.isArray(summary)) return 0;
+  return summary
+    .filter((item) => predicate(item.value))
+    .reduce((sum, item) => sum + Math.max(0, item.distance), 0);
+}
+
+function trafficSafety(route: RouteProviderResult) {
+  const stateRoadMeters = summaryDistance(route.extras?.waytype, (value) => value === 1);
+  const roadMeters = summaryDistance(route.extras?.waytype, (value) => value === 2);
+  const noisyMeters = summaryDistance(route.extras?.noise, (value) => value >= 6);
+  const veryNoisyMeters = summaryDistance(route.extras?.noise, (value) => value >= 8);
+  const distance = Math.max(1, route.distanceMeters);
+
+  const unsafeRoads =
+    stateRoadMeters > 80 ||
+    veryNoisyMeters > 150 ||
+    noisyMeters / distance > 0.12 ||
+    roadMeters / distance > 0.38;
+
+  return {
+    stateRoadMeters: Math.round(stateRoadMeters),
+    roadMeters: Math.round(roadMeters),
+    noisyMeters: Math.round(noisyMeters),
+    trafficPenalty:
+      (stateRoadMeters / distance) * 220 +
+      (roadMeters / distance) * 65 +
+      (noisyMeters / distance) * 120 +
+      (veryNoisyMeters / distance) * 180,
+    unsafeRoads,
   };
 }
 
@@ -117,7 +157,7 @@ function elevationScore(elevationGainMeters: number, targetDistanceKm: number, p
 
 export async function generateOpenRouteServiceRoundTrip(
   input: RoundTripSuggestionInput,
-): Promise<{ routes: RoundTripSuggestionResult[]; rejectedCount: number }> {
+): Promise<{ routes: RoundTripSuggestionResult[]; rejectedCount: number; unsafeRejectedCount: number }> {
   const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = (input.toleranceKm ?? 0.5) * 1000;
@@ -125,6 +165,7 @@ export async function generateOpenRouteServiceRoundTrip(
   const accepted: RoundTripSuggestionResult[] = [];
   const closest: RoundTripSuggestionResult[] = [];
   let rejectedCount = 0;
+  let unsafeRejectedCount = 0;
   const points = pointsForDistance(targetMeters);
   const phases: Array<{
     requestMode: "preferred" | "basic" | "basic-no-elevation";
@@ -155,7 +196,7 @@ export async function generateOpenRouteServiceRoundTrip(
         if (!route || route.geometry.length < 2) return null;
 
         const distanceDeltaMeters = Math.abs(route.distanceMeters - targetMeters);
-        const quality = routeQuality(route.geometry);
+        const quality = routeQuality(route);
         const gain = Math.round(route.elevationGainMeters ?? 0);
         const elevScore = elevationScore(gain, input.targetDistanceKm, input.elevationPreference ?? "any");
 
@@ -168,13 +209,18 @@ export async function generateOpenRouteServiceRoundTrip(
             points,
             distanceDeltaMeters,
             withinTolerance: distanceDeltaMeters <= toleranceMeters,
-            qualityPenalty: quality.penalty,
+            qualityPenalty: quality.geometryPenalty + quality.trafficPenalty,
             hairpins: quality.hairpins,
             tinyLoops: quality.tinyLoops,
             backtracks: quality.backtracks,
+            stateRoadMeters: quality.stateRoadMeters,
+            roadMeters: quality.roadMeters,
+            noisyMeters: quality.noisyMeters,
+            trafficPenalty: quality.trafficPenalty,
+            unsafeRoads: quality.unsafeRoads,
             elevationScore: elevScore,
           },
-          reject: quality.reject,
+          reject: quality.geometryReject || quality.unsafeRoads,
         };
       }));
 
@@ -186,16 +232,21 @@ export async function generateOpenRouteServiceRoundTrip(
 
         phaseHadResponse = true;
         const { reject, ...route } = result;
-        closest.push(route);
-        closest.sort((a, b) => {
-          const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
-          const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
-          return scoreA - scoreB;
-        });
-        closest.splice(Math.max(alternatives, 4));
+        if (!route.debug.unsafeRoads) {
+          closest.push(route);
+          closest.sort((a, b) => {
+            const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
+            const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
+            return scoreA - scoreB;
+          });
+          closest.splice(Math.max(alternatives, 4));
+        }
 
         if (!reject && route.debug.distanceDeltaMeters <= toleranceMeters) accepted.push(route);
-        else rejectedCount += 1;
+        else {
+          rejectedCount += 1;
+          if (route.debug.unsafeRoads) unsafeRejectedCount += 1;
+        }
       }
 
       if (accepted.length > 0) break;
@@ -213,5 +264,6 @@ export async function generateOpenRouteServiceRoundTrip(
   return {
     routes: accepted.length > 0 ? accepted : closest,
     rejectedCount,
+    unsafeRejectedCount,
   };
 }

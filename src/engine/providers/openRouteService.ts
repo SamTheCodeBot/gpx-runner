@@ -1,4 +1,4 @@
-import { LatLng, RouteProvider, RouteProviderResult, RouteRequest } from "../../types";
+import { LatLng, RouteExtraSummary, RouteProvider, RouteProviderResult, RouteRequest } from "../../types";
 
 function encodeCoordinate(point: LatLng): [number, number] {
   return [point.lng, point.lat];
@@ -16,11 +16,24 @@ type OpenRouteServiceFeature = {
     summary?: { distance?: number };
     ascent?: number;
     descent?: number;
+    extras?: {
+      waytype?: OpenRouteServiceExtra;
+      waytypes?: OpenRouteServiceExtra;
+      noise?: OpenRouteServiceExtra;
+    };
   };
 };
 
 type OpenRouteServiceResponse = {
   features?: OpenRouteServiceFeature[];
+};
+
+type OpenRouteServiceExtra = {
+  summary?: Array<{
+    value?: number;
+    distance?: number;
+    amount?: number;
+  }>;
 };
 
 type RoundTripInput = {
@@ -139,6 +152,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
           coordinates: [encodeCoordinate(input.start)],
           instructions: false,
           elevation: attempt.elevation,
+          extra_info: ["waytype", "noise"],
           options: {
             ...attempt.options,
             round_trip: {
@@ -178,6 +192,10 @@ export class OpenRouteServiceProvider implements RouteProvider {
         ? Number(feature.properties?.ascent)
         : this.computeElevationGain(coords),
       elevationLossMeters: Number.isFinite(feature.properties?.descent) ? Number(feature.properties?.descent) : undefined,
+      extras: {
+        waytype: this.parseExtraSummary(feature.properties?.extras?.waytype ?? feature.properties?.extras?.waytypes),
+        noise: this.parseExtraSummary(feature.properties?.extras?.noise),
+      },
       geometry: coords.map(([lng, lat, elevation]) => ({
         lat,
         lng,
@@ -200,5 +218,24 @@ export class OpenRouteServiceProvider implements RouteProvider {
     }
 
     return hasElevation ? Math.round(gain) : undefined;
+  }
+
+  private parseExtraSummary(extra: OpenRouteServiceExtra | undefined): RouteExtraSummary[] | undefined {
+    const summary = extra?.summary;
+    if (!Array.isArray(summary)) return undefined;
+
+    const parsed = summary
+      .map((item) => ({
+        value: Number(item.value),
+        distance: Number(item.distance),
+        amount: Number(item.amount),
+      }))
+      .filter((item) => (
+        Number.isFinite(item.value) &&
+        Number.isFinite(item.distance) &&
+        Number.isFinite(item.amount)
+      ));
+
+    return parsed.length > 0 ? parsed : undefined;
   }
 }

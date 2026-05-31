@@ -42,6 +42,18 @@ export type RouteProviderResult = {
   distanceMeters: number;
   elevationGainMeters?: number;
   elevationLossMeters?: number;
+  extras?: RouteProviderExtras;
+};
+
+export type RouteProviderExtras = {
+  waytype?: RouteExtraSummary[];
+  noise?: RouteExtraSummary[];
+};
+
+export type RouteExtraSummary = {
+  value: number;
+  distance: number;
+  amount: number;
 };
 
 export interface RouteProvider {
