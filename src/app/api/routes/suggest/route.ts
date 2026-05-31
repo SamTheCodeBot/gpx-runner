@@ -9,6 +9,7 @@ type SuggestionRequest = {
   preferQuiet?: boolean;
   preferGreen?: boolean;
   elevationPreference?: 'any' | 'hilly' | 'flat';
+  directionShift?: number;
   existingRoutes?: { coordinates?: [number, number][] }[];
 };
 
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
       preferQuiet: Boolean(body.preferQuiet),
       preferGreen: Boolean(body.preferGreen),
       elevationPreference: body.elevationPreference ?? 'any',
+      directionShift: Number.isFinite(body.directionShift) ? Number(body.directionShift) : 0,
     });
 
     const best = result.routes[0];

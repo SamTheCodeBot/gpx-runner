@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
@@ -30,6 +30,7 @@ export default function SuggestPage() {
   const [preferQuiet, setPreferQuiet] = useState(true);
   const [preferGreen, setPreferGreen] = useState(false);
   const [elevationPreference, setElevationPreference] = useState<"any" | "hilly" | "flat">("any");
+  const [generationCount, setGenerationCount] = useState(0);
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
@@ -43,6 +44,10 @@ export default function SuggestPage() {
 
   const { suggestedRoute, isSuggesting, suggestionError, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, false);
+
+  useEffect(() => {
+    setGenerationCount(0);
+  }, [selectedStartPoint, suggestDistance, preferQuiet, preferGreen, elevationPreference]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,10 +92,13 @@ export default function SuggestPage() {
   };
 
   const handleGenerate = () => {
+    const directionShift = generationCount % 4;
+    setGenerationCount((count) => count + 1);
     getSuggestion(selectedStartPoint, routes, {
       preferQuiet,
       preferGreen,
       elevationPreference,
+      directionShift,
     });
   };
 

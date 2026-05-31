@@ -612,6 +612,7 @@ type RouteSuggestionOptions = {
   preferQuiet?: boolean;
   preferGreen?: boolean;
   elevationPreference?: "any" | "hilly" | "flat";
+  directionShift?: number;
 };
 
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
@@ -654,6 +655,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               preferQuiet: options.preferQuiet ?? false,
               preferGreen: options.preferGreen ?? false,
               elevationPreference: options.elevationPreference ?? "any",
+              directionShift: options.directionShift ?? 0,
             }),
             signal: controller.signal,
           });

@@ -17,6 +17,7 @@ export type RoundTripSuggestionInput = {
   preferQuiet?: boolean;
   preferGreen?: boolean;
   elevationPreference?: "any" | "hilly" | "flat";
+  directionShift?: number;
 };
 
 export type RoundTripSuggestionResult = {
@@ -38,6 +39,8 @@ export type RoundTripSuggestionResult = {
     trafficPenalty: number;
     unsafeRoads: boolean;
     elevationScore: number;
+    directionBucket: number;
+    directionPenalty: number;
   };
 };
 
@@ -155,6 +158,36 @@ function elevationScore(elevationGainMeters: number, targetDistanceKm: number, p
   return -Math.min(80, gainPerKm * 2.5);
 }
 
+function shiftedSeeds(seeds: number[], directionShift = 0): number[] {
+  const shift = Math.abs(Math.floor(directionShift)) % 4;
+  if (shift === 0) return seeds;
+
+  const groups = [0, 1, 2, 3].map((group) => seeds.filter((_, index) => index % 4 === group));
+  return [...groups[shift], ...groups[(shift + 1) % 4], ...groups[(shift + 2) % 4], ...groups[(shift + 3) % 4]];
+}
+
+function directionBucketFromStart(start: LatLng, points: LatLng[]): number {
+  let farthest = points[0] ?? start;
+  let farthestDistance = 0;
+
+  for (const point of points) {
+    const distance = haversineMeters(start, point);
+    if (distance > farthestDistance) {
+      farthest = point;
+      farthestDistance = distance;
+    }
+  }
+
+  const bucket = Math.round(bearing(start, farthest) / 90) % 4;
+  return Number.isFinite(bucket) ? bucket : 0;
+}
+
+function directionPenalty(bucket: number, directionShift = 0): number {
+  const desired = Math.abs(Math.floor(directionShift)) % 4;
+  const diff = Math.abs(bucket - desired);
+  return Math.min(diff, 4 - diff) * 180;
+}
+
 export async function generateOpenRouteServiceRoundTrip(
   input: RoundTripSuggestionInput,
 ): Promise<{ routes: RoundTripSuggestionResult[]; rejectedCount: number; unsafeRejectedCount: number }> {
@@ -167,13 +200,14 @@ export async function generateOpenRouteServiceRoundTrip(
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   const points = pointsForDistance(targetMeters);
+  const seeds = shiftedSeeds(ROUND_TRIP_SEEDS, input.directionShift);
   const phases: Array<{
     requestMode: "preferred" | "basic" | "basic-no-elevation";
     seeds: number[];
   }> = [
-    { requestMode: "preferred", seeds: ROUND_TRIP_SEEDS.slice(0, 8) },
-    { requestMode: "basic", seeds: ROUND_TRIP_SEEDS.slice(0, 8) },
-    { requestMode: "basic-no-elevation", seeds: ROUND_TRIP_SEEDS.slice(0, 4) },
+    { requestMode: "preferred", seeds: seeds.slice(0, 8) },
+    { requestMode: "basic", seeds: seeds.slice(0, 8) },
+    { requestMode: "basic-no-elevation", seeds: seeds.slice(0, 4) },
   ];
 
   for (const phase of phases) {
@@ -199,6 +233,8 @@ export async function generateOpenRouteServiceRoundTrip(
         const quality = routeQuality(route);
         const gain = Math.round(route.elevationGainMeters ?? 0);
         const elevScore = elevationScore(gain, input.targetDistanceKm, input.elevationPreference ?? "any");
+        const directionBucket = directionBucketFromStart(input.start, route.geometry);
+        const dirPenalty = directionPenalty(directionBucket, input.directionShift);
 
         return {
           distanceMeters: route.distanceMeters,
@@ -219,6 +255,8 @@ export async function generateOpenRouteServiceRoundTrip(
             trafficPenalty: quality.trafficPenalty,
             unsafeRoads: quality.unsafeRoads,
             elevationScore: elevScore,
+            directionBucket,
+            directionPenalty: dirPenalty,
           },
           reject: quality.geometryReject || quality.unsafeRoads,
         };
@@ -235,8 +273,8 @@ export async function generateOpenRouteServiceRoundTrip(
         if (!route.debug.unsafeRoads) {
           closest.push(route);
           closest.sort((a, b) => {
-            const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
-            const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
+            const scoreA = a.debug.directionPenalty + a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
+            const scoreB = b.debug.directionPenalty + b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
             return scoreA - scoreB;
           });
           closest.splice(Math.max(alternatives, 4));
@@ -256,8 +294,8 @@ export async function generateOpenRouteServiceRoundTrip(
   }
 
   accepted.sort((a, b) => {
-    const scoreA = a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
-    const scoreB = b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
+    const scoreA = a.debug.directionPenalty + a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
+    const scoreB = b.debug.directionPenalty + b.debug.distanceDeltaMeters + b.debug.qualityPenalty - b.debug.elevationScore;
     return scoreA - scoreB;
   });
 
