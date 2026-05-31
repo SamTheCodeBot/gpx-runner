@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateTrainingRoutes } from "@/api/routeGeneratorService";
+import { generateOpenRouteServiceRoundTrip } from "@/api/routeGeneratorService";
 
 type SuggestionRequest = {
   distance?: number;
@@ -18,35 +18,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid route request' }, { status: 400 });
     }
 
-    const targetDistanceKm = Number(body.distance);
-    const result = await generateTrainingRoutes({
-      start: { lat: Number(body.centerLat), lng: Number(body.centerLon) },
+    const targetDistanceKm = Math.min(100, Math.max(1, Number(body.distance)));
+    const start = { lat: Number(body.centerLat), lng: Number(body.centerLon) };
+    const result = await generateOpenRouteServiceRoundTrip({
+      start,
       targetDistanceKm,
-      toleranceKm: Math.max(0.75, targetDistanceKm * 0.15),
-      familiarityMode: body.avoidFamiliar ? 'new' : 'familiar',
-      routeCollections: (body.existingRoutes ?? []).map((route) =>
-        (route.coordinates ?? []).map(([lng, lat]) => ({ lat, lng })),
-      ),
-      maxCandidates: 36,
+      toleranceKm: 0.5,
       alternatives: 3,
     });
 
     const best = result.routes[0];
     if (!best) {
-      return NextResponse.json({ error: 'No valid road/trail loop found for the chosen constraints.' }, { status: 422 });
+      return NextResponse.json({ error: 'No loop route found from this start point.' }, { status: 422 });
     }
 
     return NextResponse.json({
       coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
       distance: best.distanceMeters,
       elevationGain: 0,
-      name: `${body.avoidFamiliar ? 'New' : 'Familiar'} Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
+      name: `Suggested Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
       isRoundTrip: true,
       type: body.routeType ?? 'mixed',
       startPoint: [Number(body.centerLon), Number(body.centerLat)] as [number, number],
-      familiarityScore: Math.round(best.familiarityRatio * 100),
       debug: best.debug,
-      source: best.source,
+      source: 'openrouteservice-round-trip',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate route';

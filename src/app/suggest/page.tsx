@@ -27,8 +27,6 @@ export default function SuggestPage() {
   const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
-  const [avoidFamiliar, setAvoidFamiliar] = useState(true);
-  const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
@@ -41,7 +39,7 @@ export default function SuggestPage() {
   }, [routes]);
 
   const { suggestedRoute, isSuggesting, suggestionError, getSuggestion, clearSuggestion } =
-    useRouteSuggestions(suggestDistance, avoidFamiliar);
+    useRouteSuggestions(suggestDistance, false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +84,7 @@ export default function SuggestPage() {
   };
 
   const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes, selectedType);
+    getSuggestion(selectedStartPoint, routes, "mixed");
   };
 
   if (authLoading) {
@@ -159,35 +157,6 @@ export default function SuggestPage() {
                   </div>
                   <input type="range" min={1} max={30} step={0.5} value={suggestDistance}
                     onChange={e => setSuggestDistance(parseFloat(e.target.value))} className="w-full accent-primary" />
-                </div>
-
-                {/* Type */}
-                <div>
-                  <div className="mb-1.5">
-                    <span className="text-xs font-medium text-on-surface-variant">Route Type</span>
-                  </div>
-                  <div className="flex gap-2">
-                    {(["road", "trail", "mixed"] as const).map(t => (
-                      <button key={t} onClick={() => setSelectedType(t)}
-                        className={`flex-1 py-1.5 rounded-xl text-xs font-bold capitalize transition-colors ${
-                          selectedType === t
-                            ? t === "road" ? "bg-pink-100 text-pink-700" : t === "trail" ? "bg-cyan-100 text-cyan-700" : "bg-purple-100 text-purple-700"
-                            : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-low"
-                        }`}>{t}</button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium text-on-surface-variant w-16">Mode</span>
-                  <button onClick={() => setAvoidFamiliar(false)}
-                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                      !avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🏡 Your area</button>
-                  <button onClick={() => setAvoidFamiliar(true)}
-                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                      avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🧭 New area</button>
                 </div>
 
                 {/* Start point */}

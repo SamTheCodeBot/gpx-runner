@@ -635,12 +635,6 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);
 
-        const typedRoutes =
-          routeType === "mixed"
-            ? routes
-            : routes.filter((route) => route.type === routeType || route.type === "mixed");
-        const nearbyRoutes = selectNearbyRoutes(typedRoutes, [lon, lat], suggestDistance);
-
         const generateFromServer = async () => {
           const response = await fetch("/api/routes/suggest", {
             method: "POST",
@@ -651,9 +645,6 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               centerLat: lat,
               centerLon: lon,
               routeType,
-              existingRoutes: nearbyRoutes.map((route) => ({
-                coordinates: compactRouteCoordinates(route.coordinates),
-              })),
             }),
             signal: controller.signal,
           });
@@ -719,57 +710,6 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
       setSuggestionError(null);
     },
   };
-}
-
-function selectNearbyRoutes(routes: GPXRoute[], center: [number, number], distanceKm: number): GPXRoute[] {
-  const radiusMeters = Math.max(8000, distanceKm * 2500);
-  const scored = routes
-    .map((route) => ({
-      route,
-      distance: minRouteDistanceFromPoint(route.coordinates, center),
-    }))
-    .filter(({ distance }) => distance <= radiusMeters)
-    .sort((a, b) => a.distance - b.distance);
-
-  return scored.slice(0, 60).map(({ route }) => route);
-}
-
-function minRouteDistanceFromPoint(coordinates: [number, number][], center: [number, number]): number {
-  if (coordinates.length === 0) return Number.POSITIVE_INFINITY;
-
-  const step = Math.max(1, Math.floor(coordinates.length / 80));
-  let best = Number.POSITIVE_INFINITY;
-
-  for (let i = 0; i < coordinates.length; i += step) {
-    const coordinate = coordinates[i];
-    const distance = haversine(center[1], center[0], coordinate[1], coordinate[0]);
-    if (distance < best) best = distance;
-  }
-
-  const final = coordinates[coordinates.length - 1];
-  return Math.min(best, haversine(center[1], center[0], final[1], final[0]));
-}
-
-function compactRouteCoordinates(coordinates: [number, number][]): [number, number][] {
-  if (coordinates.length <= 2) return coordinates;
-
-  const compacted: [number, number][] = [coordinates[0]];
-  let last = coordinates[0];
-
-  for (let i = 1; i < coordinates.length - 1; i += 1) {
-    const current = coordinates[i];
-    if (haversine(last[1], last[0], current[1], current[0]) >= 25) {
-      compacted.push(current);
-      last = current;
-    }
-  }
-
-  const finalPoint = coordinates[coordinates.length - 1];
-  if (compacted[compacted.length - 1] !== finalPoint) {
-    compacted.push(finalPoint);
-  }
-
-  return compacted;
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 
