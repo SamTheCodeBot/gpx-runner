@@ -607,18 +607,27 @@ export function useRouteFilter(
   return filtered;
 }
 
+type RouteSuggestionOptions = {
+  routeType?: "road" | "trail" | "mixed";
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  elevationPreference?: "any" | "hilly" | "flat";
+  directionShift?: number;
+};
+
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
   const getSuggestion = useCallback(
     async (
       startPoint: [number, number] | null,
       routes: GPXRoute[],
-      source: "my-routes" | "mapbox" | "both" = "my-routes",
-      mapboxApiKey: string = ""
+      options: RouteSuggestionOptions = {}
     ) => {
       setIsSuggesting(true);
+      setSuggestionError(null);
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
@@ -631,29 +640,51 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
-        const { generateFromMyRoutes, generateFromMapbox } = await import("@/lib/route-providers");
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+        const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);
 
-        let result = null;
-        try {
-          if (source === "my-routes") {
-            result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
-          } else if (source === "mapbox") {
-            if (!mapboxApiKey) throw new Error("Mapbox API key required");
-            result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
-          } else {
-            // "both" — try my-routes first, fall back to mapbox
-            try {
-              result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
-            } catch {
-              if (mapboxApiKey) {
-                result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
-              } else {
-                throw new Error("No routes nearby and no Mapbox key");
-              }
-            }
+        const generateFromServer = async () => {
+          const response = await fetch("/api/routes/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              distance: suggestDistance,
+              avoidFamiliar,
+              centerLat: lat,
+              centerLon: lon,
+              preferQuiet: options.preferQuiet ?? false,
+              preferGreen: options.preferGreen ?? false,
+              elevationPreference: options.elevationPreference ?? "any",
+              directionShift: options.directionShift ?? 0,
+            }),
+            signal: controller.signal,
+          });
+
+          const data = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(data?.error || "No runnable route found for those settings");
           }
+          return {
+            name: data.name || `${avoidFamiliar ? "New" : "Familiar"} Loop`,
+            coordinates: data.coordinates,
+            distance: data.distance,
+            elevationGain: data.elevationGain || 0,
+            samples: Array.isArray(data.samples) ? data.samples : undefined,
+            type: data.type || "mixed",
+          };
+        };
+
+        let result: {
+          name: string;
+          coordinates: [number, number][];
+          distance: number;
+          elevationGain: number;
+          samples?: GPXRoute["samples"];
+          type: "road" | "trail" | "mixed";
+        } | null = null;
+
+        try {
+          result = await generateFromServer();
 
           if (result) {
             setSuggestedRoute({
@@ -663,6 +694,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               coordinates: result.coordinates,
               distance: result.distance,
               elevationGain: result.elevationGain,
+              samples: result.samples,
               color: "#f472b6",
               isRoundTrip: true,
               type: result.type,
@@ -673,28 +705,8 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
         }
       } catch (err) {
         console.error("[useRouteSuggestions]", err);
-        const { generateRandomRoute } = await import("@/lib/utils");
-        let lat2 = 56.9, lon2 = 12.5;
-        if (startPoint) { [lon2, lat2] = startPoint; }
-        else if (routes.length > 0) {
-          const allCoords = routes.flatMap((r) => r.coordinates);
-          if (allCoords.length > 0) {
-            lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
-            lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
-          }
-        }
-        const generated = generateRandomRoute([lon2, lat2], suggestDistance, "mixed", avoidFamiliar ? "novel" : "familiar", [], Date.now());
-        setSuggestedRoute({
-          id: `suggested-${Date.now()}`,
-          name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
-          date: new Date().toISOString(),
-          coordinates: generated.coordinates,
-          distance: generated.distance,
-          elevationGain: generated.elevationGain,
-          color: "#f472b6",
-          isRoundTrip: true,
-          type: "mixed",
-        });
+        setSuggestedRoute(null);
+        setSuggestionError(err instanceof Error ? err.message : "Could not generate a runnable route");
       } finally {
         setIsSuggesting(false);
       }
@@ -702,7 +714,16 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     [suggestDistance, avoidFamiliar]
   );
 
-  return { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
+  return {
+    suggestedRoute,
+    isSuggesting,
+    suggestionError,
+    getSuggestion,
+    clearSuggestion: () => {
+      setSuggestedRoute(null);
+      setSuggestionError(null);
+    },
+  };
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 

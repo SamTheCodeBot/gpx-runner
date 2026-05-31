@@ -25,8 +25,10 @@ export async function generateRoutes(
   const toleranceMeters = toleranceKm * 1000;
   const targetFamiliarityRange = familiarityRangeForMode(familiarityMode);
 
-  const parsedTracks = (input.gpxFiles ?? [])
-    .map((gpx) => parseGpxToTrackPoints(gpx))
+  const parsedTracks = [
+    ...(input.routeCollections ?? []),
+    ...(input.gpxFiles ?? []).map((gpx) => parseGpxToTrackPoints(gpx)),
+  ]
     .filter((track) => track.length >= 2);
   const familiarityIndex = buildFamiliarityIndex(parsedTracks);
   const familiarGraph = buildFamiliarGraph(parsedTracks, input.start);
@@ -55,10 +57,20 @@ export async function generateRoutes(
     else rejectedCount += 1;
   }
 
+  if (accepted.length >= alternatives) {
+    const bestAccepted = dedupeRoutes(accepted).sort((a, b) => {
+      const distDiffA = Math.abs(a.distanceMeters - targetMeters);
+      const distDiffB = Math.abs(b.distanceMeters - targetMeters);
+      if (distDiffA !== distDiffB) return distDiffA - distDiffB;
+      return b.score - a.score;
+    });
+    return { routes: bestAccepted.slice(0, alternatives), rejectedCount };
+  }
+
   const candidateWaypoints = buildLoopWaypointCandidates(
     input.start,
     targetMeters,
-    Math.min(maxCandidates, 20),
+    Math.min(maxCandidates, familiarityMode === "familiar" ? 12 : 20),
     familiarityMode,
     parsedTracks,
   );
@@ -96,6 +108,8 @@ export async function generateRoutes(
         rejectedCount += 1;
       }
     }
+
+    if (accepted.length >= alternatives) break;
   }
 
   const bestAccepted = dedupeRoutes(accepted).sort((a, b) => {

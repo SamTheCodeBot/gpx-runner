@@ -1,6 +1,7 @@
 export type LatLng = {
   lat: number;
   lng: number;
+  elevation?: number;
 };
 
 export type FamiliarityMode = "familiar" | "mixed" | "new";
@@ -27,6 +28,7 @@ export type GenerateRouteInput = {
   toleranceKm?: number;
   familiarityMode?: FamiliarityMode;
   gpxFiles?: string[];
+  routeCollections?: LatLng[][];
   maxCandidates?: number;
   alternatives?: number;
 };
@@ -38,6 +40,20 @@ export type RouteRequest = {
 export type RouteProviderResult = {
   geometry: LatLng[];
   distanceMeters: number;
+  elevationGainMeters?: number;
+  elevationLossMeters?: number;
+  extras?: RouteProviderExtras;
+};
+
+export type RouteProviderExtras = {
+  waytype?: RouteExtraSummary[];
+  noise?: RouteExtraSummary[];
+};
+
+export type RouteExtraSummary = {
+  value: number;
+  distance: number;
+  amount: number;
 };
 
 export interface RouteProvider {
