@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateOpenRouteServiceRoundTrip } from "@/api/routeGeneratorService";
+import type { NoGoZone } from "@/types";
 
 type SuggestionRequest = {
   distance?: number;
@@ -11,6 +12,7 @@ type SuggestionRequest = {
   elevationPreference?: 'any' | 'hilly' | 'flat';
   directionShift?: number;
   existingRoutes?: { coordinates?: [number, number][] }[];
+  noGoZones?: NoGoZone[];
 };
 
 export async function POST(request: NextRequest) {
@@ -33,6 +35,7 @@ export async function POST(request: NextRequest) {
       preferGreen: Boolean(body.preferGreen),
       elevationPreference: body.elevationPreference ?? 'any',
       directionShift: Number.isFinite(body.directionShift) ? Number(body.directionShift) : 0,
+      noGoZones: Array.isArray(body.noGoZones) ? body.noGoZones : undefined,
     });
 
     const best = result.routes[0];

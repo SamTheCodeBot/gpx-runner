@@ -1,4 +1,4 @@
-import { LatLng, RouteExtraSummary, RouteProvider, RouteProviderResult, RouteRequest } from "../../types";
+import { LatLng, LatLngPoint, NoGoZone, RouteExtraSummary, RouteProvider, RouteProviderResult, RouteRequest } from "../../types";
 
 function encodeCoordinate(point: LatLng): [number, number] {
   return [point.lng, point.lat];
@@ -45,6 +45,8 @@ type RoundTripInput = {
   preferQuiet?: boolean;
   preferGreen?: boolean;
   requestMode?: "preferred" | "basic" | "basic-no-elevation";
+  /** No-go zones — routes will not cross these polygon areas */
+  noGoZones?: NoGoZone[];
 };
 
 export class OpenRouteServiceProvider implements RouteProvider {
@@ -110,7 +112,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
               options: this.routeOptions(input.routeStyle, input.preferQuiet, input.preferGreen),
             };
 
-    return this.requestRoundTrip(input, attempt);
+    return this.requestRoundTrip(input, attempt, input.noGoZones);
   }
 
   private headers() {
@@ -137,12 +139,47 @@ export class OpenRouteServiceProvider implements RouteProvider {
     };
   }
 
+  /**
+   * Build ORS avoid_polygons geometry from no-go zones.
+   * ORS expects a single outer ring per polygon with clockwise winding.
+   * We accept [lng, lat] arrays and close each ring if not already closed.
+   */
+  private buildAvoidPolygons(zones: NoGoZone[]): { coordinates: LatLngPoint[][] } {
+    const polygons: LatLngPoint[][] = zones
+      .filter((z) => z.polygon.length >= 3)
+      .map((zone) => {
+        const ring = zone.polygon as LatLngPoint[];
+        // Close the ring
+        const closed = [...ring];
+        if (closed[0][0] !== closed[closed.length - 1][0] || closed[0][1] !== closed[closed.length - 1][1]) {
+          closed.push([closed[0][0], closed[0][1]]);
+        }
+        return closed;
+      });
+
+    return { coordinates: polygons };
+  }
+
   private async requestRoundTrip(
     input: RoundTripInput,
     attempt: { profile?: RouteStyle; elevation: boolean; options: Record<string, unknown> },
+    noGoZones?: NoGoZone[],
   ): Promise<RouteProviderResult | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    const options: Record<string, unknown> = {
+      ...attempt.options,
+      round_trip: {
+        length: Math.round(input.targetDistanceMeters),
+        points: input.points ?? 5,
+        seed: input.seed,
+      },
+    };
+
+    if (noGoZones && noGoZones.length > 0) {
+      options.avoid_polygons = this.buildAvoidPolygons(noGoZones);
+    }
 
     try {
       const response = await fetch(this.directionsUrl(attempt.profile), {
@@ -153,14 +190,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
           instructions: false,
           elevation: attempt.elevation,
           extra_info: ["waytype", "noise"],
-          options: {
-            ...attempt.options,
-            round_trip: {
-              length: Math.round(input.targetDistanceMeters),
-              points: input.points ?? 5,
-              seed: input.seed,
-            },
-          },
+          options,
         }),
         signal: controller.signal,
       });

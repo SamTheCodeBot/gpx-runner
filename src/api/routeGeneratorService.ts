@@ -1,6 +1,6 @@
 import { generateRoutes } from "../engine/generateRoute";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
-import { GenerateRouteInput, LatLng, RouteExtraSummary, RouteProviderResult } from "../types";
+import { GenerateRouteInput, LatLng, NoGoZone, RouteExtraSummary, RouteProviderResult } from "../types";
 import { haversineMeters } from "../engine/utils/geo";
 
 export async function generateTrainingRoutes(input: GenerateRouteInput) {
@@ -18,6 +18,8 @@ export type RoundTripSuggestionInput = {
   preferGreen?: boolean;
   elevationPreference?: "any" | "hilly" | "flat";
   directionShift?: number;
+  /** No-go zones — routes will not cross these polygon areas */
+  noGoZones?: NoGoZone[];
 };
 
 export type RoundTripSuggestionResult = {
@@ -224,6 +226,7 @@ export async function generateOpenRouteServiceRoundTrip(
           preferQuiet: input.preferQuiet,
           preferGreen: input.preferGreen,
           requestMode: phase.requestMode,
+          noGoZones: input.noGoZones,
         });
 
         if (!route || route.geometry.length < 2) return null;

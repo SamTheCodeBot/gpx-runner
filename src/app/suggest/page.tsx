@@ -1,13 +1,27 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useRouteSuggestions, useUserProfile, useRouteTemplate } from "@/lib/hooks";
 import { Icon, LoginScreen } from "@/components/ui";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "../types";
+import type { NoGoZone } from "@/types";
+
+const ZONE_COLORS = [
+  "#ef4444", // red
+  "#f97316", // orange
+  "#eab308", // yellow
+  "#22c55e", // green
+  "#3b82f6", // blue
+  "#8b5cf6", // violet
+];
+
+function randomZoneColor() {
+  return ZONE_COLORS[Math.floor(Math.random() * ZONE_COLORS.length)];
+}
 
 export default function SuggestPage() {
   const { user, loading: authLoading } = useAuth();
@@ -33,7 +47,18 @@ export default function SuggestPage() {
   const [generationCount, setGenerationCount] = useState(0);
   const [showHeatmap, setShowHeatmap] = useState(true);
 
-  const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
+  // ── No-go zones state ───────────────────────────────────────────────────
+  const [zonesExpanded, setZonesExpanded] = useState(false);
+  const [zonesEnabled, setZonesEnabled] = useState(true);
+  const [isDrawingZone, setIsDrawingZone] = useState(false);
+  const [drawingPolygon, setDrawingPolygon] = useState<[number, number][]>([]);
+  const [newZoneName, setNewZoneName] = useState("");
+  const [newZoneColor, setNewZoneColor] = useState(randomZoneColor());
+
+  const { template, loading: templateLoading, saving, saveZones, deleteZone } = useRouteTemplate(user?.uid ?? null);
+
+  // Flat list of zones from template
+  const zones: NoGoZone[] = template?.zones ?? [];
 
   const stats = useMemo(() => {
     if (!routes.length) return null;
@@ -88,8 +113,30 @@ export default function SuggestPage() {
   };
 
   const handleMapClick = (lat: number, lon: number) => {
-    if (isSelectingStartPoint) { setSelectedStartPoint([lon, lat]); setIsSelectingStartPoint(false); }
+    if (isSelectingStartPoint) { setSelectedStartPoint([lon, lat]); setIsSelectingStartPoint(false); return; }
+    if (isDrawingZone) {
+      setDrawingPolygon((prev) => [...prev, [lon, lat]]);
+    }
   };
+
+  // Double-click on map while drawing → close polygon and save zone
+  const handleZoneDrawDblClick = useCallback((lat: number, lon: number) => {
+    if (!isDrawingZone || drawingPolygon.length < 3) return;
+    // Close the polygon
+    const closed: [number, number][] = [...drawingPolygon];
+    const newZone: NoGoZone = {
+      id: `zone-${Date.now()}`,
+      name: newZoneName.trim() || `Zone ${zones.length + 1}`,
+      polygon: closed,
+      color: newZoneColor,
+      createdAt: new Date().toISOString(),
+    };
+    saveZones([...zones, newZone]);
+    setDrawingPolygon([]);
+    setIsDrawingZone(false);
+    setNewZoneName("");
+    setNewZoneColor(randomZoneColor());
+  }, [isDrawingZone, drawingPolygon, newZoneName, newZoneColor, zones, saveZones]);
 
   const handleGenerate = () => {
     const directionShift = generationCount % 4;
@@ -99,8 +146,30 @@ export default function SuggestPage() {
       preferGreen,
       elevationPreference,
       directionShift,
+      noGoZones: zonesEnabled ? zones : [],
     });
   };
+
+  const startDrawing = () => {
+    if (!newZoneName.trim()) {
+      setNewZoneName(`Zone ${zones.length + 1}`);
+    }
+    setIsDrawingZone(true);
+    setDrawingPolygon([]);
+  };
+
+  const cancelDrawing = () => {
+    setIsDrawingZone(false);
+    setDrawingPolygon([]);
+    setNewZoneName("");
+    setNewZoneColor(randomZoneColor());
+  };
+
+  const removeZone = async (zoneId: string) => {
+    await saveZones(zones.filter((z) => z.id !== zoneId));
+  };
+
+  const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
 
   if (authLoading) {
     return <div className="min-h-screen bg-background flex items-center justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -162,7 +231,130 @@ export default function SuggestPage() {
               </div>
             )}
 
+            {/* ── No-go zones panel ── */}
             <div className="bg-surface-container border border-outline-variant/20 rounded-2xl overflow-hidden">
+              {/* Panel header — always visible */}
+              <button
+                onClick={() => setZonesExpanded((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-container-high transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-secondary/20 flex items-center justify-center">
+                    <Icon name="do_not_disturb_on" className="text-secondary text-base" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-xs font-bold text-on-surface">No-Go Zones</p>
+                    <p className="text-[10px] text-on-surface-variant">
+                      {zones.length === 0 ? "No zones — all routes allowed" : `${zones.length} zone${zones.length !== 1 ? "s" : ""} defined`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Enable/disable toggle */}
+                  {zones.length > 0 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setZonesEnabled((v) => !v); }}
+                      className={`relative w-9 h-5 rounded-full transition-colors ${zonesEnabled ? "bg-secondary" : "bg-surface-container-high"}`}
+                      aria-label={zonesEnabled ? "Disable zones" : "Enable zones"}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${zonesEnabled ? "translate-x-4" : ""}`} />
+                    </button>
+                  )}
+                  <Icon name={zonesExpanded ? "expand_less" : "expand_more"} className="text-on-surface-variant text-xl" />
+                </div>
+              </button>
+
+              {/* Expanded zone editor */}
+              {zonesExpanded && (
+                <div className="px-4 pb-4 space-y-3 border-t border-outline-variant/20">
+                  {/* Existing zones list */}
+                  {zones.length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      {zones.map((zone) => (
+                        <div key={zone.id} className="flex items-center gap-2 px-3 py-2 bg-surface-container-high rounded-xl">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
+                          <span className="flex-1 text-xs font-medium text-on-surface truncate">{zone.name}</span>
+                          <span className="text-[10px] text-on-surface-variant">{zone.polygon.length} pts</span>
+                          <button
+                            onClick={() => removeZone(zone.id)}
+                            className="p-1 hover:bg-surface-container-low rounded-lg transition-colors"
+                            title="Remove zone"
+                          >
+                            <Icon name="delete" className="text-on-surface-variant text-sm" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Drawing controls */}
+                  {!isDrawingZone ? (
+                    <div className="space-y-2 mt-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newZoneName}
+                          onChange={(e) => setNewZoneName(e.target.value)}
+                          placeholder={`Zone ${zones.length + 1}`}
+                          className="flex-1 px-3 py-1.5 bg-surface-container-high rounded-xl text-xs text-on-surface placeholder:text-on-surface-variant outline-none focus:ring-1 focus:ring-secondary"
+                          onKeyDown={(e) => { if (e.key === "Enter") startDrawing(); }}
+                        />
+                        {/* Color picker */}
+                        <div className="flex items-center gap-1 px-2 py-1.5 bg-surface-container-high rounded-xl">
+                          {ZONE_COLORS.map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => setNewZoneColor(c)}
+                              className={`w-4 h-4 rounded-full transition-transform ${newZoneColor === c ? "scale-125 ring-2 ring-offset-1 ring-on-surface" : "opacity-60 hover:opacity-100"}`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        onClick={startDrawing}
+                        disabled={saving}
+                        className="w-full py-2 bg-secondary/20 hover:bg-secondary/30 text-secondary rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <Icon name="edit_square" className="text-sm" />
+                        {saving ? "Saving…" : "Draw New Zone on Map"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 mt-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: newZoneColor }} />
+                          <span className="text-xs font-bold text-secondary">{newZoneName || `Zone ${zones.length + 1}`}</span>
+                        </div>
+                        <button
+                          onClick={cancelDrawing}
+                          className="px-3 py-1.5 bg-surface-container-high hover:bg-surface-container-low rounded-xl text-xs font-medium text-on-surface-variant transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="text-xs text-on-surface-variant">
+                        {drawingPolygon.length < 3
+                          ? `Tap map to add points (${drawingPolygon.length}/3 min needed)…`
+                          : `Double-click map to close polygon (${drawingPolygon.length} points)`}
+                      </p>
+                      {drawingPolygon.length >= 3 && (
+                        <button
+                          onClick={() => handleZoneDrawDblClick(0, 0)}
+                          disabled={saving}
+                          className="w-full py-2 bg-secondary text-on-secondary rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Icon name="check" className="text-sm" />
+                          {saving ? "Saving…" : "Close Polygon & Save Zone"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Route controls — Distance */}
               <div className="px-4 pt-4 pb-4 space-y-4">
                 {/* Distance */}
                 <div>
@@ -302,6 +494,14 @@ export default function SuggestPage() {
                 selectedStartPoint={selectedStartPoint}
                 isSelectingStartPoint={isSelectingStartPoint}
                 onMapClick={handleMapClick}
+                noGoZones={zonesEnabled ? zones : []}
+                drawingPolygon={drawingPolygon}
+                onZoneDrawClick={(lat, lon) => {
+                  if (isDrawingZone) {
+                    setDrawingPolygon((prev) => [...prev, [lon, lat]]);
+                  }
+                }}
+                isDrawingZone={isDrawingZone}
               />
             </div>
             {/* Mobile map controls */}

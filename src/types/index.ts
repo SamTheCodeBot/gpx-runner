@@ -60,3 +60,22 @@ export type RouteExtraSummary = {
 export interface RouteProvider {
   route(input: RouteRequest): Promise<RouteProviderResult | null>;
 }
+
+// ── No-go zone / route template ───────────────────────────────────────────
+export type LatLngPoint = [number, number]; // [lng, lat]
+
+export interface NoGoZone {
+  id: string;
+  name: string;
+  /** Closed polygon ring — each point is [lng, lat] */
+  polygon: LatLngPoint[];
+  color: string; // hex, for map display
+  createdAt: string; // ISO
+}
+
+export interface RouteTemplate {
+  id: string;
+  userId: string;
+  zones: NoGoZone[];
+  updatedAt: string; // ISO
+}

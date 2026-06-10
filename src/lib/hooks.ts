@@ -613,6 +613,7 @@ type RouteSuggestionOptions = {
   preferGreen?: boolean;
   elevationPreference?: "any" | "hilly" | "flat";
   directionShift?: number;
+  noGoZones?: import("@/types").NoGoZone[];
 };
 
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
@@ -656,6 +657,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               preferGreen: options.preferGreen ?? false,
               elevationPreference: options.elevationPreference ?? "any",
               directionShift: options.directionShift ?? 0,
+              noGoZones: options.noGoZones ?? [],
             }),
             signal: controller.signal,
           });
@@ -1001,3 +1003,91 @@ export function useFavorites(userId: string | null) {
 
   return { favorites, toggleFavorite, loading };
 }
+
+// ─── useRouteTemplate ───────────────────────────────────────────────────────────
+
+export function useRouteTemplate(userId: string | null) {
+  const [template, setTemplate] = useState<{
+    id: string;
+    zones: import("@/types").NoGoZone[];
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  // Load template from Firestore on mount
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      if (!db) return;
+      setLoading(true);
+      try {
+        const snap = await getDocs(
+          query(collection(db, "routeTemplates"), where("userId", "==", userId))
+        );
+        if (!snap.empty) {
+          const data = snap.docs[0].data();
+          setTemplate({ id: snap.docs[0].id, zones: data.zones || [] });
+        } else {
+          setTemplate(null);
+        }
+      } catch (e) {
+        console.error("[useRouteTemplate] load", e);
+        setError("Failed to load template");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [userId]);
+
+  const saveZones = useCallback(
+    async (zones: import("@/types").NoGoZone[]) => {
+      if (!db || !userId) return;
+      setSaving(true);
+      setError(null);
+      try {
+        const snap = await getDocs(
+          query(collection(db, "routeTemplates"), where("userId", "==", userId))
+        );
+        const now = new Date().toISOString();
+        if (snap.empty) {
+          // Create new template doc
+          const docId = `template_${userId}`;
+          await setDoc(doc(db, "routeTemplates", docId), {
+            userId,
+            zones,
+            updatedAt: now,
+          });
+          setTemplate({ id: docId, zones });
+        } else {
+          // Update existing
+          const docId = snap.docs[0].id;
+          await updateDoc(doc(db, "routeTemplates", docId), {
+            zones,
+            updatedAt: now,
+          });
+          setTemplate({ id: docId, zones });
+        }
+      } catch (e) {
+        console.error("[useRouteTemplate] save", e);
+        setError("Failed to save template");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [userId]
+  );
+
+  const deleteZone = useCallback(
+    async (zoneId: string) => {
+      if (!template) return;
+      await saveZones(template.zones.filter((z) => z.id !== zoneId));
+    },
+    [template, saveZones]
+  );
+
+  return { template, loading, saving, error, saveZones, deleteZone };
+}
+

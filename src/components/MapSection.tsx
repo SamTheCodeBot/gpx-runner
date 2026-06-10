@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { Icon } from "./ui";
 import type { GPXRoute } from "@/app/types";
 import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
+import type { NoGoZone } from "@/types";
 
 const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
   ssr: false,
@@ -31,6 +32,14 @@ interface MapSectionProps {
   showMapControls?: boolean;
   showPersonalHeatmapControl?: boolean;
   familiaritySegments?: RouteFamiliaritySegment[];
+  /** No-go zones to render on the map */
+  noGoZones?: NoGoZone[];
+  /** Active drawing polygon (points so far, open ring — [lon, lat][]) */
+  drawingPolygon?: [number, number][];
+  /** Callback when user clicks map while in zone-drawing mode */
+  onZoneDrawClick?: (lat: number, lon: number) => void;
+  /** Whether the user is currently drawing a zone */
+  isDrawingZone?: boolean;
 }
 
 function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
@@ -85,7 +94,7 @@ function PersonalHeatmapToggle({ showPersonalHeatmap, onToggle }: { showPersonal
   return (
     <div className="hidden md:block absolute top-[88px] right-4 z-20">
       <button
-        onClick={onToggle}
+        onToggle={onToggle}
         className={`px-3 py-1.5 rounded-xl text-[10px] font-bold shadow-sm transition-colors ${
           showPersonalHeatmap
             ? "bg-primary text-on-primary"
@@ -124,6 +133,18 @@ function StartPointHint({ isSelectingStartPoint }: { isSelectingStartPoint: bool
   );
 }
 
+function ZoneDrawingHint({ isDrawingZone }: { isDrawingZone: boolean }) {
+  if (!isDrawingZone) return null;
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center pt-4 pointer-events-none">
+      <div className="bg-secondary text-on-secondary px-4 py-2 rounded-xl text-xs font-bold shadow-lg pointer-events-auto">
+        <Icon name="edit_square" className="text-xs inline mr-1" />
+        Click to add points — double-click to close polygon
+      </div>
+    </div>
+  );
+}
+
 export function MapSection({
   routes, selectedRoute, suggestedRoute, showHeatmap, showPersonalHeatmap,
   fitAllRoutes = false,
@@ -132,6 +153,10 @@ export function MapSection({
   showMapControls = true,
   showPersonalHeatmapControl = true,
   familiaritySegments,
+  noGoZones = [],
+  drawingPolygon = [],
+  onZoneDrawClick,
+  isDrawingZone = false,
 }: MapSectionProps) {
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
@@ -152,6 +177,10 @@ export function MapSection({
         onMapClick={onMapClick}
         darkMode={false}
         familiaritySegments={familiaritySegments}
+        noGoZones={noGoZones}
+        drawingPolygon={drawingPolygon}
+        onZoneDrawClick={onZoneDrawClick}
+        isDrawingZone={isDrawingZone}
       />
 
       <MapLegend showPersonalHeatmap={showPersonalHeatmap} />
@@ -165,6 +194,7 @@ export function MapSection({
       )}
       <LoadingOverlay isLoading={isLoading} />
       <StartPointHint isSelectingStartPoint={isSelectingStartPoint} />
+      <ZoneDrawingHint isDrawingZone={isDrawingZone} />
     </div>
   );
 }

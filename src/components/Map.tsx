@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, Polygon, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 // Use canvas renderer for much faster rendering of many polylines
 const canvasRenderer = L.canvas({ padding: 0.5 });
 import { GPXRoute, RouteSuggestion } from "@/app/types";
 import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
+import type { NoGoZone } from "@/types";
 
 interface MapProps {
   routes: GPXRoute[];
@@ -21,12 +22,22 @@ interface MapProps {
   isSelectingStartPoint?: boolean;
   darkMode?: boolean;
   familiaritySegments?: RouteFamiliaritySegment[];
+  noGoZones?: NoGoZone[];
+  drawingPolygon?: [number, number][];
+  onZoneDrawClick?: (lat: number, lon: number) => void;
+  isDrawingZone?: boolean;
 }
 
-function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => void }) {
+function MapEvents({ onMapClick, onZoneDrawClick, isDrawingZone }: {
+  onMapClick?: (lat: number, lon: number) => void;
+  onZoneDrawClick?: (lat: number, lon: number) => void;
+  isDrawingZone?: boolean;
+}) {
   useMapEvents({
     click: (e) => {
-      if (onMapClick) {
+      if (isDrawingZone && onZoneDrawClick) {
+        onZoneDrawClick(e.latlng.lat, e.latlng.lng);
+      } else if (onMapClick) {
         onMapClick(e.latlng.lat, e.latlng.lng);
       }
     },
@@ -550,6 +561,10 @@ export default function Map({
   isSelectingStartPoint,
   darkMode = true,
   familiaritySegments = [],
+  noGoZones = [],
+  drawingPolygon = [],
+  onZoneDrawClick,
+  isDrawingZone = false,
 }: MapProps) {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
@@ -650,7 +665,7 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapResizeHandler />
-      <MapEvents onMapClick={onMapClick} />
+      <MapEvents onMapClick={onMapClick} onZoneDrawClick={onZoneDrawClick} isDrawingZone={isDrawingZone} />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       {personalHeatmapMode === "frequency" ? (
         <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
@@ -707,6 +722,34 @@ export default function Map({
           />
         );
       })}
+
+      {/* No-go zones */}
+      {noGoZones.map((zone) => (
+        <Polygon
+          key={zone.id}
+          positions={zone.polygon.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{ color: zone.color, fillColor: zone.color, fillOpacity: 0.22, weight: 2 }}
+        />
+      ))}
+
+      {/* In-progress zone drawing */}
+      {drawingPolygon.length >= 2 && (
+        <Polyline
+          positions={drawingPolygon.map(([lon, lat]) => [lat, lon] as [number, number])}
+          pathOptions={{ color: "#a855f7", weight: 2, opacity: 0.85, dashArray: "6 4" }}
+        />
+      )}
+      {drawingPolygon.length >= 1 && (
+        <Marker
+          position={[drawingPolygon[drawingPolygon.length - 1][1], drawingPolygon[drawingPolygon.length - 1][0]]}
+          icon={L.divIcon({
+            html: '<div style="background:#a855f7;border:2px solid white;border-radius:50%;width:12px;height:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 6px rgba(168,85,247,0.6);"></div>',
+            className: "",
+            iconSize: [12, 12],
+            iconAnchor: [6, 6],
+          })}
+        />
+      )}
 
     </MapContainer>
   );
