@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
@@ -27,12 +27,10 @@ export default function SuggestPage() {
   const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
-  const [avoidFamiliar, setAvoidFamiliar] = useState(true);
-  const [selectedType, setSelectedType] = useState<"road" | "trail" | "mixed">("mixed");
-  const [routeSource, setRouteSource] = useState<"my-routes" | "mapbox" | "both">("my-routes");
-  const [mapboxApiKey, setMapboxApiKey] = useState(
-    typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_MAPBOX_TOKEN as string) || "" : ""
-  );
+  const [preferQuiet, setPreferQuiet] = useState(true);
+  const [preferGreen, setPreferGreen] = useState(false);
+  const [elevationPreference, setElevationPreference] = useState<"any" | "hilly" | "flat">("any");
+  const [generationCount, setGenerationCount] = useState(0);
   const [showHeatmap, setShowHeatmap] = useState(true);
 
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
@@ -44,8 +42,12 @@ export default function SuggestPage() {
     return { totalRuns: routes.length, totalDistance: Math.round(totalDistance * 10) / 10, totalElevation: Math.round(totalElevation) };
   }, [routes]);
 
-  const { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion } =
-    useRouteSuggestions(suggestDistance, avoidFamiliar);
+  const { suggestedRoute, isSuggesting, suggestionError, getSuggestion, clearSuggestion } =
+    useRouteSuggestions(suggestDistance, false);
+
+  useEffect(() => {
+    setGenerationCount(0);
+  }, [selectedStartPoint, suggestDistance, preferQuiet, preferGreen, elevationPreference]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,7 +92,14 @@ export default function SuggestPage() {
   };
 
   const handleGenerate = () => {
-    getSuggestion(selectedStartPoint, routes, routeSource, mapboxApiKey);
+    const directionShift = generationCount % 4;
+    setGenerationCount((count) => count + 1);
+    getSuggestion(selectedStartPoint, routes, {
+      preferQuiet,
+      preferGreen,
+      elevationPreference,
+      directionShift,
+    });
   };
 
   if (authLoading) {
@@ -127,7 +136,7 @@ export default function SuggestPage() {
           <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4 md:p-6 md:pt-4 space-y-5 custom-scrollbar">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
-                <Icon name="explore" className="text-primary text-xl" />
+                <Icon name="explore" filled className="text-on-primary-container text-xl" />
               </div>
               <div>
                 <h2 className="text-xl font-extrabold text-on-surface">Route Suggestions</h2>
@@ -165,67 +174,42 @@ export default function SuggestPage() {
                     onChange={e => setSuggestDistance(parseFloat(e.target.value))} className="w-full accent-primary" />
                 </div>
 
-                {/* Type */}
-                <div>
-                  <div className="mb-1.5">
-                    <span className="text-xs font-medium text-on-surface-variant">Route Type</span>
+                {/* Route preferences */}
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-xs font-medium text-on-surface-variant">Elevation</span>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+                      {[
+                        { value: "any", label: "Any" },
+                        { value: "hilly", label: "Hilly" },
+                        { value: "flat", label: "Flat" },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setElevationPreference(option.value as typeof elevationPreference)}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            elevationPreference === option.value
+                              ? "bg-secondary text-on-secondary"
+                              : "text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    {(["road", "trail", "mixed"] as const).map(t => (
-                      <button key={t} onClick={() => setSelectedType(t)}
-                        className={`flex-1 py-1.5 rounded-xl text-xs font-bold capitalize transition-colors ${
-                          selectedType === t
-                            ? t === "road" ? "bg-pink-100 text-pink-700" : t === "trail" ? "bg-cyan-100 text-cyan-700" : "bg-purple-100 text-purple-700"
-                            : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-low"
-                        }`}>{t}</button>
-                    ))}
-                  </div>
-                </div>
 
-                {/* Route source selector */}
-                <div>
-                  <div className="mb-1.5">
-                    <span className="text-xs font-medium text-on-surface-variant">Route Source</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-container-high rounded-xl">
+                      <span className="text-xs font-medium text-on-surface">Prefer quiet roads</span>
+                      <input type="checkbox" checked={preferQuiet} onChange={(e) => setPreferQuiet(e.target.checked)} className="accent-primary" />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-container-high rounded-xl">
+                      <span className="text-xs font-medium text-on-surface">Prefer green areas</span>
+                      <input type="checkbox" checked={preferGreen} onChange={(e) => setPreferGreen(e.target.checked)} className="accent-primary" />
+                    </label>
                   </div>
-                  <div className="flex gap-2">
-                    {(["my-routes", "mapbox", "both"] as const).map(src => (
-                      <button key={src} onClick={() => setRouteSource(src)}
-                        className={`flex-1 py-1.5 rounded-xl text-xs font-bold capitalize transition-colors ${
-                          routeSource === src
-                            ? "bg-primary-container text-on-primary-container"
-                            : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-low"
-                        }`}>{src === "my-routes" ? "My Routes" : src === "mapbox" ? "Mapbox" : "Both"}</button>
-                    ))}
-                  </div>
-                  {routeSource === "mapbox" && (
-                    <div className="mt-2 flex gap-2 items-center">
-                      <input
-                        type="password"
-                        value={mapboxApiKey}
-                        onChange={e => setMapboxApiKey(e.target.value)}
-                        placeholder="Mapbox API Key"
-                        className="flex-1 px-3 py-1.5 bg-surface-container-high rounded-xl text-xs text-on-surface border border-outline-variant focus:border-primary focus:outline-none"
-                      />
-                      <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-primary font-medium underline shrink-0">Get free key</a>
-                    </div>
-                  )}
-                  {routeSource === "both" && (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <span className="text-[10px] text-on-surface-variant">Using my routes + Mapbox together</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium text-on-surface-variant w-16">Mode</span>
-                  <button onClick={() => setAvoidFamiliar(false)}
-                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                      !avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🏡 Your area</button>
-                  <button onClick={() => setAvoidFamiliar(true)}
-                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                      avoidFamiliar ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"
-                    }`}>🧭 New area</button>
                 </div>
 
                 {/* Start point */}
@@ -259,24 +243,30 @@ export default function SuggestPage() {
                 </button>
               </div>
 
+              {/* Route generation error */}
+              {suggestionError && (
+                <div className="mx-4 mb-4 bg-error-container/40 border border-error/20 rounded-2xl p-4 animate-fade-in">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon name="error" className="text-error text-base" />
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-error">No runnable route found</span>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    {suggestionError}
+                  </p>
+                </div>
+              )}
+
               {/* Generated result */}
               {suggestedRoute && (
                 <div className="mx-4 mb-4 bg-primary-container/10 border border-primary-container/30 rounded-2xl p-4 animate-fade-in">
                   <div className="flex items-center gap-2 mb-2">
                     <Icon name="check_circle" filled className="text-secondary text-base" />
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-secondary">Generated Route</span>
-                    {suggestedRoute.type && (
-                      <span className={`ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                        suggestedRoute.type === "road" ? "bg-pink-100 text-pink-700"
-                          : suggestedRoute.type === "trail" ? "bg-cyan-100 text-cyan-700"
-                          : "bg-purple-100 text-purple-700"
-                      }`}>{suggestedRoute.type}</span>
-                    )}
                   </div>
                   <h4 className="text-base font-extrabold text-primary">{suggestedRoute.name}</h4>
                   <p className="text-xs text-on-surface-variant mt-0.5">
                     {(suggestedRoute.distance / 1000).toFixed(1)} km
-                    {suggestedRoute.elevationGain > 0 && ` · +${suggestedRoute.elevationGain}m`}
+                    {` · +${Math.round(suggestedRoute.elevationGain || 0)}m estimated climb`}
                   </p>
                   <div className="mt-3 flex items-center gap-2">
                     <button onClick={handleGenerate} disabled={isSuggesting}
@@ -316,19 +306,9 @@ export default function SuggestPage() {
             </div>
             {/* Mobile map controls */}
             <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Road</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(18 221 251)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Trail</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(197 45 255)" }} />
-                  <span className="text-[9px] text-on-surface-variant">Mixed</span>
-                </div>
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                <span className="text-[9px] text-on-surface-variant">Suggestion</span>
               </div>
               <button
                 onClick={() => setShowHeatmap(!showHeatmap)}

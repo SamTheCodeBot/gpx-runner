@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+
+const ROUTE_CACHE_VERSION = 3;
+const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
+const ROUTE_CACHE_MAX_BYTES = 4_500_000;
 
 export interface RouteFilter {
   year?: string;
@@ -42,6 +46,32 @@ export type RouteSummary = Pick<
 > & {
   coordinates: [number, number][];
 };
+
+interface RouteCachePayload {
+  version: number;
+  userId: string;
+  cachedAt: number;
+  routes: GPXRoute[];
+}
+
+interface RouteSummaryCachePayload {
+  version: number;
+  userId: string;
+  cachedAt: number;
+  routes: RouteSummary[];
+}
+
+function routeCacheKey(userId: string) {
+  return `gpx-routes:${ROUTE_CACHE_VERSION}:${userId}`;
+}
+
+function routeSummaryCacheKey(userId: string) {
+  return `gpx-route-summaries:${ROUTE_CACHE_VERSION}:${userId}`;
+}
+
+function isFreshCache(cachedAt: number) {
+  return Date.now() - cachedAt < ROUTE_CACHE_TTL_MS;
+}
 
 function routeCountriesFromData(data: any, coordinates: [number, number][] = []): string[] | undefined {
   if (Array.isArray(data?.countries) && data.countries.length > 0) {
@@ -111,35 +141,61 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
 
   const compactRouteCache = useCallback((route: GPXRoute): GPXRoute => {
     const maxCoordinates = 500;
-    if (route.coordinates.length <= maxCoordinates) return stripRouteCache(route);
+    const compactSamples = route.samples?.length
+      ? route.samples.filter((_, index) => {
+          const maxSamples = 250;
+          const step = Math.ceil((route.samples?.length || 0) / maxSamples);
+          return index === 0 || index === (route.samples?.length || 1) - 1 || index % step === 0;
+        })
+      : undefined;
+    const routeWithCompactSamples = { ...route, samples: compactSamples };
+
+    if (route.coordinates.length <= maxCoordinates) return routeWithCompactSamples;
 
     const step = Math.ceil(route.coordinates.length / maxCoordinates);
-    return stripRouteCache({
+    return {
       ...route,
+      samples: compactSamples,
       coordinates: route.coordinates.filter((_, index) => (
         index === 0 || index === route.coordinates.length - 1 || index % step === 0
       )),
-    });
-  }, [stripRouteCache]);
+    };
+  }, []);
 
-  const cacheRoutes = useCallback((routesToCache: GPXRoute[]) => {
-    const maxCacheBytes = 2_500_000;
+  const cacheRoutes = useCallback((routesToCache: GPXRoute[], cacheUserId = userId) => {
+    if (!cacheUserId) return;
     try {
-      localStorage.setItem("gpx-route-summaries", JSON.stringify(routesToCache.map(summarizeRoute)));
-      const stripped = routesToCache.map(stripRouteCache);
-      let payload = JSON.stringify(stripped);
-      if (payload.length > maxCacheBytes) {
-        payload = JSON.stringify(routesToCache.slice(0, 50).map(compactRouteCache));
+      const summaries: RouteSummaryCachePayload = {
+        version: ROUTE_CACHE_VERSION,
+        userId: cacheUserId,
+        cachedAt: Date.now(),
+        routes: routesToCache.map(summarizeRoute),
+      };
+      localStorage.setItem(routeSummaryCacheKey(cacheUserId), JSON.stringify(summaries));
+
+      const fullPayload = (routes: GPXRoute[]): RouteCachePayload => ({
+        version: ROUTE_CACHE_VERSION,
+        userId: cacheUserId,
+        cachedAt: Date.now(),
+        routes,
+      });
+
+      let payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache)));
+      if (payload.length > ROUTE_CACHE_MAX_BYTES) {
+        payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache)));
       }
-      if (payload.length > maxCacheBytes) {
-        localStorage.removeItem("gpx-routes");
+      if (payload.length > ROUTE_CACHE_MAX_BYTES) {
+        payload = JSON.stringify(fullPayload(routesToCache.slice(0, 75).map(compactRouteCache)));
+      }
+      if (payload.length > ROUTE_CACHE_MAX_BYTES) {
+        localStorage.removeItem(routeCacheKey(cacheUserId));
         return;
       }
-      localStorage.setItem("gpx-routes", payload);
+      localStorage.setItem(routeCacheKey(cacheUserId), payload);
     } catch (e) {
-      localStorage.removeItem("gpx-routes");
+      localStorage.removeItem(routeCacheKey(cacheUserId));
     }
-  }, [compactRouteCache, stripRouteCache]);
+  }, [compactRouteCache, stripRouteCache, userId]);
 
   const serializeRoute = useCallback((route: GPXRoute) => {
     const payload: any = {
@@ -238,29 +294,33 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    if (!loadRoutes) return;
-    const stored = localStorage.getItem("gpx-routes");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) setRoutes(parsed);
-      } catch {}
-    }
-  }, [loadRoutes]);
-
-  // Sync from Firestore when user is available — always overwrite local state
-  // so a new user never sees another account's routes from localStorage
+  // Sync from Firestore when user is available. A fresh per-user local cache
+  // avoids expensive repeat loads while preventing cross-account route leaks.
   useEffect(() => {
     if (!loadRoutes) return;
     if (!userId) {
       setRoutes([]);
       return;
     }
+
+    let cancelled = false;
+    let hasFreshCache = false;
+
+    try {
+      const stored = localStorage.getItem(routeCacheKey(userId));
+      if (stored) {
+        const parsed = JSON.parse(stored) as RouteCachePayload;
+        if (parsed.version === ROUTE_CACHE_VERSION && parsed.userId === userId && Array.isArray(parsed.routes)) {
+          setRoutes(parsed.routes);
+          hasFreshCache = isFreshCache(parsed.cachedAt);
+        }
+      }
+    } catch {}
+
     const load = async () => {
       if (!db) return;
       try {
+        if (!hasFreshCache) setLoading(true);
         const q = query(collection(db, "routes"), where("userId", "==", userId));
         const snap = await getDocs(q);
         const firestoreRoutes: GPXRoute[] = [];
@@ -271,13 +331,20 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
           }
         });
         firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
+        if (cancelled) return;
         setRoutes(firestoreRoutes);
-        cacheRoutes(firestoreRoutes);
+        cacheRoutes(firestoreRoutes, userId);
       } catch (e) {
         console.error("Firestore load error", e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
-    load();
+
+    if (!hasFreshCache) load();
+    return () => {
+      cancelled = true;
+    };
   }, [userId, deserializeRoute, cacheRoutes, loadRoutes]);
 
   const saveRoutes = useCallback((newRoutes: GPXRoute[]) => {
@@ -417,45 +484,70 @@ export function useRouteSummaries(userId: string | null) {
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const cacheSummaries = useCallback((summaries: RouteSummary[]) => {
+  const cacheSummaries = useCallback((summaries: RouteSummary[], cacheUserId = userId) => {
+    if (!cacheUserId) return;
     try {
-      localStorage.setItem("gpx-route-summaries", JSON.stringify(summaries));
+      const payload: RouteSummaryCachePayload = {
+        version: ROUTE_CACHE_VERSION,
+        userId: cacheUserId,
+        cachedAt: Date.now(),
+        routes: summaries,
+      };
+      localStorage.setItem(routeSummaryCacheKey(cacheUserId), JSON.stringify(payload));
     } catch {
-      localStorage.removeItem("gpx-route-summaries");
+      localStorage.removeItem(routeSummaryCacheKey(cacheUserId));
     }
-  }, []);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("gpx-route-summaries");
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) setRoutes(parsed);
-    } catch {}
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) {
       setRoutes([]);
       return;
     }
+
+    let cancelled = false;
+    let hasFreshCache = false;
+
+    try {
+      const stored = localStorage.getItem(routeSummaryCacheKey(userId));
+      if (stored) {
+        const parsed = JSON.parse(stored) as RouteSummaryCachePayload;
+        if (parsed.version === ROUTE_CACHE_VERSION && parsed.userId === userId && Array.isArray(parsed.routes)) {
+          setRoutes(parsed.routes);
+          hasFreshCache = isFreshCache(parsed.cachedAt);
+        }
+      }
+    } catch {}
+
     const load = async () => {
-      if (!db) return;
-      setLoading(true);
+      const user = firebaseAuth?.currentUser;
+      if (!user) return;
+      if (!hasFreshCache) setLoading(true);
       try {
-        const q = query(collection(db, "routes"), where("userId", "==", userId));
-        const snap = await getDocs(q);
-        const summaries = snap.docs.map((d) => deserializeRouteSummary(d.id, d.data()));
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/routes/summaries", {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!res.ok) throw new Error(`Route summary fetch failed: ${res.status}`);
+        const data = await res.json();
+        const summaries: RouteSummary[] = Array.isArray(data.routes)
+          ? data.routes.map((route: RouteSummary) => ({ ...route, coordinates: route.coordinates ?? [] }))
+          : [];
         summaries.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
+        if (cancelled) return;
         setRoutes(summaries);
-        cacheSummaries(summaries);
+        cacheSummaries(summaries, userId);
       } catch (e) {
-        console.error("Firestore summary load error", e);
+        console.error("Route summary load error", e);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    load();
+
+    if (!hasFreshCache) load();
+    return () => {
+      cancelled = true;
+    };
   }, [userId, cacheSummaries]);
 
   return { routes, loading };
@@ -515,18 +607,27 @@ export function useRouteFilter(
   return filtered;
 }
 
+type RouteSuggestionOptions = {
+  routeType?: "road" | "trail" | "mixed";
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  elevationPreference?: "any" | "hilly" | "flat";
+  directionShift?: number;
+};
+
 export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
   const getSuggestion = useCallback(
     async (
       startPoint: [number, number] | null,
       routes: GPXRoute[],
-      source: "my-routes" | "mapbox" | "both" = "my-routes",
-      mapboxApiKey: string = ""
+      options: RouteSuggestionOptions = {}
     ) => {
       setIsSuggesting(true);
+      setSuggestionError(null);
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
@@ -539,29 +640,51 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
-        const { generateFromMyRoutes, generateFromMapbox } = await import("@/lib/route-providers");
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+        const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);
 
-        let result = null;
-        try {
-          if (source === "my-routes") {
-            result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
-          } else if (source === "mapbox") {
-            if (!mapboxApiKey) throw new Error("Mapbox API key required");
-            result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
-          } else {
-            // "both" — try my-routes first, fall back to mapbox
-            try {
-              result = await generateFromMyRoutes([lon, lat], suggestDistance, routes, "mixed", avoidFamiliar ? "novel" : "familiar", controller.signal);
-            } catch {
-              if (mapboxApiKey) {
-                result = await generateFromMapbox([lon, lat], suggestDistance, "mixed", mapboxApiKey, controller.signal);
-              } else {
-                throw new Error("No routes nearby and no Mapbox key");
-              }
-            }
+        const generateFromServer = async () => {
+          const response = await fetch("/api/routes/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              distance: suggestDistance,
+              avoidFamiliar,
+              centerLat: lat,
+              centerLon: lon,
+              preferQuiet: options.preferQuiet ?? false,
+              preferGreen: options.preferGreen ?? false,
+              elevationPreference: options.elevationPreference ?? "any",
+              directionShift: options.directionShift ?? 0,
+            }),
+            signal: controller.signal,
+          });
+
+          const data = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(data?.error || "No runnable route found for those settings");
           }
+          return {
+            name: data.name || `${avoidFamiliar ? "New" : "Familiar"} Loop`,
+            coordinates: data.coordinates,
+            distance: data.distance,
+            elevationGain: data.elevationGain || 0,
+            samples: Array.isArray(data.samples) ? data.samples : undefined,
+            type: data.type || "mixed",
+          };
+        };
+
+        let result: {
+          name: string;
+          coordinates: [number, number][];
+          distance: number;
+          elevationGain: number;
+          samples?: GPXRoute["samples"];
+          type: "road" | "trail" | "mixed";
+        } | null = null;
+
+        try {
+          result = await generateFromServer();
 
           if (result) {
             setSuggestedRoute({
@@ -571,6 +694,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
               coordinates: result.coordinates,
               distance: result.distance,
               elevationGain: result.elevationGain,
+              samples: result.samples,
               color: "#f472b6",
               isRoundTrip: true,
               type: result.type,
@@ -581,28 +705,8 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
         }
       } catch (err) {
         console.error("[useRouteSuggestions]", err);
-        const { generateRandomRoute } = await import("@/lib/utils");
-        let lat2 = 56.9, lon2 = 12.5;
-        if (startPoint) { [lon2, lat2] = startPoint; }
-        else if (routes.length > 0) {
-          const allCoords = routes.flatMap((r) => r.coordinates);
-          if (allCoords.length > 0) {
-            lat2 = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
-            lon2 = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
-          }
-        }
-        const generated = generateRandomRoute([lon2, lat2], suggestDistance, "mixed", avoidFamiliar ? "novel" : "familiar", [], Date.now());
-        setSuggestedRoute({
-          id: `suggested-${Date.now()}`,
-          name: `${generated.name} — ${(generated.distance / 1000).toFixed(1)}km`,
-          date: new Date().toISOString(),
-          coordinates: generated.coordinates,
-          distance: generated.distance,
-          elevationGain: generated.elevationGain,
-          color: "#f472b6",
-          isRoundTrip: true,
-          type: "mixed",
-        });
+        setSuggestedRoute(null);
+        setSuggestionError(err instanceof Error ? err.message : "Could not generate a runnable route");
       } finally {
         setIsSuggesting(false);
       }
@@ -610,7 +714,16 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     [suggestDistance, avoidFamiliar]
   );
 
-  return { suggestedRoute, isSuggesting, getSuggestion, clearSuggestion: () => setSuggestedRoute(null) };
+  return {
+    suggestedRoute,
+    isSuggesting,
+    suggestionError,
+    getSuggestion,
+    clearSuggestion: () => {
+      setSuggestedRoute(null);
+      setSuggestionError(null);
+    },
+  };
 }
 // ─── useUserProfile ────────────────────────────────────────────────────────────
 
@@ -621,6 +734,11 @@ export function useUserProfile(userId: string | null) {
   const loadProfile = useCallback(async () => {
     if (!db || !userId) return;
     try {
+      const direct = await getDoc(doc(db, "userProfiles", userId));
+      if (direct.exists()) {
+        setProfile(direct.data() as import("@/app/types").UserProfile);
+        return;
+      }
       const snap = await getDocs(query(collection(db, "userProfiles"), where("userId", "==", userId)));
       if (!snap.empty) {
         setProfile(snap.docs[0].data() as import("@/app/types").UserProfile);

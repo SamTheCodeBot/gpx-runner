@@ -124,9 +124,17 @@ export function parseTCXFile(text: string): ParsedTCXSample[] {
   return samples;
 }
 
-export function downloadGPXFile(route: { name: string; coordinates: [number, number][] }) {
+export function downloadGPXFile(route: {
+  name: string;
+  coordinates: [number, number][];
+  samples?: { coordinate: [number, number]; elevation?: number }[];
+}) {
   const pts = route.coordinates
-    .map(([lon, lat]) => `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>0</ele><time>${new Date().toISOString()}</time></trkpt>`)
+    .map(([lon, lat], index) => {
+      const elevation = route.samples?.[index]?.elevation;
+      const ele = Number.isFinite(elevation) ? Number(elevation).toFixed(1) : "0";
+      return `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>${ele}</ele><time>${new Date().toISOString()}</time></trkpt>`;
+    })
     .join("\n");
   const gpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="GPX running" xmlns="http://www.topografix.com/GPX/1/1">

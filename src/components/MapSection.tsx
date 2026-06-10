@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { Icon } from "./ui";
 import type { GPXRoute } from "@/app/types";
+import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
 
 const MapWithNoSSR = dynamic(() => import("@/components/Map"), {
   ssr: false,
@@ -29,6 +30,7 @@ interface MapSectionProps {
   onMapClick: (lat: number, lon: number) => void;
   showMapControls?: boolean;
   showPersonalHeatmapControl?: boolean;
+  familiaritySegments?: RouteFamiliaritySegment[];
 }
 
 function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
@@ -129,6 +131,7 @@ export function MapSection({
   onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
   showMapControls = true,
   showPersonalHeatmapControl = true,
+  familiaritySegments,
 }: MapSectionProps) {
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
@@ -148,6 +151,7 @@ export function MapSection({
         isSelectingStartPoint={isSelectingStartPoint}
         onMapClick={onMapClick}
         darkMode={false}
+        familiaritySegments={familiaritySegments}
       />
 
       <MapLegend showPersonalHeatmap={showPersonalHeatmap} />

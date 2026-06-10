@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
+// Use canvas renderer for much faster rendering of many polylines
+const canvasRenderer = L.canvas({ padding: 0.5 });
 import { GPXRoute, RouteSuggestion } from "@/app/types";
+import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
 
 interface MapProps {
   routes: GPXRoute[];
@@ -17,6 +20,7 @@ interface MapProps {
   onMapClick?: (lat: number, lon: number) => void;
   isSelectingStartPoint?: boolean;
   darkMode?: boolean;
+  familiaritySegments?: RouteFamiliaritySegment[];
 }
 
 function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => void }) {
@@ -527,6 +531,12 @@ function PersonalHeatmapCanvas({ routes, enabled }: { routes: GPXRoute[]; enable
   return null;
 }
 
+function simplifyPositions(coords: [number, number][], maxPoints = 200): [number, number][] {
+  if (coords.length <= maxPoints) return coords;
+  const step = Math.ceil(coords.length / maxPoints);
+  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+}
+
 export default function Map({
   routes,
   selectedRoute,
@@ -539,6 +549,7 @@ export default function Map({
   onMapClick,
   isSelectingStartPoint,
   darkMode = true,
+  familiaritySegments = [],
 }: MapProps) {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
@@ -569,12 +580,12 @@ export default function Map({
     ] as [number, number];
   };
 
-  const getHeatmapRoutes = () => {
+  const heatmapRoutes = useMemo(() => {
     if (!showHeatmap || routes.length === 0) return [];
 
     if (selectedRoute) {
       return [{
-        positions: selectedRoute.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
+        positions: simplifyPositions(selectedRoute.coordinates, 500).map(([lon, lat]) => [lat, lon] as [number, number]),
         color: selectedRoute.type === "trail" ? "rgb(18 221 251)" : selectedRoute.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
         weight: 4,
         opacity: 1,
@@ -582,12 +593,12 @@ export default function Map({
     }
 
     return routes.map((route) => ({
-      positions: route.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]),
+      positions: simplifyPositions(route.coordinates, 500).map(([lon, lat]) => [lat, lon] as [number, number]),
       color: route.type === "trail" ? "rgb(18 221 251)" : route.type === "mixed" ? "rgb(197 45 255)" : "rgb(255 65 164)",
-      weight: 2,
-      opacity: 0.6,
+      weight: 1.5,
+      opacity: 0.5,
     }));
-  };
+  }, [routes, selectedRoute, showHeatmap]);
 
   const activeRouteCoords = selectedRoute?.coordinates || suggestedRoute?.coordinates || [];
   const kmMarkers = getKilometerMarkers(activeRouteCoords);
@@ -627,6 +638,7 @@ export default function Map({
       style={{ height: "100%", width: "100%", background: darkMode ? "#111113" : "#f4f4f5" }}
       zoomControl={true}
       dragging={!isSelectingStartPoint}
+      renderer={canvasRenderer}
     >
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
@@ -671,13 +683,30 @@ export default function Map({
       )}
 
       {/* Standard heatmap */}
-      {getHeatmapRoutes().map((route, index) => (
+      {heatmapRoutes.map((route, index) => (
         <Polyline
           key={`heatmap-${index}`}
           positions={route.positions}
           pathOptions={{ color: route.color, weight: route.weight, opacity: route.opacity }}
         />
       ))}
+
+      {familiaritySegments.map((segment, index) => {
+        const color =
+          segment.label === "familiar"
+            ? "#16a34a"
+            : segment.label === "partly familiar"
+              ? "#f59e0b"
+              : "#f97316";
+
+        return (
+          <Polyline
+            key={`familiarity-${index}`}
+            positions={segment.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])}
+            pathOptions={{ color, weight: 7, opacity: 0.95 }}
+          />
+        );
+      })}
 
     </MapContainer>
   );
