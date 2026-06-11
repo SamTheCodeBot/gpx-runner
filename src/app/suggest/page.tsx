@@ -4,6 +4,7 @@ import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteSuggestions, useUserProfile, useRouteTemplate } from "@/lib/hooks";
+import type { ZoneEditAction } from "@/types";
 import { Icon, LoginScreen } from "@/components/ui";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
@@ -55,10 +56,17 @@ export default function SuggestPage() {
   const [newZoneName, setNewZoneName] = useState("");
   const [newZoneColor, setNewZoneColor] = useState(randomZoneColor());
 
+  // ── Zone editing state ─────────────────────────────────────────────────────
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  // Per-zone undo stacks keyed by zone id
+  const [undoStacks, setUndoStacks] = useState<Record<string, ZoneEditAction[]>>({});
+  // Live preview zones while editing
+  const [previewZones, setPreviewZones] = useState<NoGoZone[] | null>(null);
+
   const { template, loading: templateLoading, saving, saveZones, deleteZone } = useRouteTemplate(user?.uid ?? null);
 
-  // Flat list of zones from template
-  const zones: NoGoZone[] = template?.zones ?? [];
+  // Preview zones are used when editing; fall back to saved zones
+  const zones: NoGoZone[] = previewZones ?? template?.zones ?? [];
 
   const stats = useMemo(() => {
     if (!routes.length) return null;
@@ -169,7 +177,121 @@ export default function SuggestPage() {
     await saveZones(zones.filter((z) => z.id !== zoneId));
   };
 
+  // ── Zone edit handlers ─────────────────────────────────────────────────────
+  const startEditZone = (zoneId: string) => {
+    setEditingZoneId(zoneId);
+    setUndoStacks({});
+    const zone = (template?.zones ?? []).find((z) => z.id === zoneId);
+    if (zone) setPreviewZones([...template!.zones!]);
+  };
+
+  const stopEditing = async (save: boolean) => {
+    if (!editingZoneId) return;
+    if (save && previewZones) {
+      await saveZones(previewZones);
+    }
+    setEditingZoneId(null);
+    setUndoStacks({});
+    setPreviewZones(null);
+  };
+
+  const handleZonePointMove = (zoneId: string, pointIndex: number, newPos: [number, number]) => {
+    setPreviewZones((prev) => {
+      if (!prev) return prev;
+      return prev.map((z) =>
+        z.id === zoneId
+          ? { ...z, polygon: z.polygon.map((p, i) => (i === pointIndex ? newPos : p)) }
+          : z
+      );
+    });
+    setUndoStacks((prev) => ({
+      ...prev,
+      [zoneId]: [
+        ...(prev[zoneId] ?? []),
+        {
+          type: "move_point",
+          pointIndex,
+          oldPos: (previewZones ?? []).find((z) => z.id === zoneId)?.polygon[pointIndex] ?? newPos,
+          newPos,
+        },
+      ],
+    }));
+  };
+
+  const handleZonePointDelete = (zoneId: string, pointIndex: number) => {
+    setPreviewZones((prev) => {
+      if (!prev) return prev;
+      return prev
+        .map((z) =>
+          z.id === zoneId ? { ...z, polygon: z.polygon.filter((_, i) => i !== pointIndex) } : z
+        )
+        .filter((z) => z.polygon.length >= 3 || true);
+    });
+    setUndoStacks((prev) => {
+      const zone = (previewZones ?? []).find((z) => z.id === zoneId);
+      return {
+        ...prev,
+        [zoneId]: [
+          ...(prev[zoneId] ?? []),
+          { type: "remove_point", pointIndex, point: zone?.polygon[pointIndex] ?? [0, 0] },
+        ],
+      };
+    });
+  };
+
+  const handleZoneEditAddPoint = (zoneId: string, lat: number, lon: number) => {
+    setPreviewZones((prev) => {
+      if (!prev) return prev;
+      // Add point at end of polygon
+      return prev.map((z) =>
+        z.id === zoneId ? { ...z, polygon: [...z.polygon, [lon, lat]] } : z
+      );
+    });
+    setUndoStacks((prev) => ({
+      ...prev,
+      [zoneId]: [
+        ...(prev[zoneId] ?? []),
+        { type: "add_point", pointIndex: ((previewZones ?? []).find((z) => z.id === zoneId)?.polygon.length ?? 0), point: [lon, lat] },
+      ],
+    }));
+  };
+
+  // Ctrl+Z undo for zone editing
+  useEffect(() => {
+    if (!editingZoneId) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        const stack = undoStacks[editingZoneId] ?? [];
+        if (!stack.length) return;
+        const last = stack[stack.length - 1];
+        setPreviewZones((prev) => {
+          if (!prev) return prev;
+          return prev.map((z) => {
+            if (z.id !== editingZoneId) return z;
+            if (last.type === "move_point") {
+              return { ...z, polygon: z.polygon.map((p, i) => (i === last.pointIndex ? last.oldPos : p)) };
+            }
+            if (last.type === "remove_point") {
+              const copy = [...z.polygon];
+              copy.splice(last.pointIndex, 0, last.point);
+              return { ...z, polygon: copy };
+            }
+            if (last.type === "add_point") {
+              return { ...z, polygon: z.polygon.slice(0, -1) };
+            }
+            return z;
+          });
+        });
+        setUndoStacks((prev) => ({ ...prev, [editingZoneId]: stack.slice(0, -1) }));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [editingZoneId, undoStacks]);
+
   const { profile, loading, saveProfile } = useUserProfile(user?.uid ?? null);
+
 
   if (authLoading) {
     return <div className="min-h-screen bg-background flex items-center justify-center"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -271,17 +393,46 @@ export default function SuggestPage() {
                   {zones.length > 0 && (
                     <div className="space-y-2 mt-3">
                       {zones.map((zone) => (
-                        <div key={zone.id} className="flex items-center gap-2 px-3 py-2 bg-surface-container-high rounded-xl">
+                        <div key={zone.id} className={`flex items-center gap-2 px-3 py-2 bg-surface-container-high rounded-xl ${editingZoneId === zone.id ? 'ring-2 ring-secondary' : ''}`}>
                           <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
                           <span className="flex-1 text-xs font-medium text-on-surface truncate">{zone.name}</span>
                           <span className="text-[10px] text-on-surface-variant">{zone.polygon.length} pts</span>
-                          <button
-                            onClick={() => removeZone(zone.id)}
-                            className="p-1 hover:bg-surface-container-low rounded-lg transition-colors"
-                            title="Remove zone"
-                          >
-                            <Icon name="delete" className="text-on-surface-variant text-sm" />
-                          </button>
+                          {editingZoneId === zone.id ? (
+                            <>
+                              <span className="text-[10px] text-secondary font-bold">Editing…</span>
+                              <button
+                                onClick={() => stopEditing(true)}
+                                className="p-1 hover:bg-surface-container-low rounded-lg transition-colors text-green-500"
+                                title="Save & exit edit"
+                              >
+                                <Icon name="check" className="text-sm" />
+                              </button>
+                              <button
+                                onClick={() => stopEditing(false)}
+                                className="p-1 hover:bg-surface-container-low rounded-lg transition-colors text-on-surface-variant"
+                                title="Discard changes"
+                              >
+                                <Icon name="close" className="text-sm" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => startEditZone(zone.id)}
+                                className="p-1 hover:bg-surface-container-low rounded-lg transition-colors"
+                                title="Edit zone"
+                              >
+                                <Icon name="edit" className="text-on-surface-variant text-sm" />
+                              </button>
+                              <button
+                                onClick={() => removeZone(zone.id)}
+                                className="p-1 hover:bg-surface-container-low rounded-lg transition-colors"
+                                title="Remove zone"
+                              >
+                                <Icon name="delete" className="text-on-surface-variant text-sm" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -502,6 +653,10 @@ export default function SuggestPage() {
                   }
                 }}
                 isDrawingZone={isDrawingZone}
+                editingZoneId={editingZoneId}
+                onZonePointMove={handleZonePointMove}
+                onZonePointDelete={handleZonePointDelete}
+                onZoneEditAddPoint={handleZoneEditAddPoint}
               />
             </div>
             {/* Mobile map controls */}

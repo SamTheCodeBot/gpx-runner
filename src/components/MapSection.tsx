@@ -40,6 +40,14 @@ interface MapSectionProps {
   onZoneDrawClick?: (lat: number, lon: number) => void;
   /** Whether the user is currently drawing a zone */
   isDrawingZone?: boolean;
+  /** ID of the zone being edited (shows draggable point markers on map) */
+  editingZoneId?: string | null;
+  /** Called when a zone point is dragged to a new position */
+  onZonePointMove?: (zoneId: string, pointIndex: number, newPos: [number, number]) => void;
+  /** Called when a zone point is clicked (to delete it) */
+  onZonePointDelete?: (zoneId: string, pointIndex: number) => void;
+  /** Called when map is clicked while editing a zone (to add a point) */
+  onZoneEditAddPoint?: (zoneId: string, lat: number, lon: number) => void;
 }
 
 function MapLegend({ showPersonalHeatmap }: { showPersonalHeatmap: boolean }) {
@@ -157,6 +165,10 @@ export function MapSection({
   drawingPolygon = [],
   onZoneDrawClick,
   isDrawingZone = false,
+  editingZoneId,
+  onZonePointMove,
+  onZonePointDelete,
+  onZoneEditAddPoint,
 }: MapSectionProps) {
   const displayRoutes = suggestedRoute ? [] : routes.filter(
     (r) => r.coordinates && r.coordinates.length > 0 && Array.isArray(r.coordinates[0])
@@ -181,6 +193,10 @@ export function MapSection({
         drawingPolygon={drawingPolygon}
         onZoneDrawClick={onZoneDrawClick}
         isDrawingZone={isDrawingZone}
+        editingZoneId={editingZoneId}
+        onZonePointMove={onZonePointMove}
+        onZonePointDelete={onZonePointDelete}
+        onZoneEditAddPoint={onZoneEditAddPoint}
       />
 
       <MapLegend showPersonalHeatmap={showPersonalHeatmap} />

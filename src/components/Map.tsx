@@ -26,17 +26,25 @@ interface MapProps {
   drawingPolygon?: [number, number][];
   onZoneDrawClick?: (lat: number, lon: number) => void;
   isDrawingZone?: boolean;
+  editingZoneId?: string | null;
+  onZonePointMove?: (zoneId: string, pointIndex: number, newPos: [number, number]) => void;
+  onZonePointDelete?: (zoneId: string, pointIndex: number) => void;
+  onZoneEditAddPoint?: (zoneId: string, lat: number, lon: number) => void;
 }
 
-function MapEvents({ onMapClick, onZoneDrawClick, isDrawingZone }: {
+function MapEvents({ onMapClick, onZoneDrawClick, isDrawingZone, editingZoneId, onZoneEditAddPoint }: {
   onMapClick?: (lat: number, lon: number) => void;
   onZoneDrawClick?: (lat: number, lon: number) => void;
   isDrawingZone?: boolean;
+  editingZoneId?: string | null;
+  onZoneEditAddPoint?: (zoneId: string, lat: number, lon: number) => void;
 }) {
   useMapEvents({
     click: (e) => {
       if (isDrawingZone && onZoneDrawClick) {
         onZoneDrawClick(e.latlng.lat, e.latlng.lng);
+      } else if (editingZoneId && onZoneEditAddPoint) {
+        onZoneEditAddPoint(editingZoneId, e.latlng.lat, e.latlng.lng);
       } else if (onMapClick) {
         onMapClick(e.latlng.lat, e.latlng.lng);
       }
@@ -565,6 +573,10 @@ export default function Map({
   drawingPolygon = [],
   onZoneDrawClick,
   isDrawingZone = false,
+  editingZoneId,
+  onZonePointMove,
+  onZonePointDelete,
+  onZoneEditAddPoint,
 }: MapProps) {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
@@ -665,7 +677,7 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapResizeHandler />
-      <MapEvents onMapClick={onMapClick} onZoneDrawClick={onZoneDrawClick} isDrawingZone={isDrawingZone} />
+      <MapEvents onMapClick={onMapClick} onZoneDrawClick={onZoneDrawClick} isDrawingZone={isDrawingZone} editingZoneId={editingZoneId} onZoneEditAddPoint={onZoneEditAddPoint} />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       {personalHeatmapMode === "frequency" ? (
         <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
@@ -728,9 +740,50 @@ export default function Map({
         <Polygon
           key={zone.id}
           positions={zone.polygon.map(([lon, lat]) => [lat, lon] as [number, number])}
-          pathOptions={{ color: zone.color, fillColor: zone.color, fillOpacity: 0.22, weight: 2 }}
+          pathOptions={{ color: zone.color, fillColor: zone.color, fillOpacity: zone.id === editingZoneId ? 0.35 : 0.22, weight: zone.id === editingZoneId ? 3 : 2 }}
         />
       ))}
+
+      {/* Draggable zone points when editing */}
+      {editingZoneId && (() => {
+        const zone = noGoZones.find(z => z.id === editingZoneId);
+        if (!zone) return null;
+        return zone.polygon.map(([lon, lat], idx) => (
+          <Marker
+            key={`pt-${zone.id}-${idx}`}
+            position={[lat, lon]}
+            icon={L.divIcon({
+              html: `<div style="
+                width:14px;height:14px;
+                border-radius:50%;
+                background:${zone.color};
+                border:2.5px solid white;
+                box-shadow:0 0 0 2px ${zone.color}, 0 2px 8px rgba(0,0,0,0.35);
+                cursor:move;
+                display:flex;align-items:center;justify-content:center;
+              ">
+                <div style="width:4px;height:4px;background:white;border-radius:50%;opacity:0.7;"></div>
+              </div>`,
+              className: "",
+              iconSize: [14, 14],
+              iconAnchor: [7, 7],
+            })}
+            draggable
+            eventHandlers={{
+              dragend: (e) => {
+                const marker = e.target as L.Marker;
+                const newLat = marker.getLatLng().lat;
+                const newLon = marker.getLatLng().lng;
+                if (onZonePointMove) onZonePointMove(zone.id, idx, [newLon, newLat]);
+              },
+              click: (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (onZonePointDelete) onZonePointDelete(zone.id, idx);
+              },
+            }}
+          />
+        ));
+      })()}
 
       {/* In-progress zone drawing */}
       {drawingPolygon.length >= 2 && (

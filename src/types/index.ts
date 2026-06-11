@@ -79,3 +79,9 @@ export interface RouteTemplate {
   zones: NoGoZone[];
   updatedAt: string; // ISO
 }
+
+/** One entry in the undo stack for zone editing */
+export type ZoneEditAction =
+  | { type: "remove_point"; pointIndex: number; point: LatLngPoint }
+  | { type: "move_point"; pointIndex: number; oldPos: LatLngPoint; newPos: LatLngPoint }
+  | { type: "add_point"; pointIndex: number; point: LatLngPoint };
