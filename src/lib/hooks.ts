@@ -1025,16 +1025,16 @@ export function useRouteTemplate(userId: string | null) {
       setError(null);
       setLoading(true);
       try {
-        const snap = await getDocs(
-          query(collection(db, "routeTemplates"), where("userId", "==", userId))
-        );
-        if (!snap.empty) {
-          const data = snap.docs[0].data();
-          setTemplate({ id: snap.docs[0].id, zones: data.zones || [] });
+        const docId = `template_${userId}`;
+        const docRef = doc(db, "routeTemplates", docId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setTemplate({ id: docId, zones: docSnap.data().zones || [] });
         } else {
           setTemplate(null);
         }
-      } catch (e) {
+      }
+      catch (e) {
         console.error("[useRouteTemplate] load", e);
         setError("Failed to load template");
       } finally {
@@ -1043,34 +1043,18 @@ export function useRouteTemplate(userId: string | null) {
     };
     load();
   }, [userId]);
+
   const saveZones = useCallback(
     async (zones: import("@/types").NoGoZone[]) => {
       if (!db || !userId) return;
       setSaving(true);
       setError(null);
       try {
-        const snap = await getDocs(
-          query(collection(db, "routeTemplates"), where("userId", "==", userId))
-        );
+        const docId = `template_${userId}`;
+        const docRef = doc(db, "routeTemplates", docId);
         const now = new Date().toISOString();
-        if (snap.empty) {
-          // Create new template doc
-          const docId = `template_${userId}`;
-          await setDoc(doc(db, "routeTemplates", docId), {
-            userId,
-            zones,
-            updatedAt: now,
-          });
-          setTemplate({ id: docId, zones, updatedAt: now });
-        } else {
-          // Update existing
-          const docId = snap.docs[0].id;
-          await updateDoc(doc(db, "routeTemplates", docId), {
-            zones,
-            updatedAt: now,
-          });
-          setTemplate({ id: docId, zones, updatedAt: now });
-        }
+        await setDoc(docRef, { userId, zones, updatedAt: now }, { merge: true });
+        setTemplate({ id: docId, zones, updatedAt: now });
       } catch (e) {
         console.error("[useRouteTemplate] save", e);
         setError("Failed to save template");
@@ -1080,6 +1064,7 @@ export function useRouteTemplate(userId: string | null) {
     },
     [userId]
   );
+
 
   const deleteZone = useCallback(
     async (zoneId: string) => {
