@@ -1026,7 +1026,7 @@ export function useRouteTemplate(userId: string | null) {
       setLoading(true);
       try {
         const snap = await getDocs(
-          query(collection(db, "routeTemplates"), where("userId", "=="", userId))
+          query(collection(db, "routeTemplates"), where("userId", "==", userId))
         );
         if (!snap.empty) {
           const data = snap.docs[0].data();
@@ -1043,7 +1043,6 @@ export function useRouteTemplate(userId: string | null) {
     };
     load();
   }, [userId]);
-
   const saveZones = useCallback(
     async (zones: import("@/types").NoGoZone[]) => {
       if (!db || !userId) return;
