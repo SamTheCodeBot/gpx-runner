@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { collection, query, where, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
+import { onAuthStateChanged } from "firebase/auth";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
@@ -1017,36 +1018,54 @@ export function useRouteTemplate(userId: string | null) {
 
   const [error, setError] = useState<string | null>(null);
 
-  // Load template from Firestore on mount
+  // Load template from Firestore — wait for auth, then load once db is ready
   useEffect(() => {
-    if (!userId) return;
-    const load = async () => {
-      if (!db) {
-        // Firebase not ready yet — retry after a short delay
-        setTimeout(load, 500);
+    let cancelled = false;
+
+    if (!firebaseAuth) return;
+    const stop = onAuthStateChanged(firebaseAuth, async (user) => {
+      if (cancelled) return;
+      const uid = user?.uid;
+      if (!uid) {
+        setTemplate(null);
         return;
       }
-      setError(null);
-      setLoading(true);
-      try {
-        const docId = `template_${userId}`;
-        const docRef = doc(db, "routeTemplates", docId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setTemplate({ id: docId, zones: docSnap.data().zones || [] });
-        } else {
-          setTemplate(null);
+
+      // Poll until db is available (Firebase not ready on first render)
+      let attempts = 0;
+      const tryLoad = async () => {
+        if (cancelled || !firebaseAuth || !firebaseAuth.currentUser) return;
+        if (!db) {
+          if (attempts++ < 20) { setTimeout(tryLoad, 250); return; }
+          if (!cancelled) setError("Template unavailable — please refresh");
+          return;
         }
-      }
-      catch (e) {
-        console.error("[useRouteTemplate] load", e);
-        setError("Failed to load template");
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [userId]);
+        if (cancelled) return;
+        setError(null);
+        setLoading(true);
+        try {
+          const docId = `template_${uid}`;
+          const docSnap = await getDoc(doc(db, "routeTemplates", docId));
+          if (!cancelled) {
+            setTemplate(docSnap.exists()
+              ? { id: docId, zones: docSnap.data().zones || [] }
+              : null);
+          }
+        } catch (e) {
+          if (!cancelled) {
+            console.error("[useRouteTemplate] load", e);
+            setError("Failed to load template");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      };
+      tryLoad();
+    });
+
+    return () => { cancelled = true; stop(); };
+  }, []);
+
 
   const saveZones = useCallback(
     async (zones: import("@/types").NoGoZone[]) => {
