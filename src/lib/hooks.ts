@@ -185,7 +185,7 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache)));
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
-        payload = JSON.stringify(fullPayload(routesToCache.slice(0, 75).map(compactRouteCache)));
+        payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache)));
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
         localStorage.removeItem(routeCacheKey(cacheUserId));
@@ -1021,7 +1021,11 @@ export function useRouteTemplate(userId: string | null) {
   useEffect(() => {
     if (!userId) return;
     const load = async () => {
-      if (!db) return;
+      if (!db) {
+        // Firebase not ready yet — retry after a short delay
+        setTimeout(load, 500);
+        return;
+      }
       setError(null);
       setLoading(true);
       try {
