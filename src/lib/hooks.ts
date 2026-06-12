@@ -1022,10 +1022,11 @@ export function useRouteTemplate(userId: string | null) {
     if (!userId) return;
     const load = async () => {
       if (!db) return;
+      setError(null);
       setLoading(true);
       try {
         const snap = await getDocs(
-          query(collection(db, "routeTemplates"), where("userId", "==", userId))
+          query(collection(db, "routeTemplates"), where("userId", "=="", userId))
         );
         if (!snap.empty) {
           const data = snap.docs[0].data();
