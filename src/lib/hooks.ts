@@ -1018,53 +1018,50 @@ export function useRouteTemplate(userId: string | null) {
 
   const [error, setError] = useState<string | null>(null);
 
-  // Load template from Firestore — wait for auth, then load once db is ready
+  // Load template from Firestore — poll until both Firebase Auth and Firestore are ready
   useEffect(() => {
     let cancelled = false;
+    let attempts = 0;
 
-    if (!firebaseAuth) return;
-    const stop = onAuthStateChanged(firebaseAuth, async (user) => {
+    const tryLoad = async () => {
       if (cancelled) return;
-      const uid = user?.uid;
+      const uid = firebaseAuth?.currentUser?.uid;
       if (!uid) {
-        setTemplate(null);
+        // Not logged in yet — keep polling until auth resolves (up to 20 tries = 5s)
+        if (attempts++ < 20) setTimeout(tryLoad, 250);
         return;
       }
-
-      // Poll until db is available (Firebase not ready on first render)
-      let attempts = 0;
-      const tryLoad = async () => {
-        if (cancelled || !firebaseAuth || !firebaseAuth.currentUser) return;
-        if (!db) {
-          if (attempts++ < 20) { setTimeout(tryLoad, 250); return; }
-          if (!cancelled) setError("Template unavailable — please refresh");
-          return;
+      if (!db) {
+        // Firebase not ready yet — poll
+        if (attempts++ < 20) setTimeout(tryLoad, 250);
+        else if (!cancelled) setError("Template unavailable — please refresh");
+        return;
+      }
+      if (cancelled) return;
+      setError(null);
+      setLoading(true);
+      try {
+        const docId = `template_${uid}`;
+        const docSnap = await getDoc(doc(db, "routeTemplates", docId));
+        if (!cancelled) {
+          setTemplate(docSnap.exists()
+            ? { id: docId, zones: docSnap.data().zones || [] }
+            : null);
         }
-        if (cancelled) return;
-        setError(null);
-        setLoading(true);
-        try {
-          const docId = `template_${uid}`;
-          const docSnap = await getDoc(doc(db, "routeTemplates", docId));
-          if (!cancelled) {
-            setTemplate(docSnap.exists()
-              ? { id: docId, zones: docSnap.data().zones || [] }
-              : null);
-          }
-        } catch (e) {
-          if (!cancelled) {
-            console.error("[useRouteTemplate] load", e);
-            setError("Failed to load template");
-          }
-        } finally {
-          if (!cancelled) setLoading(false);
+      } catch (e) {
+        if (!cancelled) {
+          console.error("[useRouteTemplate] load", e);
+          setError("Failed to load template");
         }
-      };
-      tryLoad();
-    });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
 
-    return () => { cancelled = true; stop(); };
+    tryLoad();
+    return () => { cancelled = true; };
   }, []);
+
 
 
   const saveZones = useCallback(
