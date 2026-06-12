@@ -63,7 +63,8 @@ export default function SuggestPage() {
   // Live preview zones while editing
   const [previewZones, setPreviewZones] = useState<NoGoZone[] | null>(null);
 
-  const { template, loading: templateLoading, saving, saveZones, deleteZone } = useRouteTemplate(user?.uid ?? null);
+  const { template, loading: templateLoading, saving, error, saveZones, deleteZone } = useRouteTemplate(user?.uid ?? null);
+  const [zoneError, setZoneError] = useState<string | null>(null);
 
   // Preview zones are used when editing; fall back to saved zones
   const zones: NoGoZone[] = previewZones ?? template?.zones ?? [];
@@ -389,8 +390,23 @@ export default function SuggestPage() {
               {/* Expanded zone editor */}
               {zonesExpanded && (
                 <div className="px-4 pb-4 space-y-3 border-t border-outline-variant/20">
-                  {/* Existing zones list */}
-                  {zones.length > 0 && (
+                  {/* Zone save error */}
+                  {(zoneError ?? error) && !saving && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-error-container/50 border border-error/20 rounded-xl">
+                      <Icon name="error" className="text-error text-sm shrink-0" />
+                      <span className="text-xs text-error">{zoneError ?? error}</span>
+                      <button onClick={() => setZoneError(null)} className="ml-auto text-error/60 hover:text-error text-xs">✕</button>
+                    </div>
+                  )}
+                  {/* Loading zones */}
+                  {templateLoading ? (
+                    <div className="flex items-center justify-center py-6 gap-2">
+                      <div className="w-4 h-4 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs text-on-surface-variant">Loading zones…</span>
+                    </div>
+                  ) : (
+                    <>{/* Existing zones list */}
+                    {zones.length > 0 && (
                     <div className="space-y-2 mt-3">
                       {zones.map((zone) => (
                         <div key={zone.id} className={`flex items-center gap-2 px-3 py-2 bg-surface-container-high rounded-xl ${editingZoneId === zone.id ? 'ring-2 ring-secondary' : ''}`}>
@@ -436,6 +452,11 @@ export default function SuggestPage() {
                         </div>
                       ))}
                     </div>
+                  )}
+                  {zones.length === 0 && (
+                    <p className="text-xs text-on-surface-variant mt-2">No zones yet — draw one below</p>
+                  )}
+                  </>
                   )}
 
                   {/* Drawing controls */}

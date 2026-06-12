@@ -1010,6 +1010,7 @@ export function useRouteTemplate(userId: string | null) {
   const [template, setTemplate] = useState<{
     id: string;
     zones: import("@/types").NoGoZone[];
+    updatedAt?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1060,7 +1061,7 @@ export function useRouteTemplate(userId: string | null) {
             zones,
             updatedAt: now,
           });
-          setTemplate({ id: docId, zones });
+          setTemplate({ id: docId, zones, updatedAt: now });
         } else {
           // Update existing
           const docId = snap.docs[0].id;
@@ -1068,7 +1069,7 @@ export function useRouteTemplate(userId: string | null) {
             zones,
             updatedAt: now,
           });
-          setTemplate({ id: docId, zones });
+          setTemplate({ id: docId, zones, updatedAt: now });
         }
       } catch (e) {
         console.error("[useRouteTemplate] save", e);
