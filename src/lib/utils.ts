@@ -30,11 +30,14 @@ export interface ParsedGPX {
   coordinates: [number, number][]; // [lon, lat]
   distance: number;
   elevationGain: number;
+  duration?: number;
   samples: {
     coordinate: [number, number];
     elevation?: number;
     time?: string;
     distanceM: number;
+    heartRate?: number;
+    paceMinPerKm?: number;
   }[];
 }
 
@@ -122,6 +125,88 @@ export function parseTCXFile(text: string): ParsedTCXSample[] {
   }
 
   return samples;
+}
+
+export function parseTCXActivityFile(text: string, fallbackName: string): ParsedGPX {
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  const points = Array.from(xml.querySelectorAll("Trackpoint"));
+  const coordinates: [number, number][] = [];
+  const samples: ParsedGPX["samples"] = [];
+  let elevationGain = 0;
+  let lastElevation: number | null = null;
+  let distance = 0;
+  let previous: { coordinate: [number, number]; timeMs: number } | null = null;
+
+  for (const point of points) {
+    const latText = point.querySelector("Position LatitudeDegrees")?.textContent;
+    const lonText = point.querySelector("Position LongitudeDegrees")?.textContent;
+    if (!latText || !lonText) continue;
+
+    const lat = parseFloat(latText);
+    const lon = parseFloat(lonText);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const coordinate: [number, number] = [lon, lat];
+    const time = point.querySelector("Time")?.textContent || undefined;
+    const timeMs = time ? new Date(time).valueOf() : NaN;
+    const elevation = parseFloat(point.querySelector("AltitudeMeters")?.textContent || "");
+    const pointDistance = parseFloat(point.querySelector("DistanceMeters")?.textContent || "");
+    const heartRate = parseFloat(point.querySelector("HeartRateBpm Value")?.textContent || "");
+
+    if (Number.isFinite(pointDistance)) {
+      distance = Math.max(distance, pointDistance);
+    } else if (coordinates.length > 0) {
+      const previousCoordinate = coordinates[coordinates.length - 1];
+      distance += haversine(previousCoordinate[1], previousCoordinate[0], lat, lon);
+    }
+
+    if (Number.isFinite(elevation)) {
+      if (lastElevation !== null && elevation > lastElevation) elevationGain += elevation - lastElevation;
+      lastElevation = elevation;
+    }
+
+    let paceMinPerKm: number | undefined;
+    if (previous && Number.isFinite(timeMs)) {
+      const seconds = (timeMs - previous.timeMs) / 1000;
+      const meters = haversine(previous.coordinate[1], previous.coordinate[0], lat, lon);
+      if (seconds > 0 && meters > 1) paceMinPerKm = seconds / 60 / (meters / 1000);
+    }
+
+    coordinates.push(coordinate);
+    samples.push({
+      coordinate,
+      elevation: Number.isFinite(elevation) ? elevation : undefined,
+      time,
+      distanceM: distance,
+      heartRate: Number.isFinite(heartRate) ? heartRate : undefined,
+      paceMinPerKm,
+    });
+
+    if (Number.isFinite(timeMs)) previous = { coordinate, timeMs };
+  }
+
+  const firstTime = samples.find((sample) => sample.time)?.time;
+  const lastTime = [...samples].reverse().find((sample) => sample.time)?.time;
+  const startMs = firstTime ? new Date(firstTime).valueOf() : NaN;
+  const endMs = lastTime ? new Date(lastTime).valueOf() : NaN;
+  const duration = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? Math.round((endMs - startMs) / 60000)
+    : undefined;
+  const name =
+    xml.querySelector("Activity Id")?.textContent ||
+    xml.querySelector("Lap Notes")?.textContent ||
+    fallbackName;
+  const dateStr = firstTime || xml.querySelector("Id")?.textContent || new Date().toISOString();
+
+  return {
+    name,
+    date: new Date(dateStr).toISOString(),
+    coordinates,
+    distance,
+    elevationGain,
+    duration,
+    samples,
+  };
 }
 
 export function downloadGPXFile(route: {

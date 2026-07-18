@@ -23,7 +23,7 @@ interface RouteListProps {
   onEditRoute: (r: GPXRoute) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
+  onRouteUpload?: (routeFiles: File[], tcxFiles: File[]) => void;
   favorites: string[];
   onToggleFavorite: (routeId: string) => void;
 }
@@ -165,7 +165,7 @@ export function RouteList({
           ) : (
             <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold cursor-pointer hover:opacity-90 transition-opacity">
               <Icon name="upload" className="text-sm" />Upload route
-              <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
+              <input ref={fileInputRef} type="file" accept=".gpx,.tcx,application/gpx+xml,application/vnd.garmin.tcx+xml" multiple onChange={onFileUpload} className="hidden" />
             </label>
           )}
         </div>
@@ -189,8 +189,8 @@ export function RouteList({
       {showUploadPrompt && onRouteUpload && (
         <UploadRoutePrompt
           onClose={() => setShowUploadPrompt(false)}
-          onUpload={(gpxFiles, tcxFiles) => {
-            onRouteUpload(gpxFiles, tcxFiles);
+          onUpload={(routeFiles, tcxFiles) => {
+            onRouteUpload(routeFiles, tcxFiles);
             setShowUploadPrompt(false);
           }}
         />

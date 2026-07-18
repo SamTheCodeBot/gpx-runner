@@ -14,7 +14,7 @@ interface SidebarProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
+  onRouteUpload?: (routeFiles: File[], tcxFiles: File[]) => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }
@@ -24,14 +24,14 @@ export function UploadRoutePrompt({
   onUpload,
 }: {
   onClose: () => void;
-  onUpload: (gpxFiles: File[], tcxFiles: File[]) => void;
+  onUpload: (routeFiles: File[], tcxFiles: File[]) => void;
 }) {
-  const [gpxFiles, setGpxFiles] = useState<File[]>([]);
+  const [routeFiles, setRouteFiles] = useState<File[]>([]);
   const [tcxFiles, setTcxFiles] = useState<File[]>([]);
   const [matchStatus, setMatchStatus] = useState<{ checking: boolean; ok: boolean; message: string }>({
     checking: false,
     ok: true,
-    message: "TCX is optional. GPX-only uploads still work.",
+    message: "GPX and Garmin TCX activity files are supported.",
   });
 
   type FileSignature = {
@@ -72,6 +72,8 @@ export function UploadRoutePrompt({
     };
   }, []);
 
+  const isTcxFile = useCallback((file: File) => file.name.toLowerCase().endsWith(".tcx") || file.type.includes("tcx"), []);
+
   const distanceMeters = useCallback((a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
     const radius = 6371000;
     const lat1 = (a.lat * Math.PI) / 180;
@@ -86,22 +88,27 @@ export function UploadRoutePrompt({
     let cancelled = false;
 
     const validate = async () => {
+      const routeHasTcx = routeFiles.some(isTcxFile);
       if (tcxFiles.length === 0) {
-        setMatchStatus({ checking: false, ok: true, message: "TCX is optional. GPX-only uploads still work." });
+        setMatchStatus({ checking: false, ok: true, message: "GPX and Garmin TCX activity files are supported." });
         return;
       }
-      if (gpxFiles.length === 0) {
-        setMatchStatus({ checking: false, ok: false, message: "Choose a GPX route file before adding TCX metrics." });
+      if (routeFiles.length === 0) {
+        setMatchStatus({ checking: false, ok: false, message: "Choose a route file before adding TCX metrics." });
         return;
       }
-      if (gpxFiles.length !== tcxFiles.length) {
-        setMatchStatus({ checking: false, ok: false, message: "For now, upload the same number of GPX and TCX files." });
+      if (routeHasTcx) {
+        setMatchStatus({ checking: false, ok: false, message: "Garmin TCX activity files already include metrics. Add extra TCX metrics only with GPX route files." });
+        return;
+      }
+      if (routeFiles.length !== tcxFiles.length) {
+        setMatchStatus({ checking: false, ok: false, message: "For now, upload the same number of route and metric files." });
         return;
       }
 
       setMatchStatus({ checking: true, ok: false, message: "Checking GPX and TCX match..." });
       try {
-        const gpxSignatures = await Promise.all(gpxFiles.map((file) => readSignature(file, "gpx")));
+        const gpxSignatures = await Promise.all(routeFiles.map((file) => readSignature(file, "gpx")));
         const tcxSignatures = await Promise.all(tcxFiles.map((file) => readSignature(file, "tcx")));
         const usedGpx = new Set<number>();
 
@@ -146,11 +153,11 @@ export function UploadRoutePrompt({
     return () => {
       cancelled = true;
     };
-  }, [gpxFiles, tcxFiles, readSignature, distanceMeters]);
+  }, [routeFiles, tcxFiles, readSignature, distanceMeters, isTcxFile]);
 
   const submit = () => {
-    if (gpxFiles.length === 0 || !matchStatus.ok || matchStatus.checking) return;
-    onUpload(gpxFiles, tcxFiles);
+    if (routeFiles.length === 0 || !matchStatus.ok || matchStatus.checking) return;
+    onUpload(routeFiles, tcxFiles);
     onClose();
   };
 
@@ -161,7 +168,7 @@ export function UploadRoutePrompt({
         <div className="flex items-center justify-between mb-5">
           <div>
             <h3 className="text-base font-extrabold text-primary font-headline">Upload route</h3>
-            <p className="text-xs text-on-surface-variant mt-1">GPX is required. TCX adds pace and heart-rate data later.</p>
+            <p className="text-xs text-on-surface-variant mt-1">Upload GPX or a Garmin TCX activity file.</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container transition-colors">
             <Icon name="close" className="text-on-surface-variant text-sm" />
@@ -177,16 +184,16 @@ export function UploadRoutePrompt({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-on-surface">GPX route file</p>
                 <p className="text-xs text-on-surface-variant truncate">
-                  {gpxFiles.length > 0 ? gpxFiles.map((file) => file.name).join(", ") : "Route geometry and elevation"}
+                  {routeFiles.length > 0 ? routeFiles.map((file) => file.name).join(", ") : "Route geometry, elevation, and Garmin TCX metrics"}
                 </p>
               </div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-primary">Required</span>
             </div>
             <input
               type="file"
-              accept=".gpx,application/gpx+xml"
+              accept=".gpx,.tcx,application/gpx+xml,application/vnd.garmin.tcx+xml,application/xml,text/xml"
               multiple
-              onChange={(e) => setGpxFiles(Array.from(e.target.files || []))}
+              onChange={(e) => setRouteFiles(Array.from(e.target.files || []))}
               className="hidden"
             />
           </label>
@@ -197,9 +204,9 @@ export function UploadRoutePrompt({
                 <Icon name="monitor_heart" className="text-on-surface-variant text-lg" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-on-surface">TCX metrics file</p>
+                <p className="text-sm font-bold text-on-surface">Extra TCX metrics file</p>
                 <p className="text-xs text-on-surface-variant truncate">
-                  {tcxFiles.length > 0 ? tcxFiles.map((file) => file.name).join(", ") : "Optional pace and heart-rate data"}
+                  {tcxFiles.length > 0 ? tcxFiles.map((file) => file.name).join(", ") : "Optional when the route file is GPX"}
                 </p>
               </div>
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Optional</span>
@@ -226,7 +233,7 @@ export function UploadRoutePrompt({
           <button onClick={onClose} className="flex-1 py-2.5 border border-outline-variant rounded-xl text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
             Cancel
           </button>
-          <button onClick={submit} disabled={gpxFiles.length === 0 || !matchStatus.ok || matchStatus.checking} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+          <button onClick={submit} disabled={routeFiles.length === 0 || !matchStatus.ok || matchStatus.checking} className="flex-1 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             {matchStatus.checking ? "Checking..." : "Upload"}
           </button>
         </div>
@@ -354,7 +361,7 @@ export function Sidebar({
           <Icon name="add" className="text-sm" />
           {!collapsed && "Upload route"}
         </button>
-        <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={onFileUpload} className="hidden" />
+        <input ref={fileInputRef} type="file" accept=".gpx,.tcx,application/gpx+xml,application/vnd.garmin.tcx+xml" multiple onChange={onFileUpload} className="hidden" />
       </div>
 
       {/* User section */}
@@ -404,7 +411,7 @@ interface MobileDrawerProps {
   onLogout: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRouteUpload?: (gpxFiles: File[], tcxFiles: File[]) => void;
+  onRouteUpload?: (routeFiles: File[], tcxFiles: File[]) => void;
 }
 
 export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, onLogout, fileInputRef, onFileUpload, onRouteUpload }: MobileDrawerProps) {
@@ -496,7 +503,7 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
             <Icon name="add" className="text-sm" />
             Upload route
           </button>
-          <input ref={fileInputRef} type="file" accept=".gpx" multiple onChange={(e) => { onFileUpload(e); onClose(); }} className="hidden" />
+          <input ref={fileInputRef} type="file" accept=".gpx,.tcx,application/gpx+xml,application/vnd.garmin.tcx+xml" multiple onChange={(e) => { onFileUpload(e); onClose(); }} className="hidden" />
         </div>
 
         {/* User section */}
@@ -530,8 +537,8 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
       {showUploadPrompt && onRouteUpload && (
         <UploadRoutePrompt
           onClose={() => setShowUploadPrompt(false)}
-          onUpload={(gpxFiles, tcxFiles) => {
-            onRouteUpload(gpxFiles, tcxFiles);
+          onUpload={(routeFiles, tcxFiles) => {
+            onRouteUpload(routeFiles, tcxFiles);
             onClose();
           }}
         />
@@ -565,7 +572,7 @@ export function MobileBottomNav({ activeTab, onTabChange, fileInputRef, onFileUp
         <span className="text-[10px] font-bold">Upload</span>
         <input
           type="file"
-          accept=".gpx"
+          accept=".gpx,.tcx,application/gpx+xml,application/vnd.garmin.tcx+xml"
           multiple
           onChange={(e) => { onFileUpload(e); onTabChange("routes"); }}
           className="hidden"

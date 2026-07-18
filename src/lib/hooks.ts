@@ -7,7 +7,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
-import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+import { haversine, parseGPXFile, parseTCXActivityFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 
 const ROUTE_CACHE_VERSION = 3;
 const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -72,6 +72,10 @@ function routeSummaryCacheKey(userId: string) {
 
 function isFreshCache(cachedAt: number) {
   return Date.now() - cachedAt < ROUTE_CACHE_TTL_MS;
+}
+
+function isTcxFile(file: File) {
+  return file.name.toLowerCase().endsWith(".tcx") || file.type.includes("tcx");
 }
 
 function routeCountriesFromData(data: any, coordinates: [number, number][] = []): string[] | undefined {
@@ -256,6 +260,8 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       coordinate: sample.coordinate,
       elevation: sample.elevation,
       time: sample.time,
+      heartRate: sample.heartRate,
+      paceMinPerKm: sample.paceMinPerKm,
     }));
 
     const downsample = (metricSamples: NonNullable<GPXRoute["samples"]>) => {
@@ -362,8 +368,16 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
           const file = files[i];
           const id = `route-${Date.now()}-${i}`;
           const text = await file.text();
-          const tcxText = tcxFiles[i] ? await tcxFiles[i].text() : undefined;
-          const parsed = parseGPXFile(text, file.name.replace(".gpx", ""));
+          const isTcxRoute = isTcxFile(file);
+          const tcxText = !isTcxRoute && tcxFiles[i] ? await tcxFiles[i].text() : undefined;
+          const fallbackName = file.name.replace(/\.(gpx|tcx)$/i, "");
+          const parsed = isTcxRoute
+            ? parseTCXActivityFile(text, fallbackName)
+            : parseGPXFile(text, fallbackName);
+
+          if (parsed.coordinates.length < 2) {
+            throw new Error(`"${file.name}" does not contain enough route points to import.`);
+          }
 
           // Check for duplicates
           const isDup = currentRoutes.some(
@@ -381,8 +395,9 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
             coordinates: parsed.coordinates,
             distance: parsed.distance,
             elevationGain: parsed.elevationGain,
+            duration: parsed.duration,
             samples: mergeMetricSamples(parsed, tcxText),
-            hasTcx: Boolean(tcxText),
+            hasTcx: isTcxRoute || Boolean(tcxText),
             color: nextColor(),
             type: "road" as const,
             userId: userId || undefined,
@@ -391,8 +406,8 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
           // Upload GPX/TCX to Firebase Storage
           if (storage && userId) {
             try {
-              await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.gpx`), file);
-              if (tcxFiles[i]) {
+              await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.${isTcxRoute ? "tcx" : "gpx"}`), file);
+              if (!isTcxRoute && tcxFiles[i]) {
                 await uploadBytes(ref(storage, `gpx-files/${userId}/${id}.tcx`), tcxFiles[i]);
               }
             } catch (e) {
@@ -1096,4 +1111,3 @@ export function useRouteTemplate(userId: string | null) {
 
   return { template, loading, saving, error, saveZones, deleteZone };
 }
-
