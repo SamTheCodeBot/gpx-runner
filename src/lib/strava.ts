@@ -1,5 +1,17 @@
 const STRAVA_API = "https://www.strava.com/api/v3";
 
+export class StravaApiError extends Error {
+  status: number;
+  body: string;
+
+  constructor(message: string, status: number, body: string) {
+    super(message);
+    this.name = "StravaApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export type StravaTokenResponse = {
   token_type: string;
   access_token: string;
@@ -44,7 +56,7 @@ export async function exchangeStravaCode(code: string): Promise<StravaTokenRespo
   });
 
   if (!res.ok) {
-    throw new Error(`Strava token exchange failed: ${await res.text()}`);
+    throw new StravaApiError("Strava token exchange failed", res.status, await res.text());
   }
 
   return res.json();
@@ -63,7 +75,7 @@ export async function refreshStravaToken(refreshToken: string): Promise<StravaTo
   });
 
   if (!res.ok) {
-    throw new Error(`Strava token refresh failed: ${await res.text()}`);
+    throw new StravaApiError("Strava token refresh failed", res.status, await res.text());
   }
 
   return res.json();
@@ -76,7 +88,7 @@ export async function deauthorizeStrava(accessToken: string): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error(`Strava deauthorize failed: ${await res.text()}`);
+    throw new StravaApiError("Strava deauthorize failed", res.status, await res.text());
   }
 }
 
@@ -86,7 +98,7 @@ export async function stravaGet<T>(path: string, accessToken: string): Promise<T
   });
 
   if (!res.ok) {
-    throw new Error(`Strava API request failed: ${res.status} ${await res.text()}`);
+    throw new StravaApiError("Strava API request failed", res.status, await res.text());
   }
 
   return res.json();

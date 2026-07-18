@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
-import { refreshStravaToken, stravaGet } from "@/lib/strava";
+import { refreshStravaToken, StravaApiError, stravaGet } from "@/lib/strava";
 import type { GPXRoute, RouteMetricSample, UserProfile } from "@/app/types";
 
 export const runtime = "nodejs";
@@ -161,6 +161,28 @@ function routeFromStrava(activity: StravaActivity, streams: StravaStreams, uid: 
   };
 }
 
+function stravaSyncErrorCode(error: unknown): string {
+  if (error instanceof StravaApiError) {
+    if (error.message.includes("token refresh")) return "strava_token_refresh_failed";
+    if (error.status === 401 || error.status === 403) return "strava_authorization_failed";
+    if (error.status === 429) return "strava_rate_limited";
+    return "strava_api_failed";
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("STRAVA_CLIENT_ID") || message.includes("STRAVA_CLIENT_SECRET")) {
+    return "strava_env_missing";
+  }
+  if (message.includes("FIREBASE") || message.includes("Firebase")) {
+    return "firebase_config_failed";
+  }
+  return "sync_failed";
+}
+
+function shouldSkipStreamError(error: unknown): boolean {
+  return error instanceof StravaApiError && error.status === 404;
+}
+
 async function loadRunActivities(accessToken: string, options: SyncOptions): Promise<StravaActivity[]> {
   const runs: StravaActivity[] = [];
 
@@ -236,10 +258,18 @@ export async function POST(req: NextRequest) {
     const importedRoutes: GPXRoute[] = [];
     const skipped: { id: number; reason: string }[] = [];
     for (const activity of newRunActivities.slice(0, options.importLimit)) {
-      const streams = await stravaGet<StravaStreams>(
-        `/activities/${activity.id}/streams?keys=time,distance,latlng,altitude,velocity_smooth,heartrate&key_by_type=true`,
-        accessToken
-      );
+      let streams: StravaStreams;
+      try {
+        streams = await stravaGet<StravaStreams>(
+          `/activities/${activity.id}/streams?keys=time,distance,latlng,altitude,velocity_smooth,heartrate&key_by_type=true`,
+          accessToken
+        );
+      } catch (error) {
+        if (!shouldSkipStreamError(error)) throw error;
+        skipped.push({ id: activity.id, reason: "No readable stream" });
+        continue;
+      }
+
       const route = routeFromStrava(activity, streams, decoded.uid);
       if (!route) {
         skipped.push({ id: activity.id, reason: "No GPS stream" });
@@ -267,7 +297,8 @@ export async function POST(req: NextRequest) {
       scanned: runActivities.length,
     });
   } catch (error) {
-    console.error("[strava/sync]", error);
-    return NextResponse.json({ error: "Failed to sync Strava runs" }, { status: 500 });
+    const code = stravaSyncErrorCode(error);
+    console.error("[strava/sync]", { code, error });
+    return NextResponse.json({ error: "Failed to sync Strava runs", code }, { status: 500 });
   }
 }

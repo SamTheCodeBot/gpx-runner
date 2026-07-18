@@ -187,7 +187,10 @@ export default function ProfilePage() {
         body: JSON.stringify({ mode }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to sync Strava runs");
+      if (!res.ok) {
+        const detail = data.code ? ` (${data.code})` : "";
+        throw new Error(`${data.error || "Failed to sync Strava runs"}${detail}`);
+      }
       const imported = Number(data.imported || 0);
       const skipped = Number(data.skipped || 0);
       const scanned = Number(data.scanned || 0);
