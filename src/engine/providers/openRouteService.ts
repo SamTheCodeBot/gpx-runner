@@ -5,7 +5,7 @@ function encodeCoordinate(point: LatLng): [number, number] {
 }
 
 const API_TIMEOUT_MS = 10_000;
-const DIRECTIONS_BASE_URL = "https://api.openrouteservice.org/v2/directions";
+const DIRECTIONS_BASE_URL = "https://api.heigit.org/openrouteservice/v2/directions";
 
 type OpenRouteServiceProfile = "foot-walking" | "foot-hiking";
 type RouteStyle = "road" | "mixed" | "trail";
