@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { SIGNUP_DATA_SUMMARY } from "@/lib/privacy";
 
 interface IconProps {
   name: string;
@@ -304,6 +306,23 @@ export function LoginScreen({
   showForgotPassword, setShowForgotPassword, handleAuth,
   setAuthError,
 }: LoginScreenProps) {
+  /**
+   * The acknowledgement lives in the component that renders it, so every entry
+   * point to registration is gated identically and no caller can forget it.
+   * Never pre-ticked, and cleared whenever the form switches mode.
+   */
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  useEffect(() => { setTermsAccepted(false); }, [isRegistering, showForgotPassword]);
+
+  const submit = (e: React.FormEvent) => {
+    if (isRegistering && !showForgotPassword && !termsAccepted) {
+      e.preventDefault();
+      setAuthError("Please read the privacy notice and accept the terms to create an account.");
+      return;
+    }
+    handleAuth(e);
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
@@ -338,7 +357,7 @@ export function LoginScreen({
             <div className="mb-3 px-3 py-2 bg-green-100 rounded-xl text-xs font-medium text-green-800">{authSuccess}</div>
           )}
 
-          <form onSubmit={handleAuth} className="space-y-3">
+          <form onSubmit={submit} className="space-y-3">
             <div>
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1">Email</label>
               <input
@@ -381,6 +400,63 @@ export function LoginScreen({
                 />
               </div>
             )}
+            {/*
+              Terms + privacy notice acknowledgement.
+
+              This is the contract the service runs on (Art. 6(1)(b)), not
+              consent. It deliberately asks for nothing about intervals.icu or
+              Strava: consent bundled into signup as a precondition of the
+              service is not freely given (Art. 7(4)), so provider permission is
+              asked separately at the moment of connecting. Nothing is pre-ticked.
+            */}
+            {isRegistering && !showForgotPassword && (
+              <div className="rounded-2xl border border-outline-variant bg-surface-container-low p-3 mt-1">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-2">
+                  What GPX running stores
+                </p>
+                <ul className="space-y-1.5">
+                  {SIGNUP_DATA_SUMMARY.map((item) => (
+                    <li key={item.label} className="flex items-start gap-2">
+                      <Icon name={item.icon} className="text-primary text-sm mt-0.5 shrink-0" />
+                      <p className="text-[11px] leading-snug text-on-surface-variant">
+                        <span className="font-bold text-on-surface">{item.label}.</span> {item.detail}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-3 flex items-start gap-2">
+                  <input
+                    id="terms-accept"
+                    name="terms-accept"
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    required
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded accent-primary cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <label htmlFor="terms-accept" className="text-[11px] leading-snug text-on-surface cursor-pointer">
+                    I have read the{" "}
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary font-bold underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded"
+                    >
+                      privacy notice
+                    </Link>{" "}
+                    and I accept the terms of use.
+                  </label>
+                </div>
+
+                <p className="text-[10px] leading-snug text-on-surface-variant/80 mt-2">
+                  This connects nothing else. Permission to import your runs from intervals.icu
+                  or Strava is asked separately, at the moment you connect one, and you can say
+                  no and still use GPX running.
+                </p>
+              </div>
+            )}
+
             <button type="submit" className="w-full py-3 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity mt-1">
               {showForgotPassword ? "Send reset link" : isRegistering ? "Create account" : "Sign in"}
             </button>

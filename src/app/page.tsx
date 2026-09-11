@@ -6,6 +6,7 @@ import { downloadGPXFile } from "@/lib/utils";
 import { routeCountryNames } from "@/lib/countries";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
+import { termsAcknowledgement } from "@/lib/privacy";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
@@ -95,7 +96,14 @@ export default function Home() {
           }
         }
         await reg(email, password);
-        await saveProfile({ username: username.trim(), displayName: username.trim() });
+        // Terms acknowledgement stamped with its version. Contract basis
+        // (Art. 6(1)(b)) — this is not, and must not be read as, consent to
+        // pull data from any provider.
+        await saveProfile({
+          username: username.trim(),
+          displayName: username.trim(),
+          ...termsAcknowledgement(),
+        });
         setUsername("");
       } else {
         await lg(email, password);

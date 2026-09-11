@@ -58,6 +58,15 @@ export const SIGNUP_DATA_SUMMARY: { icon: string; label: string; detail: string 
   },
 ];
 
+/**
+ * Stamped onto the profile when an account is created. Records *which* wording
+ * was accepted, not just that a box was ticked, so the acknowledgement can be
+ * shown back to the user and re-asked when the terms change.
+ */
+export function termsAcknowledgement(): { termsAcceptedAt: string; termsVersion: string } {
+  return { termsAcceptedAt: new Date().toISOString(), termsVersion: TERMS_VERSION };
+}
+
 // --- Views over the API responses -------------------------------------------
 
 export interface ConsentTextView {

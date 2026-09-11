@@ -5,6 +5,7 @@ import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useRouteSuggestions, useUserProfile } from "@/lib/hooks";
 import { Icon, LoginScreen } from "@/components/ui";
+import { termsAcknowledgement } from "@/lib/privacy";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "../types";
@@ -62,7 +63,7 @@ export default function SuggestPage() {
       const { login: lg, register: reg } = await import("@/lib/auth");
       if (isRegistering) {
         await reg(email, password);
-        await saveProfile({ username: username.trim(), displayName: username.trim() });
+        await saveProfile({ username: username.trim(), displayName: username.trim(), ...termsAcknowledgement() });
       } else {
         await lg(email, password);
       }

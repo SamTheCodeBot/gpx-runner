@@ -6,6 +6,7 @@ import { calculateRouteFamiliarity, type RouteFamiliarityResult } from "@/lib/ro
 import { parseGPXFile } from "@/lib/utils";
 import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
 import { Icon, LoginScreen } from "@/components/ui";
+import { termsAcknowledgement } from "@/lib/privacy";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "../types";
@@ -84,7 +85,7 @@ export default function FamiliarityPage() {
       const { login, register } = await import("@/lib/auth");
       if (isRegistering) {
         await register(email, password);
-        await saveProfile({ username: username.trim(), displayName: username.trim() });
+        await saveProfile({ username: username.trim(), displayName: username.trim(), ...termsAcknowledgement() });
       } else {
         await login(email, password);
       }
