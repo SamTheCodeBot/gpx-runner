@@ -10,5 +10,40 @@ service cloud.firestore {
       allow read: if true; // allow username lookup for duplicate check (no auth needed)
       allow write: if request.auth != null;
     }
+
+    // --- Ingestion spine ---------------------------------------------------
+    // These collections are written exclusively by server routes through the
+    // Admin SDK, which bypasses rules. Clients therefore get read access where
+    // it is their own data, and no write access anywhere: ingestion, consent
+    // and erasure must go through the API so they are validated and audited.
+
+    match /activities/{activityId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.ownerUid;
+      allow write: if false;
+    }
+
+    match /consentRecords/{consentId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false; // only /api/gdpr/consent may record consent
+    }
+
+    // Holds encrypted provider tokens. No client may read this, ever.
+    match /providerConnections/{connectionId} {
+      allow read, write: if false;
+    }
+
+    // Original provider files: server-side only, short retention.
+    match /rawActivityPayloads/{payloadId} {
+      allow read, write: if false;
+    }
+
+    // Webhook idempotency records and erasure receipts: operational data.
+    match /webhookDeliveries/{deliveryId} {
+      allow read, write: if false;
+    }
+
+    match /erasureLog/{receiptId} {
+      allow read, write: if false;
+    }
   }
 }
