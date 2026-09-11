@@ -3,13 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { TileLayer, useMap } from "react-leaflet";
 import type L from "leaflet";
-import "maplibre-gl/dist/maplibre-gl.css";
 import {
   getRasterAttribution,
   getRasterTileUrl,
   getVectorAttribution,
   getVectorStyleUrl,
+  rasterHasDarkStyle,
 } from "@/lib/basemap";
+
+/** Minimal shape of the MapLibre map exposed by the Leaflet plugin. */
+type GLMap = { on: (event: string, cb: (payload?: unknown) => void) => void };
+
+/** How long the vector style gets to paint before we fall back to raster tiles. */
+const VECTOR_LOAD_TIMEOUT_MS = 6000;
 
 function hasWebGL(): boolean {
   try {
@@ -31,32 +37,48 @@ interface BaseMapLayerProps {
 /**
  * Renders the basemap underneath the route overlays.
  *
- * Prefers the OpenFreeMap vector style (no API key, no watermark) rendered via
- * MapLibre inside Leaflet, and falls back to raster tiles when WebGL or the
- * vector style is unavailable.
+ * With the `openfreemap` provider it renders a MapLibre vector style inside
+ * Leaflet; if WebGL is missing, the style errors, or nothing has painted after
+ * VECTOR_LOAD_TIMEOUT_MS, it tears the vector layer down and shows raster tiles
+ * instead, so the map is never left blank.
  */
 export default function BaseMapLayer({ darkMode }: BaseMapLayerProps) {
   const map = useMap();
   const styleUrl = getVectorStyleUrl(darkMode);
   const [useRaster, setUseRaster] = useState(() => !styleUrl);
-  const layerRef = useRef<L.Layer | null>(null);
 
   useEffect(() => {
-    if (!styleUrl) {
-      setUseRaster(true);
-      return;
-    }
-    if (!hasWebGL()) {
+    if (!styleUrl || !hasWebGL()) {
       setUseRaster(true);
       return;
     }
 
     let cancelled = false;
     let layer: L.Layer | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const removeLayer = () => {
+      if (!layer) return;
+      try {
+        map.removeLayer(layer);
+      } catch {
+        /* map already torn down */
+      }
+      layer = null;
+    };
+
+    const fallback = (reason: string, detail?: unknown) => {
+      if (cancelled) return;
+      console.warn(`[basemap] falling back to raster tiles: ${reason}`, detail ?? "");
+      if (timer) clearTimeout(timer);
+      timer = null;
+      removeLayer();
+      setUseRaster(true);
+    };
 
     (async () => {
       try {
-        const [{ default: leaflet }, maplibregl] = await Promise.all([
+        const [{ default: leaflet }] = await Promise.all([
           import("leaflet"),
           import("maplibre-gl"),
         ]);
@@ -66,38 +88,47 @@ export default function BaseMapLayer({ darkMode }: BaseMapLayerProps) {
         layer = (leaflet as unknown as typeof L).maplibreGL({
           style: styleUrl,
           attribution: getVectorAttribution(),
-          // Leaflet owns all interaction; MapLibre only paints the basemap.
           interactive: false,
-          maplibreLogo: false,
           attributionControl: false,
         } as unknown as Parameters<typeof L.maplibreGL>[0]);
 
-        const glMap = (layer as unknown as { getMaplibreMap: () => { on: (e: string, cb: () => void) => void } })
-          .getMaplibreMap?.();
-        glMap?.on("error", () => {
-          if (!cancelled) setUseRaster(true);
+        // The MapLibre map only exists once the layer has been added.
+        layer.addTo(map);
+        if (cancelled) {
+          removeLayer();
+          return;
+        }
+
+        const glMap = (
+          layer as unknown as { getMaplibreMap?: () => GLMap | undefined }
+        ).getMaplibreMap?.();
+
+        if (!glMap) {
+          fallback("MapLibre map was not created");
+          return;
+        }
+
+        timer = setTimeout(() => fallback("vector style timed out"), VECTOR_LOAD_TIMEOUT_MS);
+
+        glMap.on("load", () => {
+          if (cancelled) return;
+          if (timer) clearTimeout(timer);
+          timer = null;
+          setUseRaster(false);
         });
 
-        layer.addTo(map);
-        layerRef.current = layer;
-        setUseRaster(false);
+        glMap.on("error", (event: unknown) => {
+          fallback("vector style error", (event as { error?: unknown })?.error ?? event);
+        });
       } catch (err) {
-        console.warn("[basemap] vector basemap unavailable, falling back to raster tiles", err);
-        if (!cancelled) setUseRaster(true);
+        fallback("vector basemap failed to initialise", err);
       }
     })();
 
     return () => {
       cancelled = true;
-      const active = layerRef.current ?? layer;
-      if (active) {
-        try {
-          map.removeLayer(active);
-        } catch {
-          /* map already torn down */
-        }
-      }
-      layerRef.current = null;
+      if (timer) clearTimeout(timer);
+      removeLayer();
     };
   }, [map, styleUrl]);
 
@@ -108,7 +139,7 @@ export default function BaseMapLayer({ darkMode }: BaseMapLayerProps) {
       attribution={getRasterAttribution()}
       url={getRasterTileUrl(darkMode)}
       maxZoom={19}
-      className={darkMode ? "basemap-raster-dark" : undefined}
+      className={darkMode && !rasterHasDarkStyle() ? "basemap-raster-dark" : undefined}
     />
   );
 }
