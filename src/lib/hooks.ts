@@ -8,6 +8,8 @@ import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
+import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
+import type { FamiliarityReport, FamiliarityTarget } from "@/engine/familiarityReport";
 
 const ROUTE_CACHE_VERSION = 3;
 const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -782,10 +784,23 @@ type RouteSuggestionOptions = {
   directionShift?: number;
 };
 
-export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: boolean) {
+/** Client-side budget for the history we post. The server enforces its own. */
+const SUGGESTION_TRACK_BUDGET = {
+  maxTracks: 150,
+  maxPointsPerTrack: 500,
+  maxTotalPoints: 25_000,
+};
+
+export function useRouteSuggestions(
+  suggestDistance: number,
+  familiarity: FamiliarityTarget | boolean = "mixed",
+) {
+  const familiarityTarget: FamiliarityTarget =
+    typeof familiarity === "boolean" ? (familiarity ? "unfamiliar" : "mixed") : familiarity;
   const [suggestedRoute, setSuggestedRoute] = useState<GPXRoute | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [suggestionFamiliarity, setSuggestionFamiliarity] = useState<FamiliarityReport | null>(null);
 
   const getSuggestion = useCallback(
     async (
@@ -795,6 +810,7 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
     ) => {
       setIsSuggesting(true);
       setSuggestionError(null);
+      setSuggestionFamiliarity(null);
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
@@ -807,6 +823,17 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           }
         }
 
+        // Familiarity is measured against the runner's own tracks, so they have
+        // to reach the server. Only the ground within reach of the start can
+        // overlap the loop, and it is thinned before it goes on the wire — a
+        // full activity history would be megabytes.
+        const start = { lat, lng: lon };
+        const tracks = boundTracksNearStart(
+          routes.map((route) => toLatLngTrack(route.coordinates)),
+          start,
+          { radiusMeters: historyRadiusMeters(suggestDistance), ...SUGGESTION_TRACK_BUDGET },
+        ).map((track) => track.map((point) => [point.lng, point.lat] as [number, number]));
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);
 
@@ -816,9 +843,11 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               distance: suggestDistance,
-              avoidFamiliar,
+              familiarityMode: familiarityTarget,
+              tracks,
               centerLat: lat,
               centerLon: lon,
+              routeStyle: options.routeType ?? "mixed",
               preferQuiet: options.preferQuiet ?? false,
               preferGreen: options.preferGreen ?? false,
               elevationPreference: options.elevationPreference ?? "any",
@@ -832,12 +861,13 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
             throw new Error(data?.error || "No runnable route found for those settings");
           }
           return {
-            name: data.name || `${avoidFamiliar ? "New" : "Familiar"} Loop`,
+            name: data.name || "Suggested loop",
             coordinates: data.coordinates,
             distance: data.distance,
             elevationGain: data.elevationGain || 0,
             samples: Array.isArray(data.samples) ? data.samples : undefined,
             type: data.type || "mixed",
+            familiarity: (data.familiarity ?? null) as FamiliarityReport | null,
           };
         };
 
@@ -848,12 +878,14 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
           elevationGain: number;
           samples?: GPXRoute["samples"];
           type: "road" | "trail" | "mixed";
+          familiarity: FamiliarityReport | null;
         } | null = null;
 
         try {
           result = await generateFromServer();
 
           if (result) {
+            setSuggestionFamiliarity(result.familiarity);
             setSuggestedRoute({
               id: `suggested-${Date.now()}`,
               name: result.name,
@@ -873,22 +905,26 @@ export function useRouteSuggestions(suggestDistance: number, avoidFamiliar: bool
       } catch (err) {
         console.error("[useRouteSuggestions]", err);
         setSuggestedRoute(null);
+        setSuggestionFamiliarity(null);
         setSuggestionError(err instanceof Error ? err.message : "Could not generate a runnable route");
       } finally {
         setIsSuggesting(false);
       }
     },
-    [suggestDistance, avoidFamiliar]
+    [suggestDistance, familiarityTarget]
   );
 
   return {
     suggestedRoute,
     isSuggesting,
     suggestionError,
+    /** Always present for a successful suggestion: how much of it the runner has run before. */
+    suggestionFamiliarity,
     getSuggestion,
     clearSuggestion: () => {
       setSuggestedRoute(null);
       setSuggestionError(null);
+      setSuggestionFamiliarity(null);
     },
   };
 }
