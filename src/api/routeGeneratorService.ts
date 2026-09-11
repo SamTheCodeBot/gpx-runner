@@ -1,6 +1,7 @@
 import { generateRoutes } from "../engine/generateRoute";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
-import { GenerateRouteInput, LatLng, RouteExtraSummary, RouteProviderResult } from "../types";
+import { evaluateTrafficSafety } from "../engine/scoring/traffic";
+import { GenerateRouteInput, LatLng, RouteProviderResult } from "../types";
 import { haversineMeters } from "../engine/utils/geo";
 
 export async function generateTrainingRoutes(input: GenerateRouteInput) {
@@ -112,41 +113,9 @@ function routeQuality(route: RouteProviderResult) {
     hairpins,
     tinyLoops,
     backtracks,
-    ...trafficSafety(route),
+    ...evaluateTrafficSafety(route),
     geometryPenalty: hairpins * 18 + tinyLoops * 28 + backtracks * 12,
     geometryReject: hairpins >= 4 || tinyLoops >= 2 || backtracks >= 4,
-  };
-}
-
-function summaryDistance(summary: RouteExtraSummary[] | undefined, predicate: (value: number) => boolean): number {
-  if (!Array.isArray(summary)) return 0;
-  return summary
-    .filter((item) => predicate(item.value))
-    .reduce((sum, item) => sum + Math.max(0, item.distance), 0);
-}
-
-function trafficSafety(route: RouteProviderResult) {
-  const stateRoadMeters = summaryDistance(route.extras?.waytype, (value) => value === 1);
-  const roadMeters = summaryDistance(route.extras?.waytype, (value) => value === 2);
-  const noisyMeters = summaryDistance(route.extras?.noise, (value) => value >= 6);
-  const veryNoisyMeters = summaryDistance(route.extras?.noise, (value) => value >= 8);
-  const distance = Math.max(1, route.distanceMeters);
-
-  const unsafeRoads =
-    stateRoadMeters > 450 ||
-    veryNoisyMeters > 600 ||
-    noisyMeters / distance > 0.28;
-
-  return {
-    stateRoadMeters: Math.round(stateRoadMeters),
-    roadMeters: Math.round(roadMeters),
-    noisyMeters: Math.round(noisyMeters),
-    trafficPenalty:
-      (stateRoadMeters / distance) * 520 +
-      (roadMeters / distance) * 95 +
-      (noisyMeters / distance) * 240 +
-      (veryNoisyMeters / distance) * 360,
-    unsafeRoads,
   };
 }
 
