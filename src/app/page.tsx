@@ -4,7 +4,7 @@ import { useState, useRef, useMemo } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { routeCountryNames } from "@/lib/countries";
-import { useGPXRoutes, useRouteStats, useRouteFilter, useUserProfile, useFavorites } from "@/lib/hooks";
+import { useGPXRoutes, useRouteStats, useRouteFilter, useUnifiedRoutes, useUserProfile, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
 import { termsAcknowledgement } from "@/lib/privacy";
 import { StatsBar } from "@/components/StatsBar";
@@ -26,7 +26,12 @@ export default function Home() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   // ── Core data ───────────────────────────────────────────────────────────────
+  // `routes` is storage: the route documents this page may upload to, rename and
+  // delete. Every mutation below keeps using it.
   const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
+  // `unifiedRoutes` is display: the same routes plus provider-synced activities,
+  // deduped and labelled with where each run came from. Read-only.
+  const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
@@ -47,9 +52,9 @@ export default function Home() {
   // ── Derived ────────────────────────────────────────────────────────────────
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
   const listFilteredRoutes = useMemo(() => {
-    if (filter.list === "favorites") return routes.filter((route) => favorites.includes(route.id));
-    return routes;
-  }, [routes, filter.list, favorites]);
+    if (filter.list === "favorites") return unifiedRoutes.filter((route) => favorites.includes(route.id));
+    return unifiedRoutes;
+  }, [unifiedRoutes, filter.list, favorites]);
   const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
@@ -66,8 +71,8 @@ export default function Home() {
   }, [filteredRoutes]);
 
   const countryOptions = useMemo(() => (
-    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
-  ), [routes]);
+    Array.from(new Set(unifiedRoutes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [unifiedRoutes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAuth = async (e: React.FormEvent) => {
@@ -178,10 +183,10 @@ export default function Home() {
   };
 
   const getYearOptions = () =>
-    Array.from(new Set(routes.map((r) => r.date.substring(0, 4)).filter(Boolean))).sort().reverse();
+    Array.from(new Set(unifiedRoutes.map((r) => r.date.substring(0, 4)).filter(Boolean))).sort().reverse();
 
   const getMonthOptions = () =>
-    Array.from(new Set(routes.map((r) => r.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
+    Array.from(new Set(unifiedRoutes.map((r) => r.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (authLoading) {

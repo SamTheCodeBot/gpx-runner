@@ -71,6 +71,9 @@ export async function GET(req: NextRequest) {
           "coordinates",
           "hasTcx",
           "strava",
+          // Ingestion-spine linkage. Without it the client read layer cannot
+          // tell a provider-synced run from one the owner uploaded by hand.
+          "activity",
         )
         .get(),
       db.collection("userProfiles")
@@ -105,6 +108,7 @@ export async function GET(req: NextRequest) {
         coordinates: compactCoordinates(d.coordinates),
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
+        activity: d.activity || null,
       };
     });
 

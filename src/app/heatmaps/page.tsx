@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
-import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { termsAcknowledgement } from "@/lib/privacy";
@@ -48,30 +48,34 @@ export default function PersonalHeatmapsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [heatmapPanelCollapsed, setHeatmapPanelCollapsed] = useState(false);
 
+  // Storage (uploads write here) versus display (synced runs merged in, dupes
+  // collapsed). A heatmap built from the raw collection would burn a manually
+  // uploaded run and its synced twin into the same pixels twice.
   const { routes, saveRoutes, uploadFiles, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
+  const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   const filteredRoutes = useMemo(() => {
-    return routes.filter((route) => {
+    return unifiedRoutes.filter((route) => {
       if (routeType !== "all" && route.type !== routeType) return false;
       if (routeYear && !route.date.startsWith(routeYear)) return false;
       if (routeMonth && route.date.substring(5, 7) !== routeMonth) return false;
       if (routeCountry && !routeHasCountry(route, routeCountry)) return false;
       return true;
     });
-  }, [routes, routeType, routeYear, routeMonth, routeCountry]);
+  }, [unifiedRoutes, routeType, routeYear, routeMonth, routeCountry]);
 
   const countryOptions = useMemo(() => (
-    Array.from(new Set(routes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
-  ), [routes]);
+    Array.from(new Set(unifiedRoutes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
+  ), [unifiedRoutes]);
 
   const yearOptions = useMemo(() => (
-    Array.from(new Set(routes.map((route) => route.date.substring(0, 4)).filter(Boolean))).sort().reverse()
-  ), [routes]);
+    Array.from(new Set(unifiedRoutes.map((route) => route.date.substring(0, 4)).filter(Boolean))).sort().reverse()
+  ), [unifiedRoutes]);
 
   const monthOptions = useMemo(() => (
-    Array.from(new Set(routes.map((route) => route.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b))
-  ), [routes]);
+    Array.from(new Set(unifiedRoutes.map((route) => route.date.substring(5, 7)).filter(Boolean))).sort((a, b) => Number(a) - Number(b))
+  ), [unifiedRoutes]);
 
   const stats = useMemo(() => {
     if (!filteredRoutes.length) return null;

@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
-import { useGPXRoutes, type RouteSummary } from "@/lib/hooks";
+import { useGPXRoutes, useUnifiedRoutes, type RouteSummary } from "@/lib/hooks";
 import { useDashboard } from "@/lib/dashboard";
 import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { Sidebar } from "@/components/Sidebar";
@@ -218,7 +218,12 @@ export default function BadgesPage() {
   const { data: dashboardData, loading: dashboardLoading } = useDashboard(user?.uid ?? null);
   const { routes: uploadRoutes, saveRoutes, uploadFiles } = useGPXRoutes(user?.uid ?? null, { loadRoutes: false });
 
-  const routes = useMemo(() => dashboardData?.routes ?? [], [dashboardData?.routes]);
+  // Badges are awarded off the unified list: a run held both as a manual upload
+  // and as a provider sync must not inflate run counts, streaks or distance.
+  // Dashboard routes arrive with their geometry compacted to ~50 points, which
+  // the distance-based sampling in `trackSignature.ts` is built to tolerate.
+  const dashboardRoutes = useMemo(() => dashboardData?.routes ?? [], [dashboardData?.routes]);
+  const { routes } = useUnifiedRoutes(user?.uid ?? null, dashboardRoutes);
   const publicProfile = useMemo(() => (
     dashboardData?.profile ? { ...dashboardData.profile, strava: undefined } as UserProfile : null
   ), [dashboardData?.profile]);

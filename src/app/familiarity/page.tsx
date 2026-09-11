@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { calculateRouteFamiliarity, type RouteFamiliarityResult } from "@/lib/routeFamiliarity";
 import { parseGPXFile } from "@/lib/utils";
-import { useGPXRoutes, useUserProfile } from "@/lib/hooks";
+import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
 import { Icon, LoginScreen } from "@/components/ui";
 import { termsAcknowledgement } from "@/lib/privacy";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
@@ -49,7 +49,11 @@ export default function FamiliarityPage() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [username, setUsername] = useState("");
 
+  // Uploads still write through `routes`; everything the familiarity score is
+  // measured against uses the unified list, so a run held both as a manual GPX
+  // and as a provider sync counts once rather than twice.
   const { routes, uploadFiles, loading: routesLoading } = useGPXRoutes(user?.uid ?? null);
+  const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
   const { profile, loading: profileLoading, saveProfile } = useUserProfile(user?.uid ?? null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(true);
@@ -59,12 +63,12 @@ export default function FamiliarityPage() {
   const [isComparing, setIsComparing] = useState(false);
 
   const stats = useMemo(() => {
-    const totalDistance = routes.reduce((sum, route) => sum + (route.distance || 0), 0) / 1000;
+    const totalDistance = unifiedRoutes.reduce((sum, route) => sum + (route.distance || 0), 0) / 1000;
     return {
-      count: routes.length,
+      count: unifiedRoutes.length,
       distance: Math.round(totalDistance * 10) / 10,
     };
-  }, [routes]);
+  }, [unifiedRoutes]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +142,7 @@ export default function FamiliarityPage() {
       };
 
       setUploadedRoute(candidate);
-      setResult(calculateRouteFamiliarity(candidate, routes));
+      setResult(calculateRouteFamiliarity(candidate, unifiedRoutes));
     } catch (error) {
       setUploadedRoute(null);
       setResult(null);
@@ -332,7 +336,7 @@ export default function FamiliarityPage() {
           <div className="w-full md:w-1/2 md:shrink-0 order-1 md:order-none relative">
             <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
-                routes={uploadedRoute ? [uploadedRoute] : routes}
+                routes={uploadedRoute ? [uploadedRoute] : unifiedRoutes}
                 selectedRoute={uploadedRoute}
                 suggestedRoute={null}
                 showHeatmap={showHeatmap}

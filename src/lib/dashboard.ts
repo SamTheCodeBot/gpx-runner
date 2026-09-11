@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { auth as firebaseAuth } from "@/lib/firebase";
+import type { GPXRoute } from "@/app/types";
 
-const DASHBOARD_CACHE_VERSION = 3;
+// Bumped to 4: route payloads now carry `activity`, and a cached v3 payload
+// would make every synced run look like a manual upload until the TTL expired.
+const DASHBOARD_CACHE_VERSION = 4;
 const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export interface DashboardRoute {
@@ -19,6 +22,8 @@ export interface DashboardRoute {
   countries: string[];
   hasTcx: boolean;
   strava?: { activityId: number; sportType?: string; syncedAt: string };
+  /** Ingestion-spine linkage, so provenance survives the dashboard round trip. */
+  activity?: GPXRoute["activity"];
   coordinates: [number, number][];
 }
 
@@ -81,6 +86,7 @@ async function fetchDashboard(): Promise<DashboardData> {
           ...route,
           coordinates: route.coordinates ?? [],
           strava: route.strava ?? undefined,
+          activity: route.activity ?? undefined,
         }))
       : [],
     favorites: Array.isArray(data.favorites) ? data.favorites : [],
