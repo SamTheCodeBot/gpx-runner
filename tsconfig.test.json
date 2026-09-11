@@ -9,8 +9,16 @@
     "skipLibCheck": true,
     "noEmit": false,
     "outDir": ".test-build",
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src/engine/**/*.ts", "src/types/**/*.ts", "tests/**/*.ts"],
+  "include": [
+    "src/engine/**/*.ts",
+    "src/types/**/*.ts",
+    "src/api/**/*.ts",
+    "src/app/api/routes/suggest/route.ts",
+    "tests/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }
