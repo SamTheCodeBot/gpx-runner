@@ -149,10 +149,50 @@ retaining an identifier pointing back at the person.
 editing in the app; there is no dedicated endpoint. Add one if activity metadata
 becomes something a user cannot otherwise correct.
 
+## User-facing surfaces
+
+Three surfaces, deliberately separate. Merging any two of them — in particular
+folding provider consent into signup — breaks the lawful basis, because consent
+required to use the service is not freely given (Art. 7(4)).
+
+| Surface | Where | What it is |
+| --- | --- | --- |
+| Terms and privacy notice | `LoginScreen` in `src/components/ui.tsx`, at account creation | Acceptance of the contract the service runs under (Art. 6(1)(b)). Stamped on the profile as `termsAcceptedAt` + `termsVersion`. Grants no provider access. |
+| Privacy notice | `/privacy` (`src/app/privacy/page.tsx`) | The Art. 13 notice, public and unauthenticated. The user-facing counterpart of this document; controller name and contact come from `GDPR_CONTROLLER_NAME` and `GDPR_CONTACT_EMAIL` at request time. |
+| Provider consent | `ProviderConsentDialog`, opened from the intervals.icu card on `/profile` | The Art. 6(1)(a) consent, asked at the moment of connecting. |
+| Privacy and data | `/profile/privacy` | Connections, consent history, withdrawal, export, erasure. |
+
+Rules the UI holds to, and which any redesign must keep:
+
+- The consent dialog renders the exact `consentText()` string the server
+  returned. It never paraphrases it, because the server stores what it showed as
+  the evidence of consent. The plain-language summary beside it is labelled as a
+  summary and sits outside the quoted text.
+- The agreed `consentVersion` is echoed back on connect. On `409
+  consent_version_mismatch` the dialog swaps in the returned wording, un-ticks
+  the box and asks again, so agreement is always against words that were on
+  screen.
+- Nothing is ever pre-ticked, on any surface.
+- The personal API key is a password field, sent once in a POST body, never in a
+  query string, never written to `localStorage`, and never logged.
+- Withdrawal is one click and sits on the same page as the consent history
+  (Art. 7(3)). For `provider_ingest` it routes through
+  `/api/intervals/disconnect`, so credentials are deleted rather than left live
+  behind a withdrawn consent.
+- Erasure requires typing `DELETE MY DATA` and surfaces the returned receipt,
+  including any provider whose upstream revoke failed.
+- Structured error codes from the ingestion layer are shown to the user with
+  actionable copy, mapped in `src/lib/privacy.ts`.
+
+Note that `/api/gdpr/erase` with `scope: "account"` deletes the data but not the
+Firebase Auth user. The privacy page says so and points at the existing delete‑
+account flow on `/profile`, which removes the sign-in itself.
+
 ## Before this goes live for other people
 
 - [ ] Sweep expired records on a schedule (see Retention, above).
-- [ ] Publish a user-facing privacy notice (Art. 13) — this document is internal.
+- [x] Publish a user-facing privacy notice (Art. 13) — at `/privacy`. This
+      document stays internal; keep the two in step.
 - [ ] Confirm the Firestore region and, if needed, a transfer mechanism.
 - [ ] Decide whether a DPIA is warranted. Systematic collection of location data
       about a group of people points that way; the small scale points away.
