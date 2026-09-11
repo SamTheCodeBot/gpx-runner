@@ -80,6 +80,15 @@ export interface CanonicalActivity {
   sport: CanonicalSport;
   /** Raw provider sport label, kept for debugging and for better mapping later. */
   sourceSport?: string;
+  /**
+   * The provider said this was recorded indoors (treadmill, trainer, virtual).
+   * Stored so the reconciliation pass can judge records ingested before the
+   * sport policy existed. Out-of-scope activities are not normally stored at
+   * all — this exists for the ones that already were.
+   */
+  indoor?: boolean;
+  /** Provider's own upload source, e.g. `GARMIN_CONNECT`, `ZWIFT`, `STRAVA`. */
+  uploadSource?: string;
   name: string;
   distanceMeters: number;
   /** Moving time where the provider distinguishes it, else elapsed. */
@@ -133,10 +142,19 @@ export interface SourceActivitySummary {
   name: string;
   sourceSport?: string;
   sport: CanonicalSport;
+  /** Provider's indoor/trainer/virtual marker, when it reports one. */
+  indoor?: boolean;
+  /** Provider's upload source, e.g. `GARMIN_CONNECT`, `ZWIFT`. */
+  uploadSource?: string;
   distanceMeters: number;
   durationSeconds: number;
   elevationGainMeters: number;
-  /** False when the provider tells us there is no GPS track to fetch. */
+  /**
+   * Whether a GPS track is worth fetching. False is an explicit "no" from the
+   * provider and is decisive; `true` may mean "the provider did not say", which
+   * `decideActivityScope` treats as permissive for outdoor-looking activities
+   * only.
+   */
   hasTrack: boolean;
 }
 
@@ -240,6 +258,10 @@ export interface NormalizedActivity {
   timezone?: string;
   sport: CanonicalSport;
   sourceSport?: string;
+  /** Provider's indoor/trainer/virtual marker, carried through for the guard. */
+  indoor?: boolean;
+  /** Provider's upload source, e.g. `GARMIN_CONNECT`, `ZWIFT`. */
+  uploadSource?: string;
   name: string;
   distanceMeters: number;
   durationSeconds: number;
