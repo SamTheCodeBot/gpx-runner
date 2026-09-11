@@ -776,6 +776,13 @@ export function useRouteFilter<T extends GPXRoute>(
   return filtered;
 }
 
+/** How the suggested route is shaped, when that is not what the runner asked for. */
+export type RouteShapeNotice = {
+  isOutAndBack: boolean;
+  /** Plain-language sentence for the UI, or null when nothing needs saying. */
+  notice: string | null;
+};
+
 type RouteSuggestionOptions = {
   routeType?: "road" | "trail" | "mixed";
   preferQuiet?: boolean;
@@ -801,6 +808,11 @@ export function useRouteSuggestions(
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [suggestionFamiliarity, setSuggestionFamiliarity] = useState<FamiliarityReport | null>(null);
+  /**
+   * Set when the server could not find a loop and fell back to a there-and-back.
+   * The runner should never have to work that out from the map themselves.
+   */
+  const [suggestionShape, setSuggestionShape] = useState<RouteShapeNotice | null>(null);
 
   const getSuggestion = useCallback(
     async (
@@ -811,6 +823,7 @@ export function useRouteSuggestions(
       setIsSuggesting(true);
       setSuggestionError(null);
       setSuggestionFamiliarity(null);
+      setSuggestionShape(null);
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
@@ -868,6 +881,11 @@ export function useRouteSuggestions(
             samples: Array.isArray(data.samples) ? data.samples : undefined,
             type: data.type || "mixed",
             familiarity: (data.familiarity ?? null) as FamiliarityReport | null,
+            shape: {
+              isOutAndBack: Boolean(data.isOutAndBack),
+              notice: typeof data.notice === "string" ? data.notice : null,
+            },
+            isRoundTrip: data.isRoundTrip !== false,
           };
         };
 
@@ -879,6 +897,8 @@ export function useRouteSuggestions(
           samples?: GPXRoute["samples"];
           type: "road" | "trail" | "mixed";
           familiarity: FamiliarityReport | null;
+          shape: RouteShapeNotice;
+          isRoundTrip: boolean;
         } | null = null;
 
         try {
@@ -886,6 +906,7 @@ export function useRouteSuggestions(
 
           if (result) {
             setSuggestionFamiliarity(result.familiarity);
+            setSuggestionShape(result.shape);
             setSuggestedRoute({
               id: `suggested-${Date.now()}`,
               name: result.name,
@@ -895,7 +916,7 @@ export function useRouteSuggestions(
               elevationGain: result.elevationGain,
               samples: result.samples,
               color: "#f472b6",
-              isRoundTrip: true,
+              isRoundTrip: result.isRoundTrip,
               type: result.type,
             });
           }
@@ -906,6 +927,7 @@ export function useRouteSuggestions(
         console.error("[useRouteSuggestions]", err);
         setSuggestedRoute(null);
         setSuggestionFamiliarity(null);
+        setSuggestionShape(null);
         setSuggestionError(err instanceof Error ? err.message : "Could not generate a runnable route");
       } finally {
         setIsSuggesting(false);
@@ -920,11 +942,14 @@ export function useRouteSuggestions(
     suggestionError,
     /** Always present for a successful suggestion: how much of it the runner has run before. */
     suggestionFamiliarity,
+    /** Whether they were given a loop or, failing that, a there-and-back. */
+    suggestionShape,
     getSuggestion,
     clearSuggestion: () => {
       setSuggestedRoute(null);
       setSuggestionError(null);
       setSuggestionFamiliarity(null);
+      setSuggestionShape(null);
     },
   };
 }

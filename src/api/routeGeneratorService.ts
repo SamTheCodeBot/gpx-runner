@@ -178,7 +178,13 @@ function directionPenalty(bucket: number, directionShift = 0): number {
 
 export async function generateOpenRouteServiceRoundTrip(
   input: RoundTripSuggestionInput,
-): Promise<{ routes: RoundTripSuggestionResult[]; rejectedCount: number; unsafeRejectedCount: number }> {
+): Promise<{
+  routes: RoundTripSuggestionResult[];
+  /** Right length and safe, but there-and-back. Never mixed into `routes`. */
+  outAndBacks: RoundTripSuggestionResult[];
+  rejectedCount: number;
+  unsafeRejectedCount: number;
+}> {
   const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = (input.toleranceKm ?? 0.5) * 1000;
@@ -186,6 +192,8 @@ export async function generateOpenRouteServiceRoundTrip(
   const deadlineAt = input.deadlineAt ?? Number.POSITIVE_INFINITY;
   const accepted: RoundTripSuggestionResult[] = [];
   const closest: RoundTripSuggestionResult[] = [];
+  /** Right length, safe, routed — but a there-and-back. The bottom tier. */
+  const outAndBacks: RoundTripSuggestionResult[] = [];
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   let outOfTime = false;
@@ -274,10 +282,14 @@ export async function generateOpenRouteServiceRoundTrip(
         phaseHadResponse = true;
         const { reject, loopShapeReject, ...route } = result;
 
-        // Never offered, not even as a "closest match": the runner asked for a
-        // loop, and this is not one.
+        // Not a loop. It never competes with one — it is held back in its own
+        // bucket and only reaches the runner if no loop at all could be found,
+        // labelled as a there-and-back when it does. Road safety and the right
+        // length still apply: this tier relaxes the shape, nothing else.
         if (loopShapeReject) {
           rejectedCount += 1;
+          if (route.debug.unsafeRoads) unsafeRejectedCount += 1;
+          else if (route.debug.distanceDeltaMeters <= toleranceMeters) outAndBacks.push(route);
           continue;
         }
 
@@ -308,8 +320,11 @@ export async function generateOpenRouteServiceRoundTrip(
     return scoreA - scoreB;
   });
 
+  outAndBacks.sort((a, b) => a.debug.distanceDeltaMeters - b.debug.distanceDeltaMeters);
+
   return {
     routes: accepted.length > 0 ? accepted : closest,
+    outAndBacks,
     rejectedCount,
     unsafeRejectedCount,
   };

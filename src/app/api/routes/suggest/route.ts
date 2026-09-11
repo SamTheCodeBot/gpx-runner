@@ -7,9 +7,28 @@ import {
   toEngineMode,
   type FamiliarityTarget,
 } from "@/engine/familiarityReport";
+import {
+  pickByTier,
+  type SuggestionTierId,
+  type TierPick,
+} from "@/engine/routeTiers";
 import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
-import type { GenerateRouteResult, GeneratedRoute, LatLng, RouteStyle } from "@/types";
+import type { RoundTripSuggestionResult } from "@/api/routeGeneratorService";
+import type { GeneratedRoute, LatLng, RouteStyle, RouteTrafficSummary } from "@/types";
+
+/** One candidate answer, flattened so both generators can be compared fairly. */
+type Suggestion = {
+  geometry: LatLng[];
+  distanceMeters: number;
+  elevationGainMeters?: number;
+  /** 0..1, or null when there is no history near the start to measure against. */
+  ratio: number | null;
+  hasHistory: boolean;
+  traffic?: RouteTrafficSummary;
+  debug: Record<string, unknown>;
+  source: string;
+};
 
 /**
  * Route suggestions.
@@ -87,68 +106,70 @@ export async function POST(request: NextRequest) {
 
     const tracks = collectTracks(body, start, targetDistanceKm);
     const hasHistory = tracks.length > 0;
-    let engine: GenerateRouteResult | null = null;
 
-    if (hasHistory) {
-      engine = await generateTrainingRoutes({
-        start,
-        targetDistanceKm,
-        toleranceKm: 0.5,
-        familiarityMode: toEngineMode(target),
-        routeCollections: tracks,
-        maxCandidates: 18,
-        alternatives: 3,
-        routeStyle,
-        preferQuiet,
-        preferGreen,
-        deadlineAt,
-      });
+    /**
+     * What the runner gets, keyed by tier. The order lives in
+     * `SUGGESTION_TIERS`; this only fills in what each tier has to offer, and
+     * `pickByTier` walks them top to bottom. An out-and-back sits at the
+     * bottom, so it can only ever be reached when every loop tier is empty.
+     */
+    const candidates: Partial<Record<SuggestionTierId, Suggestion>> = {};
 
-      // `routes` met every constraint. `nearMisses` met every *hard* one — real
-      // length, real loop shape, safe roads, routed by the provider — and only
-      // missed the familiarity band, so it comes back with the true percentage
-      // attached rather than as "no route found".
-      const candidate: GeneratedRoute | undefined = engine.routes[0] ?? engine.nearMisses[0];
-      // Belt and braces: geometry that no routing provider drew can cross
-      // houses and water, and is never shown to a runner.
-      const best = candidate?.routedByProvider ? candidate : undefined;
+    const engine = hasHistory
+      ? await generateTrainingRoutes({
+          start,
+          targetDistanceKm,
+          toleranceKm: 0.5,
+          familiarityMode: toEngineMode(target),
+          routeCollections: tracks,
+          maxCandidates: 18,
+          alternatives: 3,
+          routeStyle,
+          preferQuiet,
+          preferGreen,
+          deadlineAt,
+        })
+      : null;
 
-      if (best) {
-        const report = buildFamiliarityReport({
-          ratio: best.familiarityMeasured ? best.familiarityRatio : null,
-          target,
-          hasHistory: best.familiarityMeasured,
-        });
+    if (engine) {
+      const fromEngine = (route: GeneratedRoute | undefined, source: string): Suggestion | undefined =>
+        // Belt and braces: geometry that no routing provider drew can cross
+        // houses and water, and is never shown to a runner.
+        route?.routedByProvider
+          ? {
+              geometry: route.geometry,
+              distanceMeters: route.distanceMeters,
+              elevationGainMeters: route.elevationGainMeters ?? 0,
+              ratio: route.familiarityMeasured ? route.familiarityRatio : null,
+              hasHistory: route.familiarityMeasured,
+              traffic: route.traffic,
+              debug: {
+                ...route.debug,
+                tracksConsidered: tracks.length,
+                rejectedCount: engine.rejectedCount,
+                timedOut: engine.timedOut,
+              },
+              source,
+            }
+          : undefined;
 
-        return NextResponse.json({
-          coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
-          distance: best.distanceMeters,
-          elevationGain: best.elevationGainMeters ?? 0,
-          samples: best.geometry.map((point) => ({
-            coordinate: [point.lng, point.lat] as [number, number],
-            elevation: point.elevation,
-          })),
-          name: routeName(target, best.distanceMeters),
-          isRoundTrip: true,
-          type: routeStyle,
-          startPoint: [start.lng, start.lat] as [number, number],
-          familiarity: report,
-          traffic: best.traffic,
-          debug: {
-            ...best.debug,
-            tracksConsidered: tracks.length,
-            rejectedCount: engine.rejectedCount,
-            timedOut: engine.timedOut,
-          },
-          source: 'familiarity-engine',
-        });
-      }
+      candidates['loop-familiarity-matched'] = fromEngine(engine.routes[0], 'familiarity-engine');
+      candidates['loop-familiarity-missed'] = fromEngine(engine.nearMisses[0], 'familiarity-engine');
+      candidates['loop-off-distance'] = fromEngine(engine.bestEffort[0], 'familiarity-engine-best-effort');
+      candidates['out-and-back'] = fromEngine(engine.outAndBacks[0], 'familiarity-engine-out-and-back');
+    }
+
+    // A loop the runner knows beats anything the plain generator can offer, so
+    // only pay for the round-trip call when the engine has not already won.
+    const early = pickByTier(candidates);
+    if (early && !early.tier.isOutAndBack && early.tier.id !== 'loop-off-distance') {
+      return respond(early, { start, target, routeStyle, targetDistanceKm });
     }
 
     // No history to measure against, or the familiarity engine came up empty:
     // fall back to the round-trip generator, then report the familiarity of
     // whatever it produced so the answer is never silent about it.
-    const result = await generateOpenRouteServiceRoundTrip({
+    const fallback = await generateOpenRouteServiceRoundTrip({
       start,
       targetDistanceKm,
       toleranceKm: 0.5,
@@ -161,45 +182,32 @@ export async function POST(request: NextRequest) {
       deadlineAt,
     });
 
-    const best = result.routes[0];
-    if (!best) {
-      // Last resort: a loop the familiarity engine actually built and the
-      // provider actually drew — right shape, safe roads — that simply came out
-      // the wrong length. Offered as what it is, never as a match.
-      const salvage = engine?.bestEffort.find((route) => route.routedByProvider);
-      if (salvage) {
-        const report = buildFamiliarityReport({
-          ratio: salvage.familiarityMeasured ? salvage.familiarityRatio : null,
-          target,
-          hasHistory: salvage.familiarityMeasured,
-        });
+    const fromFallback = (
+      route: RoundTripSuggestionResult | undefined,
+      source: string,
+    ): Suggestion | undefined =>
+      route
+        ? {
+            geometry: route.geometry,
+            distanceMeters: route.distanceMeters,
+            elevationGainMeters: route.elevationGainMeters,
+            ratio: hasHistory ? familiarityOf(route.geometry, tracks) : null,
+            hasHistory,
+            debug: { ...route.debug, tracksConsidered: tracks.length },
+            source,
+          }
+        : undefined;
 
-        return NextResponse.json({
-          coordinates: salvage.geometry.map((point) => [point.lng, point.lat] as [number, number]),
-          distance: salvage.distanceMeters,
-          elevationGain: salvage.elevationGainMeters ?? 0,
-          samples: salvage.geometry.map((point) => ({
-            coordinate: [point.lng, point.lat] as [number, number],
-            elevation: point.elevation,
-          })),
-          name: routeName(target, salvage.distanceMeters),
-          isRoundTrip: true,
-          type: routeStyle,
-          startPoint: [start.lng, start.lat] as [number, number],
-          familiarity: report,
-          traffic: salvage.traffic,
-          matchedRequest: false,
-          notice:
-            `No loop of ${targetDistanceKm.toFixed(1)} km could be found from this start point. ` +
-            `This is the closest real loop, at ${(salvage.distanceMeters / 1000).toFixed(1)} km.`,
-          debug: { ...salvage.debug, tracksConsidered: tracks.length, bestEffort: true },
-          source: 'familiarity-engine-best-effort',
-        });
-      }
+    candidates['loop-round-trip'] = fromFallback(fallback.routes[0], 'openrouteservice-round-trip');
+    candidates['out-and-back'] =
+      candidates['out-and-back'] ??
+      fromFallback(fallback.outAndBacks[0], 'openrouteservice-round-trip-out-and-back');
 
-      // Nothing survived. Loop shape and road safety are not negotiable, so an
-      // honest refusal is the right answer here — but say which it was.
-      const message = result.unsafeRejectedCount > 0
+    const picked = pickByTier(candidates);
+    if (!picked) {
+      // Nothing survived. Map-following and road safety are not negotiable, so
+      // an honest refusal is the right answer here — but say which it was.
+      const message = fallback.unsafeRejectedCount > 0
         ? 'No route found that avoids the highest-traffic roads from this start point.'
         : Date.now() >= deadlineAt
           ? 'Ran out of time looking for a loop from this start point. Please try again.'
@@ -207,29 +215,55 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 422 });
     }
 
-    const ratio = hasHistory ? familiarityOf(best.geometry, tracks) : null;
-    const report = buildFamiliarityReport({ ratio, target, hasHistory });
-
-    return NextResponse.json({
-      coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
-      distance: best.distanceMeters,
-      elevationGain: best.elevationGainMeters,
-      samples: best.geometry.map((point) => ({
-        coordinate: [point.lng, point.lat] as [number, number],
-        elevation: point.elevation,
-      })),
-      name: routeName(target, best.distanceMeters),
-      isRoundTrip: true,
-      type: routeStyle,
-      startPoint: [start.lng, start.lat] as [number, number],
-      familiarity: report,
-      debug: { ...best.debug, tracksConsidered: tracks.length },
-      source: 'openrouteservice-round-trip',
-    });
+    return respond(picked, { start, target, routeStyle, targetDistanceKm });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate route';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/**
+ * The one place a suggestion turns into a response, so every tier is reported
+ * the same way — including whether the runner is being handed a there-and-back.
+ */
+function respond(
+  picked: TierPick<Suggestion>,
+  context: { start: LatLng; target: FamiliarityTarget; routeStyle: RouteStyle; targetDistanceKm: number },
+): NextResponse {
+  const { tier, candidate } = picked;
+  const report = buildFamiliarityReport({
+    ratio: candidate.ratio,
+    target: context.target,
+    hasHistory: candidate.hasHistory,
+  });
+  const notice = tier.describe({
+    targetMeters: context.targetDistanceKm * 1000,
+    distanceMeters: candidate.distanceMeters,
+  });
+
+  return NextResponse.json({
+    coordinates: candidate.geometry.map((point) => [point.lng, point.lat] as [number, number]),
+    distance: candidate.distanceMeters,
+    elevationGain: candidate.elevationGainMeters ?? 0,
+    samples: candidate.geometry.map((point) => ({
+      coordinate: [point.lng, point.lat] as [number, number],
+      elevation: point.elevation,
+    })),
+    name: routeName(context.target, candidate.distanceMeters, tier.isOutAndBack),
+    // An out-and-back is precisely not a round trip, and the map should not
+    // claim otherwise.
+    isRoundTrip: !tier.isOutAndBack,
+    isOutAndBack: tier.isOutAndBack,
+    tier: tier.id,
+    matchedRequest: notice === null,
+    notice,
+    type: context.routeStyle,
+    startPoint: [context.start.lng, context.start.lat] as [number, number],
+    familiarity: report,
+    traffic: candidate.traffic,
+    debug: { ...candidate.debug, tier: tier.id },
+    source: candidate.source,
+  });
 }
 
 function resolveTarget(body: SuggestionRequest): FamiliarityTarget {
@@ -239,9 +273,10 @@ function resolveTarget(body: SuggestionRequest): FamiliarityTarget {
   return 'mixed';
 }
 
-function routeName(target: FamiliarityTarget, distanceMeters: number): string {
+function routeName(target: FamiliarityTarget, distanceMeters: number, isOutAndBack = false): string {
   const label = target === 'familiar' ? 'Familiar' : target === 'unfamiliar' ? 'New ground' : 'Mixed';
-  return `${label} loop - ${(distanceMeters / 1000).toFixed(1)}km`;
+  const shape = isOutAndBack ? 'out & back' : 'loop';
+  return `${label} ${shape} - ${(distanceMeters / 1000).toFixed(1)}km`;
 }
 
 /**

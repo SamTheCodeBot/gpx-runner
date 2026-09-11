@@ -43,6 +43,14 @@ export type GeneratedRoute = {
    * never reach the client. Nothing without this flag may be returned.
    */
   routedByProvider: boolean;
+  /**
+   * True when this is a there-and-back rather than a loop.
+   *
+   * "Sometimes an out and back might be the only solution. But hey, then it is
+   * ok. But we should always try to avoid it." So it is allowed, last, and
+   * never quietly: whatever returns this to a runner has to say so.
+   */
+  isOutAndBack: boolean;
   traffic?: RouteTrafficSummary;
   score: number;
   source?: "familiar-graph" | "provider";
@@ -95,6 +103,12 @@ export type GenerateRouteResult = {
    * ever in here — those are not routes at any price.
    */
   bestEffort: GeneratedRoute[];
+  /**
+   * Properly routed, safe runs of the right length that are not loops — the
+   * runner goes out and comes back the same way. The answer only when no loop
+   * of any kind could be found, and always labelled as what it is.
+   */
+  outAndBacks: GeneratedRoute[];
   rejectedCount: number;
   unsafeRejectedCount: number;
   /** True when the deadline expired and the result is what had been found by then. */
