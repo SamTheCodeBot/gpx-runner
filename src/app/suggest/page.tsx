@@ -46,7 +46,7 @@ export default function SuggestPage() {
     return { totalRuns: routes.length, totalDistance: Math.round(totalDistance * 10) / 10, totalElevation: Math.round(totalElevation) };
   }, [routes]);
 
-  const { suggestedRoute, isSuggesting, suggestionError, suggestionFamiliarity, getSuggestion, clearSuggestion } =
+  const { suggestedRoute, isSuggesting, suggestionError, suggestionFamiliarity, suggestionShape, getSuggestion, clearSuggestion } =
     useRouteSuggestions(suggestDistance, familiarityMode);
 
   useEffect(() => {
@@ -336,6 +336,24 @@ export default function SuggestPage() {
                     {(suggestedRoute.distance / 1000).toFixed(1)} km
                     {` · +${Math.round(suggestedRoute.elevationGain || 0)}m estimated climb`}
                   </p>
+
+                  {suggestionShape?.isOutAndBack && (
+                    <div className="mt-3 rounded-xl px-3 py-2 border bg-error-container/30 border-error/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+                          Shape
+                        </span>
+                        <span className="text-xs font-extrabold text-on-surface">out &amp; back</span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-on-surface-variant">
+                        {suggestionShape.notice ??
+                          "No loop was possible from this start at this distance \u2014 you return the way you came."}
+                      </p>
+                      <p className="mt-1 text-[10px] text-on-surface-variant">
+                        Try a different distance or another start point for a loop.
+                      </p>
+                    </div>
+                  )}
 
                   {suggestionFamiliarity && (
                     <div

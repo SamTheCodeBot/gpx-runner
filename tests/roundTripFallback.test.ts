@@ -6,7 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import type { NextRequest } from "next/server";
 
 import { assessLoopShape } from "@/engine/scoring/quality";
-import { polylineDistanceMeters } from "@/engine/utils/geo";
+import { maxPointGapMeters, polylineDistanceMeters } from "@/engine/utils/geo";
 import type { LatLng } from "@/types";
 import { destinationPoint } from "@/engine/utils/geo";
 import { radiusForLoopDistance, straightTrack } from "./helpers/geometry";
@@ -84,14 +84,30 @@ describe("the round-trip fallback holds the same loop shape line", () => {
     );
   });
 
-  it("returns nothing rather than an out-and-back", async () => {
+  it("never mixes an out-and-back in with the loops", async () => {
     stub = stubOpenRouteService({ geometry: OUT_AND_BACK });
 
     const result = await roundTrip();
 
-    assert.deepEqual(result.routes, [], "an out-and-back is not a loop, not even as a closest match");
+    assert.deepEqual(result.routes, [], "an out-and-back is not a loop and never competes as one");
     assert.ok(result.rejectedCount > 0);
-    assert.ok(stub.calls.length > 0, "it must actually have asked before refusing");
+    assert.ok(stub.calls.length > 0, "it must actually have asked before falling back");
+
+    // Held back in its own bucket: available when nothing else is, never before.
+    assert.ok(result.outAndBacks.length > 0, "sometimes it is the only thing this start can offer");
+  });
+
+  it("keeps an out-and-back only when it is safe and the right length", async () => {
+    const tooShort = (() => {
+      const out = straightTrack(START, 90, 800, 25);
+      return [...out, ...out.slice(0, -1).reverse()];
+    })();
+    stub = stubOpenRouteService({ geometry: tooShort });
+
+    const result = await roundTrip();
+
+    assert.deepEqual(result.routes, []);
+    assert.deepEqual(result.outAndBacks, [], "relaxing the shape does not relax the distance");
   });
 
   it("still returns a proper loop", async () => {
@@ -114,27 +130,125 @@ describe("the round-trip fallback holds the same loop shape line", () => {
   });
 });
 
-describe("POST /api/routes/suggest with no usable loop", () => {
-  it("refuses with 422 rather than serving an out-and-back", async () => {
+function suggest(body: Record<string, unknown>) {
+  const request = new Request("http://localhost/api/routes/suggest", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      distance: TARGET_KM,
+      centerLat: START.lat,
+      centerLon: START.lng,
+      familiarityMode: "mixed",
+      tracks: [],
+      ...body,
+    }),
+  });
+  return POST(request as unknown as NextRequest);
+}
+
+/**
+ * "Sometimes an out and back might be the only solution. But hey, then it is
+ * ok. But we should always try to avoid it."
+ */
+describe("POST /api/routes/suggest falls back to an out-and-back, last and labelled", () => {
+  it("returns a loop, unflagged, when one exists", async () => {
+    stub = stubOpenRouteService({ geometry: PROPER_LOOP });
+
+    const response = await suggest({});
+    const data = (await response.json()) as any;
+
+    assert.equal(response.status, 200);
+    assert.equal(data.isOutAndBack, false);
+    assert.equal(data.isRoundTrip, true);
+    assert.equal(data.notice, null, "a plain loop needs no apology");
+    assert.equal(data.tier, "loop-round-trip");
+  });
+
+  it("returns the out-and-back, flagged and explained, when no loop is possible", async () => {
     stub = stubOpenRouteService({ geometry: OUT_AND_BACK });
 
-    const request = new Request("http://localhost/api/routes/suggest", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        distance: TARGET_KM,
-        centerLat: START.lat,
-        centerLon: START.lng,
-        familiarityMode: "mixed",
-        tracks: [],
-      }),
-    });
+    const response = await suggest({});
+    const data = (await response.json()) as any;
 
-    const response = await POST(request as unknown as NextRequest);
+    assert.equal(response.status, 200, "a there-and-back beats no answer at all");
+    assert.equal(data.isOutAndBack, true);
+    assert.equal(data.isRoundTrip, false, "it is precisely not a round trip");
+    assert.equal(data.tier, "out-and-back");
+    assert.match(String(data.notice), /out-and-back/i);
+    assert.match(String(data.name), /out & back/i);
+    assert.ok(data.coordinates.length > 2);
+
+    // The relaxation is about shape only. It is still a real routed line.
+    assert.ok(
+      maxPointGapMeters(data.coordinates.map(([lng, lat]: [number, number]) => ({ lat, lng }))) < 40,
+      "an out-and-back still has to follow real ways",
+    );
+  });
+
+  it("prefers the loop while any loop candidate remains", async () => {
+    // Both shapes on offer from the same generator: the loop must win, every
+    // time, however the scoring falls.
+    let call = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      call += 1;
+      const geometry = call % 2 === 1 ? OUT_AND_BACK : PROPER_LOOP;
+      return new Response(
+        JSON.stringify({
+          features: [
+            {
+              geometry: { coordinates: geometry.map((p) => [p.lng, p.lat, 10]) },
+              properties: {
+                summary: { distance: polylineDistanceMeters(geometry) },
+                ascent: 42,
+                descent: 42,
+                extras: {
+                  waytype: { summary: [{ value: 6, distance: 5_000, amount: 100 }] },
+                  noise: { summary: [{ value: 2, distance: 5_000, amount: 100 }] },
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof globalThis.fetch;
+
+    try {
+      const data = (await (await suggest({})).json()) as any;
+      assert.equal(data.isOutAndBack, false, "a loop was available, so a loop is what goes back");
+      assert.equal(data.tier, "loop-round-trip");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("labels the fallback for a runner whose history is one dead-end road", async () => {
+    stub = stubOpenRouteService({ geometry: OUT_AND_BACK });
+    const deadEndRoad = straightTrack(START, 90, 2_500, 25);
+    const history = [...deadEndRoad, ...deadEndRoad.slice(0, -1).reverse()].map(
+      (point) => [point.lng, point.lat] as [number, number],
+    );
+
+    const response = await suggest({ familiarityMode: "familiar", tracks: [history] });
+    const data = (await response.json()) as any;
+
+    assert.equal(response.status, 200);
+    assert.equal(data.isOutAndBack, true);
+    assert.equal(data.tier, "out-and-back");
+    assert.equal(data.source, "familiarity-engine-out-and-back");
+    assert.match(String(data.notice), /out-and-back/i);
+    // He still gets told how much of it he already knows.
+    assert.ok(data.familiarity.percent >= 80, `got ${data.familiarity.percent}%`);
+  });
+
+  it("still refuses when nothing at all can be routed", async () => {
+    stub = stubOpenRouteService({ geometry: PROPER_LOOP, empty: true });
+
+    const response = await suggest({});
     const data = (await response.json()) as { error?: string; coordinates?: unknown };
 
     assert.equal(response.status, 422);
     assert.equal(data.coordinates, undefined);
-    assert.match(String(data.error), /loop/i);
   });
 });

@@ -96,12 +96,19 @@ export async function generateRoutes(
    * never as a match for what was asked.
    */
   const bestEffort: GeneratedRoute[] = [];
+  /**
+   * Right length, properly routed, safe — but a there-and-back rather than a
+   * loop. Kept, because sometimes it is the only thing this start point can
+   * offer, and consulted only after every loop tier above it is empty.
+   */
+  const outAndBacks: GeneratedRoute[] = [];
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   let timedOut = false;
 
   const collect = (built: EvaluatedRoute) => {
     if (built.reasons.hardConstraintsOk) bestEffort.push(built.route);
+    if (built.reasons.outAndBackFallback) outAndBacks.push(built.route);
 
     if (built.decision === "accept") {
       accepted.push(built.route);
@@ -124,6 +131,9 @@ export async function generateRoutes(
       0,
       alternatives,
     ),
+    outAndBacks: routedOnly(
+      dedupeRoutes(outAndBacks).sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters)),
+    ).slice(0, alternatives),
     rejectedCount,
     unsafeRejectedCount,
     timedOut,
@@ -299,6 +309,12 @@ export type EvaluatedRoute = {
      * familiarity, which is what makes it usable as a last resort.
      */
     hardConstraintsOk: boolean;
+    /**
+     * True when this is a there-and-back that is nonetheless worth keeping:
+     * right length, safe roads, drawn by the provider — it fails only the loop
+     * shape. The bottom tier, taken only when no loop could be found at all.
+     */
+    outAndBackFallback: boolean;
   };
 };
 
@@ -389,6 +405,7 @@ export function evaluateBuiltRoute(params: {
     familiarityMeasured: hasFamiliarData,
     // Only ever built from a provider response; graph geometry never gets here.
     routedByProvider: true,
+    isOutAndBack: !loopOk,
     traffic,
     score,
     debug: {
@@ -432,6 +449,10 @@ export function evaluateBuiltRoute(params: {
     unsafeRoads: traffic.unsafeRoads,
     familiarityOnly: !familiarityOk && distanceOk && !providerShortcut && loopOk && safetyOk,
     hardConstraintsOk: loopOk && safetyOk && !providerShortcut,
+    // Loop shape is the only thing it fails. Map-following and road safety are
+    // still absolute here: this tier relaxes the shape of the run, never where
+    // it is allowed to go.
+    outAndBackFallback: !loopOk && distanceOk && safetyOk && !providerShortcut,
   };
 
   if (providerShortcut) {
