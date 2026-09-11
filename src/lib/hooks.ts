@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, query, where, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
-import { GPXRoute } from "@/app/types";
+import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
 
 const ROUTE_CACHE_VERSION = 3;
 const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -480,6 +481,168 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
   return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading };
 }
 
+// ─── useSyncedActivities / useUnifiedRoutes ───────────────────────────────────
+
+/**
+ * Collection name repeated rather than imported from `src/lib/ingestion/store.ts`.
+ * That module imports `firebase-admin`; importing it from a client hook would
+ * drag the Admin SDK into the browser bundle.
+ */
+const ACTIVITY_COLLECTION = "activities";
+const ACTIVITY_CACHE_VERSION = 1;
+
+/**
+ * Firebase resolves auth AFTER the first render, so a hook that returns early
+ * on a null uid can load nothing and never retry — the bug this codebase has
+ * already been bitten by. `userId` is threaded down from `useAuth`, which means
+ * it is null on the first pass; rather than give up, fall back to reading
+ * `auth.currentUser` directly and poll until Firebase has an answer. Bounded,
+ * so a genuinely signed-out visitor settles instead of polling forever.
+ */
+const ACTIVITY_AUTH_POLL_MS = 250;
+const ACTIVITY_AUTH_MAX_POLLS = 20;
+
+interface ActivityCachePayload {
+  version: number;
+  userId: string;
+  cachedAt: number;
+  activities: CanonicalActivity[];
+}
+
+function activityCacheKey(userId: string) {
+  return `gpx-activities:${ACTIVITY_CACHE_VERSION}:${userId}`;
+}
+
+function deserializeActivity(id: string, data: any): CanonicalActivity | null {
+  // Only the fields the read layer actually relies on are checked. An activity
+  // with no start time cannot be placed on a timeline or matched to anything.
+  if (!data || typeof data.startedAt !== "string" || typeof data.source !== "string") return null;
+  return {
+    ...data,
+    id,
+    distanceMeters: typeof data.distanceMeters === "number" ? data.distanceMeters : 0,
+  } as CanonicalActivity;
+}
+
+/**
+ * Canonical activity records for the signed-in owner.
+ *
+ * Read-only by design: `firestore.rules` grants clients read on their own
+ * `activities` and no write anywhere, because ingestion, consent and erasure
+ * must go through the audited API routes. These documents hold no geometry, so
+ * the payload is small even over a long history.
+ */
+export function useSyncedActivities(userId: string | null) {
+  const [activities, setActivities] = useState<CanonicalActivity[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    let hasFreshCache = false;
+
+    if (userId) {
+      try {
+        const stored = localStorage.getItem(activityCacheKey(userId));
+        if (stored) {
+          const parsed = JSON.parse(stored) as ActivityCachePayload;
+          if (parsed.version === ACTIVITY_CACHE_VERSION && parsed.userId === userId && Array.isArray(parsed.activities)) {
+            setActivities(parsed.activities);
+            hasFreshCache = isFreshCache(parsed.cachedAt);
+          }
+        }
+      } catch {}
+    }
+
+    const load = async (uid: string) => {
+      if (!db) return;
+      try {
+        if (!hasFreshCache) setLoading(true);
+        // Single equality filter: served by the automatic single-field index,
+        // so no composite index has to be deployed for this to work.
+        const snap = await getDocs(query(collection(db, ACTIVITY_COLLECTION), where("ownerUid", "==", uid)));
+        const loaded: CanonicalActivity[] = [];
+        snap.forEach((d) => {
+          const activity = deserializeActivity(d.id, d.data());
+          if (activity) loaded.push(activity);
+        });
+        if (cancelled) return;
+        setActivities(loaded);
+        try {
+          const payload: ActivityCachePayload = {
+            version: ACTIVITY_CACHE_VERSION,
+            userId: uid,
+            cachedAt: Date.now(),
+            activities: loaded,
+          };
+          localStorage.setItem(activityCacheKey(uid), JSON.stringify(payload));
+        } catch {
+          localStorage.removeItem(activityCacheKey(uid));
+        }
+      } catch (e) {
+        // An owner who has connected no provider simply has none of these. The
+        // unified list degrades to the routes collection alone rather than
+        // breaking the page.
+        console.error("[useSyncedActivities] load", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const resolveUid = () => {
+      if (cancelled) return;
+      const uid = userId ?? firebaseAuth?.currentUser?.uid ?? null;
+      if (uid) {
+        load(uid);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts > ACTIVITY_AUTH_MAX_POLLS) {
+        // Genuinely signed out, not merely early: drop anything held.
+        setActivities([]);
+        setLoading(false);
+        return;
+      }
+      timer = setTimeout(resolveUid, ACTIVITY_AUTH_POLL_MS);
+    };
+
+    if (!hasFreshCache) resolveUid();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [userId]);
+
+  return { activities, loading };
+}
+
+/**
+ * THE unified read layer: the owner's manually uploaded routes and their
+ * provider-synced activities as one chronologically sorted list.
+ *
+ * Takes `routes` from `useGPXRoutes` rather than re-querying them, so a page
+ * keeps exactly one copy of its route state and every existing mutation
+ * (upload, rename, delete) goes on working untouched. The returned items are
+ * `GPXRoute`s with provenance attached, so the map, filters, stats and badge
+ * rules consume them unchanged.
+ *
+ * Nothing here writes to Firestore. Duplicate runs are collapsed for display
+ * only — see `activityMerge.ts`.
+ */
+export function useUnifiedRoutes(userId: string | null, routes: GPXRoute[]) {
+  const { activities, loading } = useSyncedActivities(userId);
+
+  const unified = useMemo<UnifiedRun[]>(
+    () => mergeActivityRecords({ routes, activities }),
+    [routes, activities],
+  );
+
+  return { routes: unified, activities, loading };
+}
+
 export function useRouteSummaries(userId: string | null) {
   const [routes, setRoutes] = useState<RouteSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -580,12 +743,16 @@ export function useRouteStats(routes: GPXRoute[]) {
   return stats;
 }
 
-export function useRouteFilter(
-  routes: GPXRoute[],
+/**
+ * Generic in the item type so the unified read layer's provenance survives the
+ * filter. A plain `GPXRoute[]` caller still infers `GPXRoute[]` exactly as before.
+ */
+export function useRouteFilter<T extends GPXRoute>(
+  routes: T[],
   baseFilter: RouteFilter,
   searchQuery: string
-): GPXRoute[] {
-  const [filtered, setFiltered] = useState<GPXRoute[]>(routes);
+): T[] {
+  const [filtered, setFiltered] = useState<T[]>(routes);
 
   useEffect(() => {
     let out = [...routes];
