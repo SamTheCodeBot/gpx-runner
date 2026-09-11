@@ -3,8 +3,12 @@ import {
   canonicalPointKey,
   haversineMeters,
   polylineDistanceMeters,
+  sampleAlongPolyline,
   simplifyByDistance,
 } from "./utils/geo";
+
+/** Waypoints closer together than this snap to the same spot and buy nothing. */
+const MIN_WAYPOINT_SPACING_METERS = 25;
 
 export type FamiliarEdge = {
   distanceMeters: number;
@@ -23,12 +27,31 @@ export type FamiliarGraph = {
   startNodeId: string | null;
 };
 
-/** A closed loop the search actually found, with the distance measured along it. */
+/**
+ * A closed loop the search found on the runner's own ground.
+ *
+ * This is a **proposal, not a runnable route**. `path` is assembled from the
+ * runner's GPS traces quantised onto an ~11 m key, so two ways that merely pass
+ * close by collapse onto one node and the path can cut a corner that does not
+ * exist on the ground; the last leg is stitched straight back to the start
+ * across whatever happens to be there — a house, a river, the harbour.
+ *
+ * Only `waypoints` leaves this module for real use: feed them to the routing
+ * provider and run what it returns. See `searchGraphLoops`.
+ */
 export type GraphLoop = {
-  geometry: LatLng[];
-  distanceMeters: number;
+  /** The graph's idea of the loop. Diagnostics and waypoint extraction only. */
+  path: LatLng[];
+  /** Distance along `path`. An estimate; the provider's number supersedes it. */
+  pathDistanceMeters: number;
   /** Straight-line metres stitched on to close the loop back onto the start. */
   closureStitchMeters: number;
+  /**
+   * Evenly spaced points taken from the runner's own logged ground, ordered
+   * around the loop. The start is not included — the caller brackets these with
+   * it when asking the provider for a route.
+   */
+  waypoints: LatLng[];
 };
 
 export type GraphLoopSearchOptions = {
@@ -39,6 +62,8 @@ export type GraphLoopSearchOptions = {
   maxExpansions?: number;
   /** How close to the start a path has to come to count as closed. */
   closureRadiusMeters?: number;
+  /** How many intermediate waypoints each loop is reduced to for routing. */
+  waypointCount?: number;
   /** Seed for the restart jitter, so runs are reproducible. */
   seed?: number;
   /** Injectable clock, for tests. */
@@ -145,6 +170,10 @@ export function buildFamiliarGraph(trackCollections: LatLng[][], requestedStart:
  *    step is O(1) rather than O(depth).
  *
  * It always terminates, and always returns the best of whatever it found.
+ *
+ * What it does **not** do is produce a runnable route. The loops it returns are
+ * waypoint proposals; the routing provider turns them into geometry that
+ * follows actual ways. See `GraphLoop`.
  */
 export function searchGraphLoops(
   graph: FamiliarGraph,
@@ -158,6 +187,7 @@ export function searchGraphLoops(
   const budgetMs = Math.max(1, options.budgetMs ?? DEFAULT_GRAPH_LOOP_BUDGET_MS);
   const maxExpansions = Math.max(1, Math.round(options.maxExpansions ?? DEFAULT_GRAPH_LOOP_MAX_EXPANSIONS));
   const closureRadiusMeters = Math.max(1, options.closureRadiusMeters ?? DEFAULT_CLOSURE_RADIUS_METERS);
+  const waypointCount = Math.max(3, Math.round(options.waypointCount ?? 6));
   const deadline = startedAt + budgetMs;
   const rawNodes = graph.nodes.size;
 
@@ -226,13 +256,18 @@ export function searchGraphLoops(
     const key = Array.from(usedEdges).sort().join("~");
     if (found.has(key)) return true;
 
-    const geometry: LatLng[] = [startNode.point];
+    const path: LatLng[] = [startNode.point];
     for (const edge of edgeStack) {
-      for (let i = 1; i < edge.geometry.length; i += 1) geometry.push(edge.geometry[i]);
+      for (let i = 1; i < edge.geometry.length; i += 1) path.push(edge.geometry[i]);
     }
-    if (closureStitchMeters > 1) geometry.push(startPoint);
+    if (closureStitchMeters > 1) path.push(startPoint);
 
-    found.set(key, { geometry, distanceMeters, closureStitchMeters });
+    found.set(key, {
+      path,
+      pathDistanceMeters: distanceMeters,
+      closureStitchMeters,
+      waypoints: waypointsAlong(path, waypointCount),
+    });
     return true;
   };
 
@@ -357,8 +392,13 @@ export function searchGraphLoops(
     }
   }
 
+  // Closeness to the requested distance first, but a loop stitched shut over
+  // 60 m of who-knows-what is a worse proposal than one that nearly meets
+  // itself, so pay for the stitch.
+  const loopCost = (loop: GraphLoop) =>
+    Math.abs(loop.pathDistanceMeters - targetMeters) + loop.closureStitchMeters * 2;
   const loops = Array.from(found.values())
-    .sort((a, b) => Math.abs(a.distanceMeters - targetMeters) - Math.abs(b.distanceMeters - targetMeters))
+    .sort((a, b) => loopCost(a) - loopCost(b))
     .slice(0, maxResults);
 
   return {
@@ -376,6 +416,11 @@ export function searchGraphLoops(
   };
 }
 
+/**
+ * The raw graph paths only. Diagnostics and tests — callers that need something
+ * a runner can follow want `searchGraphLoops(...).loops[].waypoints` routed
+ * through a provider.
+ */
 export function findGraphLoops(
   graph: FamiliarGraph,
   targetMeters: number,
@@ -384,8 +429,26 @@ export function findGraphLoops(
   options: GraphLoopSearchOptions = {},
 ): LatLng[][] {
   return searchGraphLoops(graph, targetMeters, toleranceMeters, { ...options, maxResults }).loops.map(
-    (loop) => loop.geometry,
+    (loop) => loop.path,
   );
+}
+
+/**
+ * Reduces a loop to `count` points spaced evenly by distance along it. The
+ * start is deliberately left out: the caller brackets the waypoints with the
+ * runner's actual start when asking the provider for a route.
+ */
+export function waypointsAlong(path: LatLng[], count: number): LatLng[] {
+  if (path.length < 3 || count < 1) return [];
+
+  const waypoints: LatLng[] = [];
+  for (const point of sampleAlongPolyline(path, count)) {
+    const previous = waypoints[waypoints.length - 1];
+    if (previous && haversineMeters(previous, point) < MIN_WAYPOINT_SPACING_METERS) continue;
+    waypoints.push(point);
+  }
+
+  return waypoints;
 }
 
 /**

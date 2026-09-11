@@ -35,8 +35,20 @@ type OpenRouteServiceExtra = {
   }>;
 };
 
+/**
+ * A single call never waits longer than the provider timeout, and never longer
+ * than the caller's remaining request budget either. Purely client-side: no
+ * openrouteservice parameter is involved.
+ */
+function callTimeoutMs(requested?: number): number {
+  if (!Number.isFinite(requested)) return API_TIMEOUT_MS;
+  return Math.max(500, Math.min(API_TIMEOUT_MS, Number(requested)));
+}
+
 type RoundTripInput = {
   start: LatLng;
+  /** Upper bound for this call, clamped to the provider timeout. */
+  timeoutMs?: number;
   targetDistanceMeters: number;
   points?: number;
   seed?: number;
@@ -55,7 +67,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), callTimeoutMs(input.timeoutMs));
 
     try {
       const response = await fetch(this.directionsUrl(input.routeStyle ?? "mixed"), {
@@ -86,7 +98,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
     }
   }
 
-  async roundTrip(input: RoundTripInput): Promise<RouteProviderResult | null> {
+  async roundTrip(input: RoundTripInput & { timeoutMs?: number }): Promise<RouteProviderResult | null> {
     if (!this.apiKey) {
       throw new Error("Missing OPENROUTESERVICE_API_KEY");
     }
@@ -142,7 +154,7 @@ export class OpenRouteServiceProvider implements RouteProvider {
     attempt: { profile?: RouteStyle; elevation: boolean; options: Record<string, unknown> },
   ): Promise<RouteProviderResult | null> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), callTimeoutMs(input.timeoutMs));
 
     try {
       const response = await fetch(this.directionsUrl(attempt.profile), {

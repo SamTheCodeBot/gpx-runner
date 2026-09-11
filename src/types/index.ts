@@ -36,6 +36,13 @@ export type GeneratedRoute = {
   familiarityRatio: number;
   /** False when the user has no logged tracks near the start — ratio is then a guess, not a measurement. */
   familiarityMeasured: boolean;
+  /**
+   * True only when `geometry` is what a routing provider returned, so it
+   * follows real ways. Graph-derived geometry is 11 m-quantised GPS history
+   * stitched shut with straight lines — it can cross houses and water and must
+   * never reach the client. Nothing without this flag may be returned.
+   */
+  routedByProvider: boolean;
   traffic?: RouteTrafficSummary;
   score: number;
   source?: "familiar-graph" | "provider";
@@ -68,16 +75,15 @@ export type GenerateRouteResult = {
   /** Routes matching distance, loop shape, road safety and the requested familiarity band. */
   routes: GeneratedRoute[];
   /**
-   * Routes that are good runs but land outside the requested familiarity band.
-   * Used to answer "closest match: 55% familiar" instead of showing nothing.
+   * Real, routed, correctly shaped loops of the right length that land outside
+   * the requested familiarity band. Used to answer "closest match: 55%
+   * familiar" instead of showing nothing.
+   *
+   * The familiarity band is the *only* constraint allowed to be missed here.
+   * Distance, loop shape and road safety are hard: a route that fails those is
+   * not a near miss, it is not a route.
    */
   nearMisses: GeneratedRoute[];
-  /**
-   * Every route that was built and is not outright broken, best first, whether
-   * or not it met the distance or familiarity bands. The answer of last resort:
-   * telling the runner "closest match, 64% familiar" beats "no route found".
-   */
-  bestEffort: GeneratedRoute[];
   rejectedCount: number;
   unsafeRejectedCount: number;
   /** True when the deadline expired and the result is what had been found by then. */

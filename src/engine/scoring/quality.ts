@@ -1,5 +1,60 @@
 import { GeneratedRoute, LatLng, RouteSegment } from "../../types";
-import { haversineMeters, pointToSegmentDistanceMeters } from "../utils/geo";
+import { haversineMeters, normalizeLoop, pointToSegmentDistanceMeters, toSegments } from "../utils/geo";
+
+/**
+ * The hard loop-shape gate.
+ *
+ * "Start at A and come back to A, but it is no straight line back and forward."
+ * A route that fails these is not the thing the runner asked for: an
+ * out-and-back, a shape that only ever covers one bearing, or one that keeps
+ * cutting back across its own start.
+ *
+ * These limits are **never** relaxed to produce an answer. The familiarity
+ * band is the only soft constraint in the engine — see `evaluateBuiltRoute`.
+ * Every path that can return a route to the client applies this same gate.
+ */
+export const LOOP_SHAPE_LIMITS = {
+  maxOutAndBackRatio: 0.2,
+  maxClosureErrorMeters: 50,
+  minAngularCoverage: 0.72,
+  minRadiusRatio: 0.46,
+  maxCenterCrossPenalty: 0.12,
+} as const;
+
+export type LoopShapeAssessment = {
+  /** False means "do not return this route", on any path, for any reason. */
+  ok: boolean;
+  outAndBackRatio: number;
+  closureErrorMeters: number;
+  angularCoverage: number;
+  radialStdRatio: number;
+  minRadiusRatio: number;
+  maxRadiusRatio: number;
+  centerCrossPenalty: number;
+};
+
+export function assessLoopShape(
+  geometry: LatLng[],
+  start: LatLng,
+  targetMeters: number,
+): LoopShapeAssessment {
+  const loopGeometry = normalizeLoop(geometry);
+  const outAndBackRatio = computeOutAndBackRatio(toSegments(loopGeometry));
+  // Measured on what the router returned, never on the normalised copy:
+  // `normalizeLoop` closes the ring by appending the first point, which would
+  // report every gaping loop as perfectly shut.
+  const closureErrorMeters = computeClosureErrorMeters(geometry);
+  const metrics = computeLoopShapeMetrics(loopGeometry, start, targetMeters);
+
+  const ok =
+    outAndBackRatio <= LOOP_SHAPE_LIMITS.maxOutAndBackRatio &&
+    closureErrorMeters <= LOOP_SHAPE_LIMITS.maxClosureErrorMeters &&
+    metrics.angularCoverage >= LOOP_SHAPE_LIMITS.minAngularCoverage &&
+    metrics.minRadiusRatio >= LOOP_SHAPE_LIMITS.minRadiusRatio &&
+    metrics.centerCrossPenalty <= LOOP_SHAPE_LIMITS.maxCenterCrossPenalty;
+
+  return { ok, outAndBackRatio, closureErrorMeters, ...metrics };
+}
 
 export function computeDistancePenalty(distanceMeters: number, targetMeters: number): number {
   return Math.abs(distanceMeters - targetMeters) / Math.max(targetMeters, 1);
@@ -29,6 +84,11 @@ function segmentKey(segment: RouteSegment): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+/**
+ * How far the end of the route sits from its start. Always give this the raw
+ * geometry — `normalizeLoop` output is closed by construction and would always
+ * measure zero.
+ */
 export function computeClosureErrorMeters(points: GeneratedRoute["geometry"]): number {
   if (points.length < 2) return 0;
   return haversineMeters(points[0], points[points.length - 1]);
