@@ -1,3 +1,4 @@
+import { haversineMeters } from "@/engine/utils/geo";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { fingerprintTrack } from "./fingerprint";
 import { stampRetention } from "./retention";
@@ -37,6 +38,99 @@ export type IngestResult = {
   duplicateOf?: string;
   reason?: string;
 };
+
+/**
+ * Compact projection of what we already hold, used for duplicate detection.
+ * Loaded once per ingestion run rather than per activity.
+ */
+export type DedupeCandidate = {
+  id: string;
+  source: ActivitySourceId;
+  startedAt: string;
+  distanceMeters: number;
+  fingerprint?: string;
+  startPoint?: [number, number];
+};
+
+/** Two recordings of one run never start more than this far apart. */
+const DUPLICATE_START_WINDOW_MS = 10 * 60 * 1000;
+/** Providers disagree on distance by smoothing artefacts, not by much. */
+const DUPLICATE_DISTANCE_TOLERANCE = 0.03;
+const DUPLICATE_DISTANCE_FLOOR_M = 200;
+/** GPS fixes at the same start line, from two devices or two exports. */
+const DUPLICATE_START_POINT_M = 500;
+
+export async function loadDedupeCandidates(ownerUid: string): Promise<DedupeCandidate[]> {
+  // Single equality filter: served by the automatic single-field index, so no
+  // composite index has to be deployed for ingestion to work.
+  const snap = await adminDb()
+    .collection(ACTIVITY_COLLECTION)
+    .where("ownerUid", "==", ownerUid)
+    .select("source", "startedAt", "distanceMeters", "fingerprint", "startPoint")
+    .get();
+
+  return snap.docs.map((doc) => ({
+    id: doc.id,
+    source: doc.get("source") as ActivitySourceId,
+    startedAt: (doc.get("startedAt") as string) ?? "",
+    distanceMeters: (doc.get("distanceMeters") as number) ?? 0,
+    fingerprint: doc.get("fingerprint") as string | undefined,
+    startPoint: doc.get("startPoint") as [number, number] | undefined,
+  }));
+}
+
+/**
+ * Is this the same run we already hold from another source?
+ *
+ * Two stages. The fingerprint is an exact-match fast path. Because any rounding
+ * scheme has boundaries, it is backed by a tolerance comparison: same owner,
+ * start times within ten minutes, distances within 3%, and — when both records
+ * carry one — start points within 500 m. A person cannot run two different runs
+ * at the same time, so this is decisive without being brittle.
+ *
+ * Records from the *same* source are ignored here: those are handled exactly by
+ * the document id, and a provider legitimately re-sending an edited activity
+ * must update rather than be discarded as a duplicate.
+ */
+export function findDuplicate(
+  candidates: DedupeCandidate[],
+  incoming: {
+    source: ActivitySourceId;
+    startedAt: string;
+    distanceMeters: number;
+    fingerprint: string;
+    startPoint?: [number, number];
+  },
+): DedupeCandidate | null {
+  const startedAt = new Date(incoming.startedAt).valueOf();
+  const distanceTolerance = Math.max(
+    DUPLICATE_DISTANCE_FLOOR_M,
+    incoming.distanceMeters * DUPLICATE_DISTANCE_TOLERANCE,
+  );
+
+  for (const candidate of candidates) {
+    if (candidate.source === incoming.source) continue;
+
+    if (candidate.fingerprint && candidate.fingerprint === incoming.fingerprint) return candidate;
+
+    const candidateStart = new Date(candidate.startedAt).valueOf();
+    if (!Number.isFinite(candidateStart) || !Number.isFinite(startedAt)) continue;
+    if (Math.abs(candidateStart - startedAt) > DUPLICATE_START_WINDOW_MS) continue;
+    if (Math.abs(candidate.distanceMeters - incoming.distanceMeters) > distanceTolerance) continue;
+
+    if (candidate.startPoint && incoming.startPoint) {
+      const apart = haversineMeters(
+        { lat: candidate.startPoint[1], lng: candidate.startPoint[0] },
+        { lat: incoming.startPoint[1], lng: incoming.startPoint[0] },
+      );
+      if (apart > DUPLICATE_START_POINT_M) continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
+}
 
 export function canonicalActivityId(source: ActivitySourceId, sourceActivityId: string): string {
   return `${source}:${sourceActivityId}`;
@@ -130,6 +224,8 @@ export async function ingestActivity(input: {
   normalized: NormalizedActivity;
   file?: SourceActivityFile;
   consentId?: string;
+  /** Preloaded once per run; fetched here if omitted. */
+  candidates?: DedupeCandidate[];
 }): Promise<IngestResult> {
   const { normalized } = input;
   const db = adminDb();
@@ -144,6 +240,7 @@ export async function ingestActivity(input: {
     distanceMeters: normalized.distanceMeters,
     coordinates: normalized.coordinates,
   });
+  const startPoint = normalized.coordinates[0];
 
   const activityRef = db.collection(ACTIVITY_COLLECTION).doc(activityId);
   const existing = await activityRef.get();
@@ -151,22 +248,28 @@ export async function ingestActivity(input: {
 
   // 2. Cross-adapter duplicate: same owner, same run, different source.
   if (!existing.exists) {
-    const sameContent = await db
-      .collection(ACTIVITY_COLLECTION)
-      .where("ownerUid", "==", normalized.ownerUid)
-      .where("fingerprint", "==", fingerprint)
-      .limit(1)
-      .get();
+    const candidates = input.candidates ?? (await loadDedupeCandidates(normalized.ownerUid));
+    const held = findDuplicate(candidates, {
+      source: normalized.source,
+      startedAt: normalized.startedAt,
+      distanceMeters: normalized.distanceMeters,
+      fingerprint,
+      startPoint,
+    });
 
-    if (!sameContent.empty) {
-      const held = sameContent.docs[0].data() as CanonicalActivity;
+    if (held) {
+      // Recorded, not discarded: we remember that this provider also has the
+      // run, so a later sync does not keep re-downloading it, but no second
+      // route is created and club stats are not doubled.
       await activityRef.set({
         id: activityId,
         ownerUid: normalized.ownerUid,
         source: normalized.source,
         sourceActivityId: normalized.sourceActivityId,
         startedAt: normalized.startedAt,
+        distanceMeters: Math.round(normalized.distanceMeters),
         fingerprint,
+        startPoint,
         duplicateOf: held.id,
         ingestedAt: now,
         visibility: "private",
@@ -229,6 +332,7 @@ export async function ingestActivity(input: {
     },
     ingestedAt: existing.exists ? (existing.data() as CanonicalActivity).ingestedAt : now,
     fingerprint,
+    startPoint,
     visibility: "private",
     retention: stampRetention("activity_user_lifetime"),
   };

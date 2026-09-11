@@ -3,7 +3,12 @@ import { TokenCryptoError } from "@/lib/tokenCrypto";
 import { ConsentError, requireConsent } from "./consent";
 import { getConnection, openCredentials, updateCursor } from "./connections";
 import { getActivitySource } from "./registry";
-import { ingestActivity, knownSourceActivityIds, type IngestOutcome } from "./store";
+import {
+  ingestActivity,
+  knownSourceActivityIds,
+  loadDedupeCandidates,
+  type IngestOutcome,
+} from "./store";
 import type { ActivitySourceId, CanonicalSport, SourceActivitySummary } from "@/app/types";
 
 /**
@@ -85,6 +90,8 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
     : page.activities;
 
   const known = input.force ? new Set<string>() : await knownSourceActivityIds(uid, source);
+  // Loaded once per run, then reused for every duplicate check below.
+  const candidates = await loadDedupeCandidates(uid);
 
   const result: IngestionRunResult = {
     source,
@@ -131,8 +138,20 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
     }
 
     const normalized = adapter.normalize({ ownerUid: uid, summary, file });
-    const outcome = await ingestActivity({ normalized, file, consentId: consent.id });
+    const outcome = await ingestActivity({ normalized, file, consentId: consent.id, candidates });
     recordOutcome(result, outcome.outcome, summary.sourceActivityId, outcome.reason);
+
+    // Keep the in-memory view current so two duplicates inside one run are both
+    // caught, not just the first.
+    if (outcome.outcome === "created") {
+      candidates.push({
+        id: outcome.activityId,
+        source,
+        startedAt: normalized.startedAt,
+        distanceMeters: Math.round(normalized.distanceMeters),
+        startPoint: normalized.coordinates[0],
+      });
+    }
   }
 
   // Only advance the cursor on a full-window run. A webhook run looks at a

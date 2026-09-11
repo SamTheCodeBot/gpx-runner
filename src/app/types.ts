@@ -96,8 +96,12 @@ export interface CanonicalActivity {
   ingestedAt: string;
   /** Set when a later sync updated the record. */
   updatedAt?: string;
-  /** Content fingerprint used for cross-adapter dedupe — see `fingerprintTrack`. */
+  /** Content fingerprint: the exact-match fast path for dedupe. */
   fingerprint: string;
+  /** First track point, [lon, lat]. Used by the tolerant duplicate check. */
+  startPoint?: [number, number];
+  /** Set when this record was recognised as the same run from another source. */
+  duplicateOf?: string;
   /** Opt-in sharing. Always `private` at ingest time. */
   visibility: ActivityVisibility;
   retention: RetentionStamp;
