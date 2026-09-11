@@ -4,6 +4,7 @@ import { familiarityRangeForMode } from "./config";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "./familiarity";
 import { buildFamiliarGraph, searchGraphLoops } from "./familiarityGraph";
 import { parseGpxToTrackPoints } from "./gpx";
+import { summarizeProviderFailures } from "./providers/failures";
 import {
   LOOP_SHAPE_LIMITS,
   LOOP_SHAPE_PREFERENCES,
@@ -19,6 +20,7 @@ import {
   GeneratedRoute,
   RouteProvider,
   RouteProviderExtras,
+  RouteProviderFailure,
   RouteTrafficSummary,
 } from "../types";
 
@@ -107,6 +109,21 @@ export async function generateRoutes(
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   let timedOut = false;
+  const providerFailures: RouteProviderFailure[] = [];
+
+  /**
+   * Drains whatever the provider recorded since the last batch.
+   *
+   * Once the provider starts refusing on quota there is nothing to be gained
+   * from the remaining tiers, and real harm in trying: every extra call digs
+   * the rate limit deeper for the next runner as well as this one.
+   */
+  const drainProviderFailures = (): { rateLimited: boolean } => {
+    const drained = provider.takeFailures?.() ?? [];
+    providerFailures.push(...drained);
+    return { rateLimited: drained.some((failure) => failure.kind === "rate-limited") };
+  };
+  let providerGaveUp = false;
 
   const collect = (built: EvaluatedRoute) => {
     if (built.reasons.hardConstraintsOk) bestEffort.push(built.route);
@@ -124,7 +141,12 @@ export async function generateRoutes(
   /** Nothing that no routing provider drew ever leaves this function. */
   const routedOnly = (routes: GeneratedRoute[]) => routes.filter((route) => route.routedByProvider);
 
-  const finish = (): GenerateRouteResult => ({
+  const finish = (): GenerateRouteResult => {
+    drainProviderFailures();
+    return finishWith();
+  };
+
+  const finishWith = (): GenerateRouteResult => ({
     routes: routedOnly(dedupeRoutes(accepted).sort(byDistanceThenScore(targetMeters))).slice(0, alternatives),
     nearMisses: routedOnly(
       dedupeRoutes(nearMisses).sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters)),
@@ -139,6 +161,7 @@ export async function generateRoutes(
     rejectedCount,
     unsafeRejectedCount,
     timedOut,
+    providerFailures: summarizeProviderFailures(providerFailures),
   });
 
   /**
@@ -193,6 +216,11 @@ export async function generateRoutes(
         else collect(built);
       }
 
+      if (drainProviderFailures().rateLimited) {
+        providerGaveUp = true;
+        return;
+      }
+
       if (accepted.length >= alternatives) return;
     }
   };
@@ -230,7 +258,7 @@ export async function generateRoutes(
     .map(({ loop }, index) => ({ seed: `graph-loop-${index}`, waypoints: loop.waypoints }));
 
   await routeCandidates(graphCandidates, "familiar-graph");
-  if (accepted.length >= alternatives) return finish();
+  if (providerGaveUp || accepted.length >= alternatives) return finish();
 
   // ── 2. Geometric loop candidates around the start ──────────────────────────
   await routeCandidates(

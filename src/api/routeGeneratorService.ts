@@ -1,8 +1,15 @@
 import { generateRoutes } from "../engine/generateRoute";
+import { summarizeProviderFailures } from "../engine/providers/failures";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
 import { assessLoopShape } from "../engine/scoring/quality";
 import { evaluateTrafficSafety } from "../engine/scoring/traffic";
-import { GenerateRouteInput, LatLng, RouteProviderResult } from "../types";
+import {
+  GenerateRouteInput,
+  LatLng,
+  RouteProviderFailure,
+  RouteProviderFailureSummary,
+  RouteProviderResult,
+} from "../types";
 import { haversineMeters } from "../engine/utils/geo";
 
 /** Head-room kept back so the answer can still be assembled before the deadline. */
@@ -185,6 +192,8 @@ export async function generateOpenRouteServiceRoundTrip(
   outAndBacks: RoundTripSuggestionResult[];
   rejectedCount: number;
   unsafeRejectedCount: number;
+  /** What the provider did when it did not return a route. */
+  providerFailures: RouteProviderFailureSummary;
 }> {
   const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
   const targetMeters = input.targetDistanceKm * 1000;
@@ -198,6 +207,9 @@ export async function generateOpenRouteServiceRoundTrip(
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   let outOfTime = false;
+  const providerFailures: RouteProviderFailure[] = [];
+  /** Set when the provider starts refusing on quota: stop asking, it only gets worse. */
+  let rateLimited = false;
   const points = pointsForDistance(targetMeters);
   const seeds = shiftedSeeds(ROUND_TRIP_SEEDS, input.directionShift);
   const phases: Array<{
@@ -275,6 +287,10 @@ export async function generateOpenRouteServiceRoundTrip(
         };
       }));
 
+      const drained = provider.takeFailures?.() ?? [];
+      providerFailures.push(...drained);
+      if (drained.some((failure) => failure.kind === "rate-limited")) rateLimited = true;
+
       for (const result of routes) {
         if (!result) {
           rejectedCount += 1;
@@ -310,10 +326,12 @@ export async function generateOpenRouteServiceRoundTrip(
         }
       }
 
-      if (accepted.length > 0) break;
+      if (accepted.length > 0 || rateLimited) break;
     }
 
-    if (accepted.length > 0 || phaseHadResponse || outOfTime) break;
+    // A rate limit is not a fact about this start point, and the later phases
+    // would only be more calls into a closed door.
+    if (accepted.length > 0 || phaseHadResponse || outOfTime || rateLimited) break;
   }
 
   accepted.sort((a, b) => {
@@ -324,10 +342,13 @@ export async function generateOpenRouteServiceRoundTrip(
 
   outAndBacks.sort((a, b) => a.debug.distanceDeltaMeters - b.debug.distanceDeltaMeters);
 
+  providerFailures.push(...(provider.takeFailures?.() ?? []));
+
   return {
     routes: accepted.length > 0 ? accepted : closest,
     outAndBacks,
     rejectedCount,
     unsafeRejectedCount,
+    providerFailures: summarizeProviderFailures(providerFailures),
   };
 }
