@@ -1,17 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateOpenRouteServiceRoundTrip } from "@/api/routeGeneratorService";
+import { generateOpenRouteServiceRoundTrip, generateTrainingRoutes } from "@/api/routeGeneratorService";
+import { buildFamiliarityIndex, computeFamiliarityRatio } from "@/engine/familiarity";
+import {
+  buildFamiliarityReport,
+  isFamiliarityTarget,
+  toEngineMode,
+  type FamiliarityTarget,
+} from "@/engine/familiarityReport";
+import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
+import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
+import type { GeneratedRoute, LatLng, RouteStyle } from "@/types";
+
+/**
+ * Route suggestions.
+ *
+ * Familiarity can only be steered on the waypoint path: openrouteservice's
+ * `round_trip` takes a start point, a seed and a length, so there is no way to
+ * push it onto or away from ground the runner already knows. This endpoint
+ * therefore runs the familiarity engine whenever the runner has logged tracks
+ * near the start, and only falls back to `round_trip` when there is no history
+ * to measure against (or the engine found nothing at all).
+ */
+
+type TrackInput = [number, number][]; // [lng, lat]
 
 type SuggestionRequest = {
   distance?: number;
-  avoidFamiliar?: boolean;
   centerLat?: number;
   centerLon?: number;
+  /** familiar | mixed | unfamiliar. */
+  familiarityMode?: string;
+  /** Legacy boolean from the first version of the UI. */
+  avoidFamiliar?: boolean;
+  /** The runner's logged activity tracks, already trimmed by the client. */
+  tracks?: TrackInput[];
+  /** Legacy shape, still accepted. */
+  existingRoutes?: { coordinates?: TrackInput }[];
+  routeStyle?: RouteStyle;
   preferQuiet?: boolean;
   preferGreen?: boolean;
   elevationPreference?: 'any' | 'hilly' | 'flat';
   directionShift?: number;
-  existingRoutes?: { coordinates?: [number, number][] }[];
 };
+
+/** Server-side guard rails: a bad client must not be able to post a phone book. */
+const MAX_TRACKS = 150;
+const MAX_POINTS_PER_TRACK = 600;
+const MAX_TOTAL_POINTS = 30_000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,16 +56,76 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid route request' }, { status: 400 });
     }
 
+    if (!process.env.OPENROUTESERVICE_API_KEY) {
+      return NextResponse.json(
+        { error: 'Route generation is not configured on the server (missing openrouteservice API key).' },
+        { status: 503 },
+      );
+    }
+
     const targetDistanceKm = Math.min(100, Math.max(1, Number(body.distance)));
-    const start = { lat: Number(body.centerLat), lng: Number(body.centerLon) };
+    const start: LatLng = { lat: Number(body.centerLat), lng: Number(body.centerLon) };
+    const target = resolveTarget(body);
+    const routeStyle: RouteStyle = body.routeStyle === 'road' || body.routeStyle === 'trail' ? body.routeStyle : 'mixed';
+    const preferQuiet = body.preferQuiet !== false; // quiet ways are the default for runners
+    const preferGreen = Boolean(body.preferGreen);
+
+    const tracks = collectTracks(body, start, targetDistanceKm);
+    const hasHistory = tracks.length > 0;
+
+    if (hasHistory) {
+      const engine = await generateTrainingRoutes({
+        start,
+        targetDistanceKm,
+        toleranceKm: 0.5,
+        familiarityMode: toEngineMode(target),
+        routeCollections: tracks,
+        maxCandidates: 18,
+        alternatives: 3,
+        routeStyle,
+        preferQuiet,
+        preferGreen,
+      });
+
+      const best: GeneratedRoute | undefined = engine.routes[0] ?? engine.nearMisses[0];
+      if (best) {
+        const report = buildFamiliarityReport({
+          ratio: best.familiarityMeasured ? best.familiarityRatio : null,
+          target,
+          hasHistory: best.familiarityMeasured,
+        });
+
+        return NextResponse.json({
+          coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
+          distance: best.distanceMeters,
+          elevationGain: best.elevationGainMeters ?? 0,
+          samples: best.geometry.map((point) => ({
+            coordinate: [point.lng, point.lat] as [number, number],
+            elevation: point.elevation,
+          })),
+          name: routeName(target, best.distanceMeters),
+          isRoundTrip: true,
+          type: routeStyle,
+          startPoint: [start.lng, start.lat] as [number, number],
+          familiarity: report,
+          traffic: best.traffic,
+          debug: { ...best.debug, tracksConsidered: tracks.length, rejectedCount: engine.rejectedCount },
+          source: 'familiarity-engine',
+        });
+      }
+    }
+
+    // No history to measure against, or the familiarity engine came up empty:
+    // fall back to the round-trip generator, then report the familiarity of
+    // whatever it produced so the answer is never silent about it.
     const result = await generateOpenRouteServiceRoundTrip({
       start,
       targetDistanceKm,
       toleranceKm: 0.5,
       alternatives: 3,
-      routeStyle: 'mixed',
-      preferQuiet: Boolean(body.preferQuiet),
-      preferGreen: Boolean(body.preferGreen),
+      routeStyle,
+      preferQuiet,
+      preferGreen,
       elevationPreference: body.elevationPreference ?? 'any',
       directionShift: Number.isFinite(body.directionShift) ? Number(body.directionShift) : 0,
     });
@@ -43,6 +138,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 422 });
     }
 
+    const ratio = hasHistory ? familiarityOf(best.geometry, tracks) : null;
+    const report = buildFamiliarityReport({ ratio, target, hasHistory });
+
     return NextResponse.json({
       coordinates: best.geometry.map((point) => [point.lng, point.lat] as [number, number]),
       distance: best.distanceMeters,
@@ -51,15 +149,52 @@ export async function POST(request: NextRequest) {
         coordinate: [point.lng, point.lat] as [number, number],
         elevation: point.elevation,
       })),
-      name: `Suggested Loop - ${(best.distanceMeters / 1000).toFixed(1)}km`,
+      name: routeName(target, best.distanceMeters),
       isRoundTrip: true,
-      type: 'mixed',
-      startPoint: [Number(body.centerLon), Number(body.centerLat)] as [number, number],
-      debug: best.debug,
+      type: routeStyle,
+      startPoint: [start.lng, start.lat] as [number, number],
+      familiarity: report,
+      debug: { ...best.debug, tracksConsidered: tracks.length },
       source: 'openrouteservice-round-trip',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate route';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function resolveTarget(body: SuggestionRequest): FamiliarityTarget {
+  if (isFamiliarityTarget(body.familiarityMode)) return body.familiarityMode;
+  if (body.familiarityMode === 'new') return 'unfamiliar';
+  if (typeof body.avoidFamiliar === 'boolean') return body.avoidFamiliar ? 'unfamiliar' : 'mixed';
+  return 'mixed';
+}
+
+function routeName(target: FamiliarityTarget, distanceMeters: number): string {
+  const label = target === 'familiar' ? 'Familiar' : target === 'unfamiliar' ? 'New ground' : 'Mixed';
+  return `${label} loop - ${(distanceMeters / 1000).toFixed(1)}km`;
+}
+
+/**
+ * Keeps only the parts of the runner's history that could possibly overlap a
+ * loop of this length from this start, and thins them out. Familiarity is a
+ * ~10 m question, so ~20 m sampling is plenty.
+ */
+function collectTracks(body: SuggestionRequest, start: LatLng, targetDistanceKm: number): LatLng[][] {
+  const raw: TrackInput[] = [
+    ...(Array.isArray(body.tracks) ? body.tracks : []),
+    ...(Array.isArray(body.existingRoutes) ? body.existingRoutes.map((route) => route?.coordinates ?? []) : []),
+  ];
+
+  return boundTracksNearStart(raw.map(toLatLngTrack), start, {
+    radiusMeters: historyRadiusMeters(targetDistanceKm),
+    maxTracks: MAX_TRACKS,
+    maxPointsPerTrack: MAX_POINTS_PER_TRACK,
+    maxTotalPoints: MAX_TOTAL_POINTS,
+  });
+}
+
+function familiarityOf(geometry: LatLng[], tracks: LatLng[][]): number {
+  const segments = toSegments(simplifyByDistance(geometry, 18)).filter((segment) => segment.distanceMeters >= 8);
+  return computeFamiliarityRatio(segments, buildFamiliarityIndex(tracks));
 }
