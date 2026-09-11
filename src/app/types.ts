@@ -395,6 +395,18 @@ export interface UserProfile {
   displayName: string;
   avatar: string; // Material Symbols icon name
   joinedAt: string; // ISO date string
+  /**
+   * When the user accepted the terms and the privacy notice at signup, and the
+   * version of that wording.
+   *
+   * This is NOT consent. Accepting the terms is Art. 6(1)(b) — the contract the
+   * service is provided under — and it authorises nothing beyond running the
+   * service. Permission to pull data from a third-party provider is Art.
+   * 6(1)(a) consent, is asked separately at the moment of connecting, and lives
+   * in `ConsentRecord`. Never treat this field as a provider grant.
+   */
+  termsAcceptedAt?: string;
+  termsVersion?: string;
   totalRuns: number; // cached count
   totalDistance: number; // cached km
   userId?: string; // Firebase UID (stored in document)
