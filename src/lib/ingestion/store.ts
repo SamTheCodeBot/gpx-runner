@@ -2,6 +2,7 @@ import { haversineMeters } from "@/engine/utils/geo";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { fingerprintTrack } from "./fingerprint";
 import { stampRetention } from "./retention";
+import { decideActivityScope } from "./sportPolicy";
 import type {
   ActivitySourceId,
   CanonicalActivity,
@@ -231,8 +232,21 @@ export async function ingestActivity(input: {
   const db = adminDb();
   const activityId = canonicalActivityId(normalized.source, normalized.sourceActivityId);
 
-  if (!normalized.coordinates.length) {
-    return { outcome: "skipped", activityId, reason: "no_gps_track" };
+  // Fail closed, a second time. The sync loop already applied the sport policy
+  // to the provider summary; this re-applies it to what was actually parsed out
+  // of the file, so a webhook path, a future adapter or a provider that lied in
+  // its summary still cannot create an app-visible indoor or trackless
+  // activity. Nothing is written when this rejects — not even a stub.
+  const scope = decideActivityScope({
+    sport: normalized.sport,
+    sourceSport: normalized.sourceSport,
+    indoor: normalized.indoor,
+    uploadSource: normalized.uploadSource,
+    hasTrack: normalized.coordinates.length > 0,
+    distanceMeters: normalized.distanceMeters,
+  });
+  if (!scope.ingest) {
+    return { outcome: "skipped", activityId, reason: scope.reason };
   }
 
   const fingerprint = fingerprintTrack({
@@ -339,6 +353,10 @@ export async function ingestActivity(input: {
 
   if (normalized.timezone) activity.timezone = normalized.timezone;
   if (normalized.sourceSport) activity.sourceSport = normalized.sourceSport;
+  // Stored so the reconciliation pass can re-judge this record later without
+  // going back to the provider.
+  if (normalized.indoor !== undefined) activity.indoor = normalized.indoor;
+  if (normalized.uploadSource) activity.uploadSource = normalized.uploadSource;
   if (rawFileRef) activity.rawFileRef = rawFileRef;
   if (existing.exists) activity.updatedAt = now;
   if (input.consentId) activity.consentId = input.consentId;

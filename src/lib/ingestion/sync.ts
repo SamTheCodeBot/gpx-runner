@@ -3,13 +3,14 @@ import { TokenCryptoError } from "@/lib/tokenCrypto";
 import { ConsentError, requireConsent } from "./consent";
 import { getConnection, openCredentials, updateCursor } from "./connections";
 import { getActivitySource } from "./registry";
+import { decideSummaryScope } from "./sportPolicy";
 import {
   ingestActivity,
   knownSourceActivityIds,
   loadDedupeCandidates,
   type IngestOutcome,
 } from "./store";
-import type { ActivitySourceId, CanonicalSport, SourceActivitySummary } from "@/app/types";
+import type { ActivitySourceId } from "@/app/types";
 
 /**
  * Provider-agnostic ingestion run.
@@ -19,9 +20,6 @@ import type { ActivitySourceId, CanonicalSport, SourceActivitySummary } from "@/
  * it was told about, and everything after that is the same path, so a missed or
  * malformed webhook can never produce data that a later pull would not.
  */
-
-/** Only foot sports with a GPS track are ingested. */
-const INGESTED_SPORTS: CanonicalSport[] = ["run", "trail_run", "walk", "hike"];
 
 const DEFAULT_LOOKBACK_DAYS = 30;
 
@@ -49,10 +47,6 @@ export type IngestionRunResult = {
   windowStart: string;
   windowEnd: string;
 };
-
-function isEligible(summary: SourceActivitySummary): boolean {
-  return INGESTED_SPORTS.includes(summary.sport) && summary.hasTrack;
-}
 
 export async function runIngestion(input: IngestionRunInput): Promise<IngestionRunResult> {
   const { uid, source } = input;
@@ -109,10 +103,14 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
   let downloads = 0;
 
   for (const summary of wanted) {
-    if (!isEligible(summary)) {
+    // The sport policy runs BEFORE anything is downloaded: an out-of-scope
+    // activity costs us one line in a list response and nothing else. A
+    // treadmill run is never fetched, never parsed and never stored.
+    const scope = decideSummaryScope(summary);
+    if (!scope.ingest) {
       result.skipped.push({
         sourceActivityId: summary.sourceActivityId,
-        reason: summary.hasTrack ? `sport_not_ingested:${summary.sport}` : "no_gps_track",
+        reason: scope.detail ? `${scope.reason}:${scope.detail}` : scope.reason,
       });
       continue;
     }
