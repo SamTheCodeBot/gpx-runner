@@ -9,7 +9,7 @@ import {
 } from "@/engine/familiarityReport";
 import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
-import type { GeneratedRoute, LatLng, RouteStyle } from "@/types";
+import type { GenerateRouteResult, GeneratedRoute, LatLng, RouteStyle } from "@/types";
 
 /**
  * Route suggestions.
@@ -87,9 +87,10 @@ export async function POST(request: NextRequest) {
 
     const tracks = collectTracks(body, start, targetDistanceKm);
     const hasHistory = tracks.length > 0;
+    let engine: GenerateRouteResult | null = null;
 
     if (hasHistory) {
-      const engine = await generateTrainingRoutes({
+      engine = await generateTrainingRoutes({
         start,
         targetDistanceKm,
         toleranceKm: 0.5,
@@ -162,6 +163,40 @@ export async function POST(request: NextRequest) {
 
     const best = result.routes[0];
     if (!best) {
+      // Last resort: a loop the familiarity engine actually built and the
+      // provider actually drew — right shape, safe roads — that simply came out
+      // the wrong length. Offered as what it is, never as a match.
+      const salvage = engine?.bestEffort.find((route) => route.routedByProvider);
+      if (salvage) {
+        const report = buildFamiliarityReport({
+          ratio: salvage.familiarityMeasured ? salvage.familiarityRatio : null,
+          target,
+          hasHistory: salvage.familiarityMeasured,
+        });
+
+        return NextResponse.json({
+          coordinates: salvage.geometry.map((point) => [point.lng, point.lat] as [number, number]),
+          distance: salvage.distanceMeters,
+          elevationGain: salvage.elevationGainMeters ?? 0,
+          samples: salvage.geometry.map((point) => ({
+            coordinate: [point.lng, point.lat] as [number, number],
+            elevation: point.elevation,
+          })),
+          name: routeName(target, salvage.distanceMeters),
+          isRoundTrip: true,
+          type: routeStyle,
+          startPoint: [start.lng, start.lat] as [number, number],
+          familiarity: report,
+          traffic: salvage.traffic,
+          matchedRequest: false,
+          notice:
+            `No loop of ${targetDistanceKm.toFixed(1)} km could be found from this start point. ` +
+            `This is the closest real loop, at ${(salvage.distanceMeters / 1000).toFixed(1)} km.`,
+          debug: { ...salvage.debug, tracksConsidered: tracks.length, bestEffort: true },
+          source: 'familiarity-engine-best-effort',
+        });
+      }
+
       // Nothing survived. Loop shape and road safety are not negotiable, so an
       // honest refusal is the right answer here — but say which it was.
       const message = result.unsafeRejectedCount > 0

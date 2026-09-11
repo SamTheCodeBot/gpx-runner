@@ -50,13 +50,27 @@ export async function generateRoutes(
   const familiarGraph = buildFamiliarGraph(parsedTracks, input.start);
 
   const accepted: GeneratedRoute[] = [];
-  /** Good runs that miss only the familiarity band — we still want to show one. */
+  /**
+   * Good runs that miss only the familiarity band — we still want to show one,
+   * with its true percentage. This is the engine's *only* best-effort bucket:
+   * length, loop shape and road safety are hard, so a route that fails those is
+   * not a near miss, it is not a route.
+   */
   const nearMisses: GeneratedRoute[] = [];
+  /**
+   * Every loop that cleared the non-negotiable gates — drawn by the provider,
+   * genuinely loop-shaped, safe — whatever its length or familiarity. Only the
+   * caller of last resort touches this, and only ever as "closest real loop",
+   * never as a match for what was asked.
+   */
+  const bestEffort: GeneratedRoute[] = [];
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
   let timedOut = false;
 
   const collect = (built: EvaluatedRoute) => {
+    if (built.reasons.hardConstraintsOk) bestEffort.push(built.route);
+
     if (built.decision === "accept") {
       accepted.push(built.route);
       return;
@@ -66,11 +80,18 @@ export async function generateRoutes(
     if (built.reasons.familiarityOnly) nearMisses.push(built.route);
   };
 
+  /** Nothing that no routing provider drew ever leaves this function. */
+  const routedOnly = (routes: GeneratedRoute[]) => routes.filter((route) => route.routedByProvider);
+
   const finish = (): GenerateRouteResult => ({
-    routes: dedupeRoutes(accepted).sort(byDistanceThenScore(targetMeters)).slice(0, alternatives),
-    nearMisses: dedupeRoutes(nearMisses)
-      .sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters))
-      .slice(0, alternatives),
+    routes: routedOnly(dedupeRoutes(accepted).sort(byDistanceThenScore(targetMeters))).slice(0, alternatives),
+    nearMisses: routedOnly(
+      dedupeRoutes(nearMisses).sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters)),
+    ).slice(0, alternatives),
+    bestEffort: routedOnly(dedupeRoutes(bestEffort).sort(byDistanceThenScore(targetMeters))).slice(
+      0,
+      alternatives,
+    ),
     rejectedCount,
     unsafeRejectedCount,
     timedOut,
@@ -109,6 +130,7 @@ export async function generateRoutes(
 
           return evaluateBuiltRoute({
             geometry: providerResult.geometry,
+            requestedWaypoints: candidate.waypoints,
             distanceMeters: providerResult.distanceMeters,
             elevationGainMeters: providerResult.elevationGainMeters,
             extras: providerResult.extras,
@@ -212,6 +234,13 @@ export type EvaluatedRoute = {
     unsafeRoads: boolean;
     /** True when familiarity is the only thing standing between this route and acceptance. */
     familiarityOnly: boolean;
+    /**
+     * True when every constraint that is never negotiable holds: the geometry
+     * came from the router, it is a loop of the right shape, and it is safe.
+     * Such a route is runnable even if it is the wrong length or the wrong
+     * familiarity, which is what makes it usable as a last resort.
+     */
+    hardConstraintsOk: boolean;
   };
 };
 
@@ -229,6 +258,8 @@ export type EvaluatedRoute = {
  */
 export function evaluateBuiltRoute(params: {
   geometry: GenerateRouteInput["start"][];
+  /** The waypoints the provider was asked to visit, when this came from a request. */
+  requestedWaypoints?: GenerateRouteInput["start"][];
   distanceMeters: number;
   elevationGainMeters?: number;
   extras?: RouteProviderExtras;
@@ -323,10 +354,15 @@ export function evaluateBuiltRoute(params: {
   };
 
   // ── Provider sanity check ──────────────────────────────────────────────────
-  // If the provider returned a route that is less than 40% of the target distance
-  // AND less than 1.15× the straight-line waypoint path, it may have ignored the
-  // intermediate waypoints and returned a near-straight-line shortcut.
-  const waypointPathDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
+  // Every waypoint we asked for has to be visited, so the route can never be
+  // shorter than the straight lines between them. Coming back at barely that
+  // length means the provider dropped the waypoints and answered with a
+  // shortcut — a different route from the one that was proposed.
+  const waypointPathDistance = computeStraightLineDistance([
+    params.input.start,
+    ...(params.requestedWaypoints ?? params.geometry.slice(0, -1)),
+    params.input.start,
+  ]);
   const providerShortcut =
     params.distanceMeters < waypointPathDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.4;
 
@@ -337,6 +373,7 @@ export function evaluateBuiltRoute(params: {
     safetyOk,
     unsafeRoads: traffic.unsafeRoads,
     familiarityOnly: !familiarityOk && distanceOk && !providerShortcut && loopOk && safetyOk,
+    hardConstraintsOk: loopOk && safetyOk && !providerShortcut,
   };
 
   if (providerShortcut) {

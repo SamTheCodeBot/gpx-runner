@@ -84,6 +84,17 @@ export type GenerateRouteResult = {
    * not a near miss, it is not a route.
    */
   nearMisses: GeneratedRoute[];
+  /**
+   * Every route that cleared the constraints that are never negotiable — drawn
+   * by the routing provider, a genuine loop, safe roads — best first, whether
+   * or not it hit the requested length or familiarity band.
+   *
+   * The answer of last resort, and only that: telling the runner "closest
+   * match, 5.8 km, 64% familiar" beats "no route found", but it is never
+   * presented as if it had met the request. Nothing misshapen or unrouted is
+   * ever in here — those are not routes at any price.
+   */
+  bestEffort: GeneratedRoute[];
   rejectedCount: number;
   unsafeRejectedCount: number;
   /** True when the deadline expired and the result is what had been found by then. */
