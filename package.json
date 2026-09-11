@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-build/tests/**/*.test.js\""
   },
   "dependencies": {
     "@mapbox/togeojson": "^0.16.2",
