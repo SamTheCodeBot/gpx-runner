@@ -3,7 +3,7 @@ import "./helpers/alias";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { LOOP_SHAPE_LIMITS, assessLoopShape } from "@/engine/scoring/quality";
+import { LOOP_SHAPE_LIMITS, LOOP_SHAPE_PREFERENCES, assessLoopShape } from "@/engine/scoring/quality";
 import { destinationPoint, polylineDistanceMeters } from "@/engine/utils/geo";
 import type { LatLng } from "@/types";
 import { circleLoop, radiusForLoopDistance } from "./helpers/geometry";
@@ -50,9 +50,11 @@ describe("the loop shape gate", () => {
 
     assert.equal(shape.ok, true, `a perfect door-to-door loop must pass: ${JSON.stringify(shape)}`);
     assert.ok(Math.abs(polylineDistanceMeters(loop) - TARGET_METERS) < 100);
-    assert.ok(shape.angularCoverage >= LOOP_SHAPE_LIMITS.minAngularCoverage);
-    assert.ok(shape.minRadiusRatio >= LOOP_SHAPE_LIMITS.minRadiusRatio);
-    assert.ok(shape.centerCrossPenalty <= LOOP_SHAPE_LIMITS.maxCenterCrossPenalty);
+    // Ranking preferences, not gates: a textbook loop should still score well
+    // on all three, but falling short of them must never reject a route.
+    assert.ok(shape.angularCoverage >= LOOP_SHAPE_PREFERENCES.minAngularCoverage);
+    assert.ok(shape.minRadiusRatio >= LOOP_SHAPE_PREFERENCES.minRadiusRatio);
+    assert.ok(shape.centerCrossPenalty <= LOOP_SHAPE_PREFERENCES.maxCenterCrossPenalty);
   });
 
   it("still accepts a loop drawn around the start", () => {
@@ -65,7 +67,7 @@ describe("the loop shape gate", () => {
 
     assert.equal(shape.ok, false);
     assert.ok(shape.outAndBackRatio > LOOP_SHAPE_LIMITS.maxOutAndBackRatio, "it retraces itself");
-    assert.ok(shape.angularCoverage < LOOP_SHAPE_LIMITS.minAngularCoverage, "it only ever goes one way");
+    assert.ok(shape.angularCoverage < LOOP_SHAPE_PREFERENCES.minAngularCoverage, "it only ever goes one way");
   });
 
   it("refuses a route that does not come back to the start", () => {
@@ -94,18 +96,18 @@ describe("the loop shape gate", () => {
     assert.equal(assessLoopShape(square, DOOR, TARGET_METERS).ok, true);
 
     // 2400 m long, 100 m wide — closed, but nobody would call it a circle.
-    const sliver: LatLng[] = [];
-    const corners: Array<[number, number]> = [
-      [90, 0],
-      [90, 2_400],
-      [0, 2_400],
-    ];
-    let point = DOOR;
-    for (const [bearing, distance] of corners) {
-      point = distance === 0 ? destinationPoint(DOOR, 0, 100) : destinationPoint(point, bearing, distance);
-      sliver.push(point);
-    }
-    const sliverLoop = [DOOR, ...sliver, DOOR];
+    //
+    // Written out leg by leg on purpose. The bearing table this replaced walked
+    // north on its final leg instead of back west, so it enclosed 2.8 km^2 and
+    // scored 0.50 for roundness: a fat quadrilateral that every gate should
+    // accept, asserted to be rejected. The test failed because the shape was
+    // wrong, not because the gate was.
+    const east = destinationPoint(DOOR, 90, 2_400);
+    const far = destinationPoint(east, 0, 100);
+    const back = destinationPoint(far, 270, 2_400);
+    const sliverLoop = [DOOR, east, far, back, DOOR];
+
+    // 4*pi*A / P^2 for 2400 x 100 is 0.12, below the 0.15 gate.
     assert.equal(assessLoopShape(sliverLoop, DOOR, TARGET_METERS).ok, false);
   });
 });

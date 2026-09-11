@@ -8,6 +8,11 @@ import {
   type FamiliarityTarget,
 } from "@/engine/familiarityReport";
 import {
+  NO_PROVIDER_FAILURES,
+  mergeProviderFailureSummaries,
+  providerFailureDebug,
+} from "@/engine/providers/failures";
+import {
   pickByTier,
   type SuggestionTierId,
   type TierPick,
@@ -15,7 +20,13 @@ import {
 import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
 import type { RoundTripSuggestionResult } from "@/api/routeGeneratorService";
-import type { GeneratedRoute, LatLng, RouteStyle, RouteTrafficSummary } from "@/types";
+import type {
+  GeneratedRoute,
+  LatLng,
+  RouteProviderFailureSummary,
+  RouteStyle,
+  RouteTrafficSummary,
+} from "@/types";
 
 /** One candidate answer, flattened so both generators can be compared fairly. */
 type Suggestion = {
@@ -205,14 +216,19 @@ export async function POST(request: NextRequest) {
 
     const picked = pickByTier(candidates);
     if (!picked) {
-      // Nothing survived. Map-following and road safety are not negotiable, so
-      // an honest refusal is the right answer here — but say which it was.
-      const message = fallback.unsafeRejectedCount > 0
-        ? 'No route found that avoids the highest-traffic roads from this start point.'
-        : Date.now() >= deadlineAt
-          ? 'Ran out of time looking for a loop from this start point. Please try again.'
-          : 'No loop route found from this start point.';
-      return NextResponse.json({ error: message }, { status: 422 });
+      // Nothing survived. Before blaming the start point, look at what the
+      // routing provider actually said: a refused key or an exhausted quota is
+      // our problem, not a fact about where this runner lives.
+      return refuse({
+        providerFailures: mergeProviderFailureSummaries(
+          engine?.providerFailures ?? NO_PROVIDER_FAILURES,
+          fallback.providerFailures,
+        ),
+        unsafeRejectedCount: fallback.unsafeRejectedCount + (engine?.unsafeRejectedCount ?? 0),
+        outOfTime: Date.now() >= deadlineAt || Boolean(engine?.timedOut),
+        tracksConsidered: tracks.length,
+        rejectedCount: fallback.rejectedCount + (engine?.rejectedCount ?? 0),
+      });
     }
 
     return respond(picked, { start, target, routeStyle, targetDistanceKm });
@@ -220,6 +236,90 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Failed to generate route';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/**
+ * The refusal, when there is genuinely nothing to give.
+ *
+ * Which refusal it is matters. "No loop route found from this start point" is a
+ * statement about Falkenberg; if the truth is that openrouteservice answered
+ * 429 to every one of forty calls, that sentence is false, unactionable, and
+ * sent a working deployment to be debugged as a routing failure. So the
+ * provider's own answer decides both the status and the wording, and the raw
+ * counts ride along in `debug`.
+ */
+function refuse(context: {
+  providerFailures: RouteProviderFailureSummary;
+  unsafeRejectedCount: number;
+  outOfTime: boolean;
+  tracksConsidered: number;
+  rejectedCount: number;
+}): NextResponse {
+  const { providerFailures: failures } = context;
+  const debug = {
+    ...providerFailureDebug(failures),
+    tracksConsidered: context.tracksConsidered,
+    rejectedCount: context.rejectedCount,
+    unsafeRejectedCount: context.unsafeRejectedCount,
+    outOfTime: context.outOfTime,
+  };
+
+  if (failures.unauthorized) {
+    return NextResponse.json(
+      {
+        error:
+          'Route generation is not working: the routing provider rejected this server’s credentials.',
+        debug,
+      },
+      { status: 503 },
+    );
+  }
+
+  if (failures.rateLimited) {
+    return NextResponse.json(
+      {
+        error:
+          'The routing provider is rate-limiting us at the moment. Please try again in a minute.',
+        debug,
+      },
+      { status: 429 },
+    );
+  }
+
+  if (failures.providerRefused) {
+    return NextResponse.json(
+      {
+        error: 'The routing provider could not answer right now. Please try again.',
+        debug,
+      },
+      { status: 503 },
+    );
+  }
+
+  if (context.unsafeRejectedCount > 0) {
+    return NextResponse.json(
+      {
+        error: 'No route found that avoids the highest-traffic roads from this start point.',
+        debug,
+      },
+      { status: 422 },
+    );
+  }
+
+  if (context.outOfTime) {
+    return NextResponse.json(
+      {
+        error: 'Ran out of time looking for a loop from this start point. Please try again.',
+        debug,
+      },
+      { status: 422 },
+    );
+  }
+
+  return NextResponse.json(
+    { error: 'No loop route found from this start point.', debug },
+    { status: 422 },
+  );
 }
 
 /**
