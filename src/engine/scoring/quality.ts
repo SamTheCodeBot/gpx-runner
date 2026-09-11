@@ -16,6 +16,31 @@ import { haversineMeters, normalizeLoop, pointToSegmentDistanceMeters, toSegment
 export const LOOP_SHAPE_LIMITS = {
   maxOutAndBackRatio: 0.2,
   maxClosureErrorMeters: 50,
+  /**
+   * How much ground the loop has to enclose for its length — see `loopRoundness`.
+   *
+   * Measured against real openrouteservice loops from the Falkenberg start
+   * point that provoked this: 0.22, 0.25, 0.45, 0.56, 0.60, 0.62. Against
+   * shapes that must not pass: a literal there-and-back scores 0.000, a run
+   * out and back along a parallel street 20 m away 0.03, and the 2.4 km x 100 m
+   * sliver the test suite guards against 0.12.
+   *
+   * 0.15 sits in that gap with the nearest real loop 1.5x clear of it.
+   */
+  minRoundness: 0.15,
+} as const;
+
+/**
+ * Roundness measures that rank loops but never reject one.
+ *
+ * They were hard limits, and that was the bug: `minRadiusRatio` is the *single*
+ * closest sample to the loop's centre divided by the radius the loop would have
+ * if it were a circle, so one street that happens to pass near the middle
+ * condemns the whole route. Four of five real routes from the reported start
+ * point scored 0.05-0.30 against a limit of 0.46 while retracing not one metre
+ * of themselves. Real streets do not lay out circles; they still make loops.
+ */
+export const LOOP_SHAPE_PREFERENCES = {
   minAngularCoverage: 0.72,
   minRadiusRatio: 0.46,
   maxCenterCrossPenalty: 0.12,
@@ -26,6 +51,8 @@ export type LoopShapeAssessment = {
   ok: boolean;
   outAndBackRatio: number;
   closureErrorMeters: number;
+  /** 0 for a there-and-back, 1 for a circle. The hard roundness test. */
+  roundness: number;
   angularCoverage: number;
   radialStdRatio: number;
   minRadiusRatio: number;
@@ -44,16 +71,63 @@ export function assessLoopShape(
   // `normalizeLoop` closes the ring by appending the first point, which would
   // report every gaping loop as perfectly shut.
   const closureErrorMeters = computeClosureErrorMeters(geometry);
+  const roundness = loopRoundness(loopGeometry);
   const metrics = computeLoopShapeMetrics(loopGeometry, start, targetMeters);
 
   const ok =
     outAndBackRatio <= LOOP_SHAPE_LIMITS.maxOutAndBackRatio &&
     closureErrorMeters <= LOOP_SHAPE_LIMITS.maxClosureErrorMeters &&
-    metrics.angularCoverage >= LOOP_SHAPE_LIMITS.minAngularCoverage &&
-    metrics.minRadiusRatio >= LOOP_SHAPE_LIMITS.minRadiusRatio &&
-    metrics.centerCrossPenalty <= LOOP_SHAPE_LIMITS.maxCenterCrossPenalty;
+    roundness >= LOOP_SHAPE_LIMITS.minRoundness;
 
-  return { ok, outAndBackRatio, closureErrorMeters, ...metrics };
+  return { ok, outAndBackRatio, closureErrorMeters, roundness, ...metrics };
+}
+
+/**
+ * How much ground a closed route encloses, for its length.
+ *
+ * The isoperimetric quotient, `4πA / P²`: 1 for a circle, 0 for a line out and
+ * back. It answers the owner's rule directly — *"start at A and come back to A,
+ * but it is no straight line back and forward"* — because going out and coming
+ * back encloses nothing, however you dress it up.
+ *
+ * It is also the only formulation of that rule that survives real streets. The
+ * shape does not have to be round, or centred anywhere in particular, or visit
+ * every compass bearing; it only has to go round *something*. And unlike
+ * counting retraced segments, it still catches the sly version: out along one
+ * street and back along the one behind it, which shares no segment with itself
+ * and is an out-and-back all the same.
+ */
+export function loopRoundness(points: LatLng[]): number {
+  if (points.length < 4) return 0;
+
+  const perimeter = polylineLengthMeters(points);
+  if (perimeter <= 0) return 0;
+
+  return Math.min(1, (4 * Math.PI * enclosedAreaSquareMeters(points)) / (perimeter * perimeter));
+}
+
+/** Shoelace area on a local equirectangular projection. Metres, unsigned. */
+function enclosedAreaSquareMeters(points: LatLng[]): number {
+  const meanLat = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+  const metersPerDegLat = 111_132.92;
+  const metersPerDegLng = 111_319.49 * Math.cos((meanLat * Math.PI) / 180);
+
+  let twiceArea = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    twiceArea +=
+      a.lng * metersPerDegLng * (b.lat * metersPerDegLat) -
+      b.lng * metersPerDegLng * (a.lat * metersPerDegLat);
+  }
+
+  return Math.abs(twiceArea / 2);
+}
+
+function polylineLengthMeters(points: LatLng[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) total += haversineMeters(points[i - 1], points[i]);
+  return total;
 }
 
 export function computeDistancePenalty(distanceMeters: number, targetMeters: number): number {
@@ -188,6 +262,8 @@ export function scoreRoute(params: {
   targetFamiliarityRange: { min: number; max: number };
   outAndBackRatio: number;
   closureErrorMeters: number;
+  /** Optional so callers that only have the older metrics still compile. */
+  roundness?: number;
   angularCoverage: number;
   radialStdRatio: number;
   minRadiusRatio: number;
@@ -203,6 +279,9 @@ export function scoreRoute(params: {
   const radialPenalty = Math.min(1, params.radialStdRatio / 0.32);
   const centerRevisitPenalty = Math.max(0, 0.85 - params.minRadiusRatio) + params.centerCrossPenalty;
   const tooWidePenalty = Math.max(0, params.maxRadiusRatio - 1.85);
+  // The rounder of two otherwise equal loops is the better run. A preference,
+  // deliberately worth less than distance: it ranks, it does not reject.
+  const roundnessBonus = Math.min(1, Math.max(0, params.roundness ?? 0)) * 18;
 
   const score =
     100 -
@@ -213,7 +292,8 @@ export function scoreRoute(params: {
     angularPenalty * 26 -
     radialPenalty * 10 -
     centerRevisitPenalty * 20 -
-    tooWidePenalty * 12;
+    tooWidePenalty * 12 +
+    roundnessBonus;
 
   return {
     score,
@@ -226,6 +306,7 @@ export function scoreRoute(params: {
       radialPenalty,
       centerRevisitPenalty,
       tooWidePenalty,
+      roundnessBonus,
     },
   };
 }

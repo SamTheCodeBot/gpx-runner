@@ -113,6 +113,8 @@ export type GenerateRouteResult = {
   unsafeRejectedCount: number;
   /** True when the deadline expired and the result is what had been found by then. */
   timedOut: boolean;
+  /** What the routing provider did when it did not return a route. */
+  providerFailures: RouteProviderFailureSummary;
 };
 
 export type RouteRequest = {
@@ -143,6 +145,52 @@ export type RouteExtraSummary = {
   amount: number;
 };
 
+/**
+ * Why a provider call came back without a route.
+ *
+ * The distinction that matters: `empty` is the provider saying "there is no
+ * route here", and everything else is the provider not answering the question.
+ * Collapsing the two into `null` made a rate limit look exactly like a start
+ * point with no loops, which is how a broken deployment could report "no loop
+ * route found from this start point" for hours without anyone knowing why.
+ */
+export type RouteProviderFailureKind =
+  | "unauthorized"
+  | "forbidden"
+  | "rate-limited"
+  | "rejected"
+  | "provider-error"
+  | "timeout"
+  | "network"
+  | "empty";
+
+export type RouteProviderFailure = {
+  kind: RouteProviderFailureKind;
+  /** HTTP status, when there was a response at all. */
+  status?: number;
+  /** The provider's own error code, when its body carried one. */
+  code?: number;
+  /** The provider's message, truncated — never anything credential-shaped. */
+  message?: string;
+};
+
+/** What a whole fan-out of provider calls ran into, flattened for reporting. */
+export type RouteProviderFailureSummary = {
+  total: number;
+  byKind: Partial<Record<RouteProviderFailureKind, number>>;
+  /** The most serious failure seen, to show a human. */
+  worst?: RouteProviderFailure;
+  /** True when the provider refused to answer rather than finding nothing. */
+  providerRefused: boolean;
+  rateLimited: boolean;
+  unauthorized: boolean;
+};
+
 export interface RouteProvider {
   route(input: RouteRequest): Promise<RouteProviderResult | null>;
+  /**
+   * Failures recorded since the last call, and cleared by it. Optional so a
+   * test double can stay a two-line object.
+   */
+  takeFailures?(): RouteProviderFailure[];
 }
