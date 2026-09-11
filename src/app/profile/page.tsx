@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { useUserProfile, useAccountDeletion } from "@/lib/hooks";
 import { Icon } from "@/components/ui";
+import { IntervalsConnectionCard } from "@/components/IntervalsConnectionCard";
 
 const RUNNING_AVATARS = [
   { icon: "directions_run",          label: "The Classic",          color: "#006d43" },
@@ -409,6 +410,33 @@ export default function ProfilePage() {
               </button>
             )}
           </div>
+
+          {/* intervals.icu connection — consent is asked inside this card, at the
+              moment of connecting, never at signup. */}
+          <IntervalsConnectionCard />
+
+          {/* Privacy and data rights. Kept one tap from the profile rather than
+              buried, because withdrawal has to be as easy as consenting. */}
+          <Link
+            href="/profile/privacy"
+            className="block bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10 hover:bg-surface-container-low transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                <Icon name="shield_person" className="text-primary text-xl" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+                  Your data
+                </p>
+                <h2 className="text-sm font-extrabold text-on-surface mt-0.5">Privacy &amp; data</h2>
+                <p className="text-xs text-on-surface-variant mt-1">
+                  Connections, what you agreed to, download everything, delete everything.
+                </p>
+              </div>
+              <Icon name="chevron_right" className="text-on-surface-variant text-xl shrink-0" />
+            </div>
+          </Link>
 
           {/* Stats */}
           {profile && (profile.totalRuns > 0 || profile.totalDistance > 0) && (
