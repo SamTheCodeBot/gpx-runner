@@ -6,6 +6,21 @@ export type LatLng = {
 
 export type FamiliarityMode = "familiar" | "mixed" | "new";
 
+/** Road vs trail preference. Maps onto the openrouteservice foot profiles. */
+export type RouteStyle = "road" | "mixed" | "trail";
+
+/** What the waytype/noise extras say about how busy a route is. */
+export type RouteTrafficSummary = {
+  hasTrafficData: boolean;
+  stateRoadMeters: number;
+  roadMeters: number;
+  noisyMeters: number;
+  quietWayMeters: number;
+  quietWayRatio: number;
+  trafficPenalty: number;
+  unsafeRoads: boolean;
+};
+
 export type RouteSegment = {
   from: LatLng;
   to: LatLng;
@@ -15,9 +30,13 @@ export type RouteSegment = {
 export type GeneratedRoute = {
   id: string;
   distanceMeters: number;
+  elevationGainMeters?: number;
   geometry: LatLng[];
   segments: RouteSegment[];
   familiarityRatio: number;
+  /** False when the user has no logged tracks near the start — ratio is then a guess, not a measurement. */
+  familiarityMeasured: boolean;
+  traffic?: RouteTrafficSummary;
   score: number;
   source?: "familiar-graph" | "provider";
   debug: Record<string, number | string | boolean>;
@@ -32,10 +51,30 @@ export type GenerateRouteInput = {
   routeCollections?: LatLng[][];
   maxCandidates?: number;
   alternatives?: number;
+  routeStyle?: RouteStyle;
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  /** Reject routes that run along state roads or noisy ways. Defaults to true. */
+  avoidUnsafeRoads?: boolean;
+};
+
+export type GenerateRouteResult = {
+  /** Routes matching distance, loop shape, road safety and the requested familiarity band. */
+  routes: GeneratedRoute[];
+  /**
+   * Routes that are good runs but land outside the requested familiarity band.
+   * Used to answer "closest match: 55% familiar" instead of showing nothing.
+   */
+  nearMisses: GeneratedRoute[];
+  rejectedCount: number;
+  unsafeRejectedCount: number;
 };
 
 export type RouteRequest = {
   coordinates: LatLng[];
+  routeStyle?: RouteStyle;
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
 };
 
 export type RouteProviderResult = {

@@ -1,4 +1,4 @@
-import { RouteExtraSummary, RouteProviderExtras } from "../../types";
+import { RouteExtraSummary, RouteProviderExtras, RouteTrafficSummary } from "../../types";
 
 /**
  * Road avoidance, shared by both generation paths.
@@ -28,18 +28,8 @@ export const WAYTYPE = {
 /** Ways the story asks us to prefer: bicycle paths and other quiet ways. */
 const QUIET_WAYTYPES: number[] = [WAYTYPE.path, WAYTYPE.track, WAYTYPE.cycleway, WAYTYPE.footway];
 
-export type TrafficSafety = {
-  /** False when the provider returned no waytype/noise extras — nothing can be judged. */
-  hasTrafficData: boolean;
-  stateRoadMeters: number;
-  roadMeters: number;
-  noisyMeters: number;
-  quietWayMeters: number;
-  /** Share of the route on paths, tracks, cycleways and footways (0..1). */
-  quietWayRatio: number;
-  trafficPenalty: number;
-  unsafeRoads: boolean;
-};
+/** `hasTrafficData` is false when the provider returned no waytype/noise extras — then nothing is judged. */
+export type TrafficSafety = RouteTrafficSummary;
 
 export function summaryDistance(
   summary: RouteExtraSummary[] | undefined,

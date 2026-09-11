@@ -1,4 +1,4 @@
-import { LatLng, RouteExtraSummary, RouteProvider, RouteProviderResult, RouteRequest } from "../../types";
+import { LatLng, RouteExtraSummary, RouteProvider, RouteProviderResult, RouteRequest, RouteStyle } from "../../types";
 
 function encodeCoordinate(point: LatLng): [number, number] {
   return [point.lng, point.lat];
@@ -8,7 +8,6 @@ const API_TIMEOUT_MS = 10_000;
 const DIRECTIONS_BASE_URL = "https://api.heigit.org/openrouteservice/v2/directions";
 
 type OpenRouteServiceProfile = "foot-walking" | "foot-hiking";
-type RouteStyle = "road" | "mixed" | "trail";
 
 type OpenRouteServiceFeature = {
   geometry?: { coordinates?: [number, number, number?][] };
@@ -59,17 +58,18 @@ export class OpenRouteServiceProvider implements RouteProvider {
     const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     try {
-      const response = await fetch(this.directionsUrl("mixed"), {
+      const response = await fetch(this.directionsUrl(input.routeStyle ?? "mixed"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
           coordinates: input.coordinates.map(encodeCoordinate),
           instructions: false,
-          elevation: false,
+          elevation: true,
           continue_straight: false,
-          options: {
-            avoid_features: ["ferries"],
-          },
+          // waytype/noise drive road avoidance; without them the waypoint path
+          // cannot tell a cycleway from a trunk road.
+          extra_info: ["waytype", "noise"],
+          options: this.routeOptions(input.routeStyle, input.preferQuiet, input.preferGreen),
         }),
         signal: controller.signal,
       });
