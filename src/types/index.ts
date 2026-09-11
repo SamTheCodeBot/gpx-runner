@@ -56,6 +56,12 @@ export type GenerateRouteInput = {
   preferGreen?: boolean;
   /** Reject routes that run along state roads or noisy ways. Defaults to true. */
   avoidUnsafeRoads?: boolean;
+  /**
+   * Epoch-ms wall clock the whole generation must finish by. Everything inside
+   * — the graph search and the provider fan-out — is budgeted against it, and
+   * whatever has been found when it expires is returned as best effort.
+   */
+  deadlineAt?: number;
 };
 
 export type GenerateRouteResult = {
@@ -66,8 +72,16 @@ export type GenerateRouteResult = {
    * Used to answer "closest match: 55% familiar" instead of showing nothing.
    */
   nearMisses: GeneratedRoute[];
+  /**
+   * Every route that was built and is not outright broken, best first, whether
+   * or not it met the distance or familiarity bands. The answer of last resort:
+   * telling the runner "closest match, 64% familiar" beats "no route found".
+   */
+  bestEffort: GeneratedRoute[];
   rejectedCount: number;
   unsafeRejectedCount: number;
+  /** True when the deadline expired and the result is what had been found by then. */
+  timedOut: boolean;
 };
 
 export type RouteRequest = {
@@ -75,6 +89,8 @@ export type RouteRequest = {
   routeStyle?: RouteStyle;
   preferQuiet?: boolean;
   preferGreen?: boolean;
+  /** Upper bound for this single call. Clamped to the provider's own timeout. */
+  timeoutMs?: number;
 };
 
 export type RouteProviderResult = {
