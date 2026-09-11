@@ -1,6 +1,8 @@
 // Shared utilities for GPX Runner
 // All coordinates are [lon, lat] (GeoJSON order) internally, converted for display
 
+import { buildRouteGpx } from "@/engine/gpx";
+
 export function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -127,20 +129,23 @@ export function parseTCXFile(text: string): ParsedTCXSample[] {
 export function downloadGPXFile(route: {
   name: string;
   coordinates: [number, number][];
-  samples?: { coordinate: [number, number]; elevation?: number }[];
+  samples?: { coordinate: [number, number]; elevation?: number; time?: string }[];
 }) {
-  const pts = route.coordinates
-    .map(([lon, lat], index) => {
-      const elevation = route.samples?.[index]?.elevation;
-      const ele = Number.isFinite(elevation) ? Number(elevation).toFixed(1) : "0";
-      return `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>${ele}</ele><time>${new Date().toISOString()}</time></trkpt>`;
-    })
-    .join("\n");
-  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="GPX running" xmlns="http://www.topografix.com/GPX/1/1">
-<metadata><name>${route.name}</name><time>${new Date().toISOString()}</time></metadata>
-<trk><name>${route.name}</name><trkseg>${pts}</trkseg></trk>
-</gpx>`;
+  // Sample arrays are downsampled for storage, so they only line up with the
+  // coordinates when the counts match. Anything else would attach the wrong
+  // timestamp to a point, which is worse than attaching none.
+  const samplesAligned = route.samples?.length === route.coordinates.length;
+
+  const gpx = buildRouteGpx({
+    name: route.name,
+    points: route.coordinates.map(([lon, lat], index) => ({
+      lat,
+      lng: lon,
+      elevation: route.samples?.[index]?.elevation,
+      time: samplesAligned ? route.samples?.[index]?.time : undefined,
+    })),
+  });
+
   const blob = new Blob([gpx], { type: "application/gpx+xml" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

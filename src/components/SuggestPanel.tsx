@@ -1,12 +1,13 @@
 "use client";
 
 import { Icon } from "./ui";
+import type { FamiliarityTarget } from "@/engine/familiarityReport";
 
 interface SuggestPanelProps {
   suggestDistance: number;
   onDistanceChange: (d: number) => void;
-  avoidFamiliar: boolean;
-  onAvoidChange: (v: boolean) => void;
+  familiarityMode: FamiliarityTarget;
+  onFamiliarityModeChange: (mode: FamiliarityTarget) => void;
   isSelectingStartPoint: boolean;
   onToggleStartPointSelect: () => void;
   selectedStartPoint: [number, number] | null;
@@ -18,7 +19,7 @@ interface SuggestPanelProps {
 }
 
 export function SuggestPanel({
-  suggestDistance, onDistanceChange, avoidFamiliar, onAvoidChange,
+  suggestDistance, onDistanceChange, familiarityMode, onFamiliarityModeChange,
   isSelectingStartPoint, onToggleStartPointSelect, selectedStartPoint, onClearStartPoint,
   isSuggesting, apiKeyMissing, onGenerate, onClose,
 }: SuggestPanelProps) {
@@ -55,16 +56,31 @@ export function SuggestPanel({
           <div className="text-center text-sm font-bold text-primary mt-1">{suggestDistance} km</div>
         </div>
 
-        {/* Avoid familiar toggle */}
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="avoidFamiliar"
-            checked={avoidFamiliar}
-            onChange={(e) => onAvoidChange(e.target.checked)}
-            className="accent-primary w-4 h-4"
-          />
-          <label htmlFor="avoidFamiliar" className="text-sm text-on-surface">Discover new routes</label>
+        {/* Familiarity target: familiar >= 80% known, new ground <= 20% */}
+        <div>
+          <label className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1 block">
+            Familiarity
+          </label>
+          <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+            {([
+              { value: "familiar", label: "Familiar" },
+              { value: "mixed", label: "Mixed" },
+              { value: "unfamiliar", label: "New ground" },
+            ] as const).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onFamiliarityModeChange(option.value)}
+                className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  familiarityMode === option.value
+                    ? "bg-secondary text-on-secondary"
+                    : "text-on-surface-variant hover:bg-surface-container"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Start point */}

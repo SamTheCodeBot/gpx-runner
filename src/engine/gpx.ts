@@ -57,6 +57,62 @@ export function parseGpxToTrackPoints(gpxXml: string): LatLng[] {
 }
 
 // ---------------------------------------------------------------------------
+// GPX export
+// ---------------------------------------------------------------------------
+
+export type GpxExportPoint = {
+  lat: number;
+  lng: number;
+  elevation?: number;
+  /** ISO 8601. Only real recorded times belong here. */
+  time?: string;
+};
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * Serialises a route to GPX.
+ *
+ * A planned route is a course, not an activity: stamping every trackpoint with
+ * "now" (which this app used to do) makes Garmin read a suggestion as a run that
+ * was completed in zero seconds. Timestamps are therefore written only for
+ * points that carry a real recorded time; a suggestion comes out as a plain
+ * `<trk>` with no `<time>` elements, which Garmin imports as a course.
+ */
+export function buildRouteGpx(input: {
+  name: string;
+  points: GpxExportPoint[];
+  createdAt?: string;
+}): string {
+  const name = escapeXml(input.name?.trim() || "Route");
+  const createdAt = input.createdAt ?? new Date().toISOString();
+
+  const trackpoints = input.points
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    .map((point) => {
+      const ele = Number.isFinite(point.elevation) ? `<ele>${Number(point.elevation).toFixed(1)}</ele>` : "";
+      const time = point.time ? `<time>${escapeXml(point.time)}</time>` : "";
+      return `      <trkpt lat="${point.lat.toFixed(6)}" lon="${point.lng.toFixed(6)}">${ele}${time}</trkpt>`;
+    })
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="GPX running" xmlns="http://www.topografix.com/GPX/1/1">
+<metadata><name>${name}</name><time>${escapeXml(createdAt)}</time></metadata>
+<trk><name>${name}</name><trkseg>
+${trackpoints}
+</trkseg></trk>
+</gpx>`;
+}
+
+// ---------------------------------------------------------------------------
 // Server-side track parsing for the ingestion spine.
 //
 // `src/lib/utils.ts` also parses GPX/TCX, but through `DOMParser`, which only
