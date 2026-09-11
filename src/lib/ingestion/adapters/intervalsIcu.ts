@@ -23,6 +23,7 @@ import type {
   SourceActivitySummary,
   SourceCredentials,
 } from "@/app/types";
+import { looksIndoor, MIN_INGESTED_DISTANCE_METERS } from "../sportPolicy";
 
 /**
  * intervals.icu adapter \u2014 the first implementation of `ActivitySource`.
@@ -44,8 +45,10 @@ function toAuth(credentials: SourceCredentials): IntervalsAuth {
  * Map intervals.icu activity types onto our canonical sports. The source values
  * are the documented `SportInfo.type` enum from the OpenAPI spec.
  *
- * VirtualRun is mapped to `other`: treadmill and virtual runs carry no useful
- * GPS track, and the spine skips non-foot-GPS sports.
+ * Mapping is only translation — whether a sport is *ingested* is decided in one
+ * place, `sportPolicy.ts`. `VirtualRun` is mapped to `other` here and rejected
+ * there; `Walk`/`Hike` still translate cleanly so that re-enabling them later
+ * is a change to the policy list alone.
  */
 function toCanonicalSport(type: string | undefined): CanonicalSport {
   switch (type) {
@@ -57,9 +60,32 @@ function toCanonicalSport(type: string | undefined): CanonicalSport {
       return "walk";
     case "Hike":
       return "hike";
+    // VirtualRun and everything else — including the indoor machines in the
+    // enum (Elliptical, StairStepper, Workout) — are not foot-outdoor sports.
     default:
       return "other";
   }
+}
+
+/**
+ * Did this happen indoors?
+ *
+ * `trainer` is the verified indicator on the `Activity` schema and the one that
+ * actually catches the case that matters: a Garmin treadmill run syncs as
+ * `type: "Run"`, not `VirtualRun`, so the sport label alone says nothing.
+ * `indoor` is read defensively — it is not a documented Activity property and
+ * is not requested, so it will normally be undefined (see `intervals.ts`).
+ */
+function isIndoor(activity: IntervalsActivity): boolean {
+  if (activity.trainer === true) return true;
+  if (activity.indoor === true) return true;
+  // Belt and braces: the sport label and upload source, judged by the shared
+  // policy so there is one definition of "indoor" in the codebase.
+  return looksIndoor({
+    sport: toCanonicalSport(activity.type),
+    sourceSport: activity.type,
+    uploadSource: activity.source,
+  });
 }
 
 /**
@@ -80,13 +106,27 @@ function toInstant(activity: IntervalsActivity): string {
 /**
  * Whether the activity is worth downloading a file for.
  *
- * `stream_types` is documented as a string array but its exact member values
- * are not in the spec, so this fails open: an unknown or absent list means we
- * try the download and let a missing track be skipped at ingest time.
+ * This used to fail open unconditionally, which is how treadmill runs got in:
+ * an activity with no stream list was downloaded regardless. It now fails
+ * CLOSED for anything indoor-looking and stays permissive only for activities
+ * that look outdoor:
+ *
+ *   indoor-looking            → false, whatever the stream list says
+ *   zero/near-zero distance   → false (nothing to draw)
+ *   stream list present       → must name a position stream
+ *   stream list absent        → true, and a missing track is caught after parse
+ *
+ * `stream_types` members are not enumerated in the OpenAPI document, so the
+ * name match is a heuristic — which is exactly why it is not the only check.
  */
 function hasTrack(activity: IntervalsActivity): boolean {
+  if (isIndoor(activity)) return false;
+
+  const distance = activity.distance ?? activity.icu_distance ?? 0;
+  if (distance < MIN_INGESTED_DISTANCE_METERS) return false;
+
   if (!activity.stream_types?.length) return true;
-  return activity.stream_types.some((stream) => /lat|position|gps/i.test(stream));
+  return activity.stream_types.some((stream) => /lat|lng|lon|position|gps|coord/i.test(stream));
 }
 
 function toSummary(activity: IntervalsActivity): SourceActivitySummary {
@@ -97,6 +137,8 @@ function toSummary(activity: IntervalsActivity): SourceActivitySummary {
     name: activity.name?.trim() || "intervals.icu activity",
     sourceSport: activity.type,
     sport: toCanonicalSport(activity.type),
+    indoor: isIndoor(activity),
+    uploadSource: activity.source,
     distanceMeters: Math.round(activity.distance ?? activity.icu_distance ?? 0),
     durationSeconds: Math.round(activity.moving_time ?? activity.elapsed_time ?? 0),
     elevationGainMeters: Math.round(activity.total_elevation_gain ?? 0),
@@ -219,6 +261,8 @@ export const intervalsIcuSource: ActivitySource = {
       timezone: summary.timezone,
       sport: summary.sport,
       sourceSport: summary.sourceSport,
+      indoor: summary.indoor,
+      uploadSource: summary.uploadSource,
       name: summary.name,
       // Provider summaries are authoritative where present; parsed values are
       // the fallback so a sparse summary still produces a usable activity.

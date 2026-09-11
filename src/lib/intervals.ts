@@ -21,6 +21,19 @@
  *                    :READ or :WRITE, comma separated
  *   rate limits      X-RateLimit-Limit / X-RateLimit-Remaining headers;
  *                    429 + Retry-After (seconds); also 10 req/s per IP
+ *   Activity.trainer boolean, on the `Activity` schema — the indoor/stationary
+ *                    marker (re-checked against the spec 2026-09-11)
+ *   Activity.source  enum STRAVA|UPLOAD|MANUAL|GARMIN_CONNECT|OAUTH_CLIENT|
+ *                    DROPBOX|POLAR|SUUNTO|COROS|WAHOO|ZWIFT|ZEPP|CONCEPT2|HUAWEI
+ *   SportInfo.type   enum incl. Run, TrailRun, VirtualRun, Walk, Hike, Ride —
+ *                    the value set `Activity.type` is drawn from
+ *
+ * NOT verified, and therefore not relied on:
+ *   Activity.indoor      `indoor` is a documented boolean on Workout/Event and a
+ *                        filterable `ActivityFilter.field_id`, but it is NOT a
+ *                        property of the `Activity` schema. Not requested.
+ *   stream_types members typed `string[]` with no documented values, so "which
+ *                        stream name means GPS" is a heuristic.
  *
  * Note the token response carries no refresh_token and no expiry: intervals.icu
  * issues long-lived bearer tokens. There is therefore no refresh path, and a
@@ -75,8 +88,33 @@ export type IntervalsActivity = {
   moving_time?: number;
   elapsed_time?: number;
   total_elevation_gain?: number;
+  /**
+   * Upload source. Verified enum (`Activity.source`): STRAVA, UPLOAD, MANUAL,
+   * GARMIN_CONNECT, OAUTH_CLIENT, DROPBOX, POLAR, SUUNTO, COROS, WAHOO, ZWIFT,
+   * ZEPP, CONCEPT2, HUAWEI.
+   */
   source?: string;
-  /** Present stream names; used to tell whether there is a GPS track at all. */
+  /**
+   * Indoor/stationary marker. VERIFIED: `trainer` is a documented boolean on
+   * the `Activity` schema. It is the only indoor indicator the Activity schema
+   * carries — a Garmin treadmill run arrives as `type: "Run"` with
+   * `trainer: true`, which is precisely the case a sport check alone misses.
+   */
+  trainer?: boolean;
+  /**
+   * NOT VERIFIED on `Activity`. The spec defines `indoor` on `Workout`/`Event`
+   * and lists `indoor` as a filterable `ActivityFilter.field_id`, but it is not
+   * a property of the `Activity` schema — so it is deliberately NOT requested
+   * in `INTERVALS_ACTIVITY_FIELDS` (an unknown name in `fields` is not worth
+   * risking a live sync over). It is read here only if the API ever returns it,
+   * which costs nothing and cannot invent data.
+   */
+  indoor?: boolean;
+  /**
+   * Present stream names; used to tell whether there is a GPS track at all.
+   * The spec types this as `string[]` with NO documented member values, so the
+   * GPS-stream name match below is a heuristic, not a verified contract.
+   */
   stream_types?: string[];
 };
 
@@ -97,6 +135,12 @@ export const INTERVALS_ACTIVITY_FIELDS = [
   "total_elevation_gain",
   "source",
   "stream_types",
+  // Indoor/stationary marker. Verified as a boolean on the `Activity` schema in
+  // the live OpenAPI document. Not a physiological metric: it says where the
+  // activity happened, not anything about the body, so it is inside the
+  // minimisation posture. Without it, treadmill runs that Garmin uploads as an
+  // ordinary `Run` are indistinguishable from outdoor runs.
+  "trainer",
 ] as const;
 
 function requireEnv(name: string): string {
