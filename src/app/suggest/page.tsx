@@ -9,6 +9,7 @@ import { termsAcknowledgement } from "@/lib/privacy";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "../types";
+import type { FamiliarityTarget } from "@/engine/familiarityReport";
 
 export default function SuggestPage() {
   const { user, loading: authLoading } = useAuth();
@@ -28,6 +29,8 @@ export default function SuggestPage() {
   const [selectedStartPoint, setSelectedStartPoint] = useState<[number, number] | null>(null);
   const [isSelectingStartPoint, setIsSelectingStartPoint] = useState(false);
   const [suggestDistance, setSuggestDistance] = useState(5);
+  const [familiarityMode, setFamiliarityMode] = useState<FamiliarityTarget>("mixed");
+  const [routeStyle, setRouteStyle] = useState<"mixed" | "road" | "trail">("mixed");
   const [preferQuiet, setPreferQuiet] = useState(true);
   const [preferGreen, setPreferGreen] = useState(false);
   const [elevationPreference, setElevationPreference] = useState<"any" | "hilly" | "flat">("any");
@@ -43,12 +46,12 @@ export default function SuggestPage() {
     return { totalRuns: routes.length, totalDistance: Math.round(totalDistance * 10) / 10, totalElevation: Math.round(totalElevation) };
   }, [routes]);
 
-  const { suggestedRoute, isSuggesting, suggestionError, getSuggestion, clearSuggestion } =
-    useRouteSuggestions(suggestDistance, false);
+  const { suggestedRoute, isSuggesting, suggestionError, suggestionFamiliarity, getSuggestion, clearSuggestion } =
+    useRouteSuggestions(suggestDistance, familiarityMode);
 
   useEffect(() => {
     setGenerationCount(0);
-  }, [selectedStartPoint, suggestDistance, preferQuiet, preferGreen, elevationPreference]);
+  }, [selectedStartPoint, suggestDistance, familiarityMode, routeStyle, preferQuiet, preferGreen, elevationPreference]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,6 +99,7 @@ export default function SuggestPage() {
     const directionShift = generationCount % 4;
     setGenerationCount((count) => count + 1);
     getSuggestion(selectedStartPoint, routes, {
+      routeType: routeStyle,
       preferQuiet,
       preferGreen,
       elevationPreference,
@@ -175,8 +179,71 @@ export default function SuggestPage() {
                     onChange={e => setSuggestDistance(parseFloat(e.target.value))} className="w-full accent-primary" />
                 </div>
 
+                {/* How familiar should the route be? */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-medium text-on-surface-variant">Familiarity</span>
+                    <span className="text-[10px] text-on-surface-variant">
+                      {familiarityMode === "familiar"
+                        ? "80%+ ground you know"
+                        : familiarityMode === "unfamiliar"
+                          ? "20% or less run before"
+                          : "a bit of both"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+                    {[
+                      { value: "familiar", label: "Familiar" },
+                      { value: "mixed", label: "Mixed" },
+                      { value: "unfamiliar", label: "New ground" },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setFamiliarityMode(option.value as FamiliarityTarget)}
+                        className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                          familiarityMode === option.value
+                            ? "bg-secondary text-on-secondary"
+                            : "text-on-surface-variant hover:bg-surface-container"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {routes.length === 0 && (
+                    <p className="mt-1.5 text-[10px] text-on-surface-variant">
+                      Upload or sync some runs and familiarity is measured against them.
+                    </p>
+                  )}
+                </div>
+
                 {/* Route preferences */}
                 <div className="space-y-3">
+                  <div>
+                    <span className="text-xs font-medium text-on-surface-variant">Surface</span>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
+                      {[
+                        { value: "mixed", label: "Any" },
+                        { value: "road", label: "Road" },
+                        { value: "trail", label: "Trail" },
+                      ].map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setRouteStyle(option.value as typeof routeStyle)}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            routeStyle === option.value
+                              ? "bg-secondary text-on-secondary"
+                              : "text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <span className="text-xs font-medium text-on-surface-variant">Elevation</span>
                     <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-surface-container-high p-1">
@@ -269,6 +336,41 @@ export default function SuggestPage() {
                     {(suggestedRoute.distance / 1000).toFixed(1)} km
                     {` · +${Math.round(suggestedRoute.elevationGain || 0)}m estimated climb`}
                   </p>
+
+                  {suggestionFamiliarity && (
+                    <div
+                      className={`mt-3 rounded-xl px-3 py-2 border ${
+                        suggestionFamiliarity.withinTarget
+                          ? "bg-surface-container border-outline-variant/30"
+                          : "bg-error-container/30 border-error/30"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+                          Familiarity
+                        </span>
+                        <span className="text-xs font-extrabold text-on-surface">
+                          {suggestionFamiliarity.percent === null ? "not measured" : `${suggestionFamiliarity.percent}%`}
+                        </span>
+                      </div>
+                      {suggestionFamiliarity.percent !== null && (
+                        <div className="mt-1.5 h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+                          <div
+                            className={suggestionFamiliarity.withinTarget ? "h-full bg-secondary" : "h-full bg-error"}
+                            style={{ width: `${suggestionFamiliarity.percent}%` }}
+                          />
+                        </div>
+                      )}
+                      <p className="mt-1.5 text-xs text-on-surface-variant">{suggestionFamiliarity.message}</p>
+                      {!suggestionFamiliarity.withinTarget && suggestionFamiliarity.percent !== null && (
+                        <p className="mt-1 text-[10px] text-on-surface-variant">
+                          Asked for {suggestionFamiliarity.target === "unfamiliar" ? "new ground" : suggestionFamiliarity.target}
+                          {" "}({Math.round(suggestionFamiliarity.min * 100)}–{Math.round(suggestionFamiliarity.max * 100)}%).
+                          Try regenerating, a different distance, or another start point.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center gap-2">
                     <button onClick={handleGenerate} disabled={isSuggesting}
                       className="flex-1 py-2 bg-primary-container hover:bg-primary-container/70 text-on-primary-container rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
