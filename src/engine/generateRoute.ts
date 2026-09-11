@@ -6,6 +6,7 @@ import { buildFamiliarGraph, searchGraphLoops } from "./familiarityGraph";
 import { parseGpxToTrackPoints } from "./gpx";
 import {
   LOOP_SHAPE_LIMITS,
+  LOOP_SHAPE_PREFERENCES,
   type LoopShapeAssessment,
   assessLoopShape,
   scoreRoute,
@@ -51,9 +52,10 @@ function proposalCost(
 
   return (
     (shape.ok ? 0 : 1_000) +
-    shape.centerCrossPenalty * 400 +
-    shortfall(LOOP_SHAPE_LIMITS.minRadiusRatio, shape.minRadiusRatio) * 400 +
-    shortfall(LOOP_SHAPE_LIMITS.minAngularCoverage, shape.angularCoverage) * 400 +
+    shortfall(1, shape.roundness) * 600 +
+    shape.centerCrossPenalty * 200 +
+    shortfall(LOOP_SHAPE_PREFERENCES.minRadiusRatio, shape.minRadiusRatio) * 200 +
+    shortfall(LOOP_SHAPE_PREFERENCES.minAngularCoverage, shape.angularCoverage) * 200 +
     Math.max(0, shape.outAndBackRatio - LOOP_SHAPE_LIMITS.maxOutAndBackRatio) * 400 +
     Math.abs(loop.pathDistanceMeters - targetMeters) / 100 +
     loop.closureStitchMeters / 10
@@ -419,6 +421,7 @@ export function evaluateBuiltRoute(params: {
       unsafeRoads: traffic.unsafeRoads,
       closureErrorMeters,
       outAndBackRatio,
+      roundness: loopMetrics.roundness,
       angularCoverage: loopMetrics.angularCoverage,
       radialStdRatio: loopMetrics.radialStdRatio,
       minRadiusRatio: loopMetrics.minRadiusRatio,

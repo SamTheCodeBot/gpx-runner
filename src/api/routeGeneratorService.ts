@@ -51,6 +51,7 @@ export type RoundTripSuggestionResult = {
     directionBucket: number;
     directionPenalty: number;
     outAndBackRatio: number;
+    roundness: number;
     angularCoverage: number;
     minRadiusRatio: number;
     centerCrossPenalty: number;
@@ -263,6 +264,7 @@ export async function generateOpenRouteServiceRoundTrip(
             directionBucket,
             directionPenalty: dirPenalty,
             outAndBackRatio: quality.shape.outAndBackRatio,
+            roundness: quality.shape.roundness,
             angularCoverage: quality.shape.angularCoverage,
             minRadiusRatio: quality.shape.minRadiusRatio,
             centerCrossPenalty: quality.shape.centerCrossPenalty,
