@@ -9,7 +9,7 @@ import {
 } from "@/engine/familiarityReport";
 import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
-import type { GeneratedRoute, LatLng, RouteStyle } from "@/types";
+import type { GenerateRouteResult, GeneratedRoute, LatLng, RouteStyle } from "@/types";
 
 /**
  * Route suggestions.
@@ -48,7 +48,22 @@ const MAX_TRACKS = 150;
 const MAX_POINTS_PER_TRACK = 600;
 const MAX_TOTAL_POINTS = 30_000;
 
+/**
+ * How long the platform lets this function run. Without it Vercel applies its
+ * own default and kills the request with no body at all, which the client can
+ * only report as "timed out". 60 s is inside every current plan's ceiling.
+ */
+export const maxDuration = 60;
+
+/**
+ * Our own deadline, set well below `maxDuration` so the work is cut short by us
+ * — with a real answer and an honest message — rather than by the platform.
+ */
+const REQUEST_BUDGET_MS = 25_000;
+
 export async function POST(request: NextRequest) {
+  const deadlineAt = Date.now() + REQUEST_BUDGET_MS;
+
   try {
     const body = (await request.json()) as SuggestionRequest;
 
@@ -72,9 +87,10 @@ export async function POST(request: NextRequest) {
 
     const tracks = collectTracks(body, start, targetDistanceKm);
     const hasHistory = tracks.length > 0;
+    let engine: GenerateRouteResult | null = null;
 
     if (hasHistory) {
-      const engine = await generateTrainingRoutes({
+      engine = await generateTrainingRoutes({
         start,
         targetDistanceKm,
         toleranceKm: 0.5,
@@ -85,9 +101,18 @@ export async function POST(request: NextRequest) {
         routeStyle,
         preferQuiet,
         preferGreen,
+        deadlineAt,
       });
 
-      const best: GeneratedRoute | undefined = engine.routes[0] ?? engine.nearMisses[0];
+      // `routes` met every constraint. `nearMisses` met every *hard* one — real
+      // length, real loop shape, safe roads, routed by the provider — and only
+      // missed the familiarity band, so it comes back with the true percentage
+      // attached rather than as "no route found".
+      const candidate: GeneratedRoute | undefined = engine.routes[0] ?? engine.nearMisses[0];
+      // Belt and braces: geometry that no routing provider drew can cross
+      // houses and water, and is never shown to a runner.
+      const best = candidate?.routedByProvider ? candidate : undefined;
+
       if (best) {
         const report = buildFamiliarityReport({
           ratio: best.familiarityMeasured ? best.familiarityRatio : null,
@@ -109,7 +134,12 @@ export async function POST(request: NextRequest) {
           startPoint: [start.lng, start.lat] as [number, number],
           familiarity: report,
           traffic: best.traffic,
-          debug: { ...best.debug, tracksConsidered: tracks.length, rejectedCount: engine.rejectedCount },
+          debug: {
+            ...best.debug,
+            tracksConsidered: tracks.length,
+            rejectedCount: engine.rejectedCount,
+            timedOut: engine.timedOut,
+          },
           source: 'familiarity-engine',
         });
       }
@@ -128,13 +158,52 @@ export async function POST(request: NextRequest) {
       preferGreen,
       elevationPreference: body.elevationPreference ?? 'any',
       directionShift: Number.isFinite(body.directionShift) ? Number(body.directionShift) : 0,
+      deadlineAt,
     });
 
     const best = result.routes[0];
     if (!best) {
+      // Last resort: a loop the familiarity engine actually built and the
+      // provider actually drew — right shape, safe roads — that simply came out
+      // the wrong length. Offered as what it is, never as a match.
+      const salvage = engine?.bestEffort.find((route) => route.routedByProvider);
+      if (salvage) {
+        const report = buildFamiliarityReport({
+          ratio: salvage.familiarityMeasured ? salvage.familiarityRatio : null,
+          target,
+          hasHistory: salvage.familiarityMeasured,
+        });
+
+        return NextResponse.json({
+          coordinates: salvage.geometry.map((point) => [point.lng, point.lat] as [number, number]),
+          distance: salvage.distanceMeters,
+          elevationGain: salvage.elevationGainMeters ?? 0,
+          samples: salvage.geometry.map((point) => ({
+            coordinate: [point.lng, point.lat] as [number, number],
+            elevation: point.elevation,
+          })),
+          name: routeName(target, salvage.distanceMeters),
+          isRoundTrip: true,
+          type: routeStyle,
+          startPoint: [start.lng, start.lat] as [number, number],
+          familiarity: report,
+          traffic: salvage.traffic,
+          matchedRequest: false,
+          notice:
+            `No loop of ${targetDistanceKm.toFixed(1)} km could be found from this start point. ` +
+            `This is the closest real loop, at ${(salvage.distanceMeters / 1000).toFixed(1)} km.`,
+          debug: { ...salvage.debug, tracksConsidered: tracks.length, bestEffort: true },
+          source: 'familiarity-engine-best-effort',
+        });
+      }
+
+      // Nothing survived. Loop shape and road safety are not negotiable, so an
+      // honest refusal is the right answer here — but say which it was.
       const message = result.unsafeRejectedCount > 0
         ? 'No route found that avoids the highest-traffic roads from this start point.'
-        : 'No loop route found from this start point.';
+        : Date.now() >= deadlineAt
+          ? 'Ran out of time looking for a loop from this start point. Please try again.'
+          : 'No loop route found from this start point.';
       return NextResponse.json({ error: message }, { status: 422 });
     }
 

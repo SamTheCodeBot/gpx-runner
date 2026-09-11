@@ -145,3 +145,47 @@ export function simplifyByDistance(points: LatLng[], minStepMeters = 18): LatLng
 export function canonicalPointKey(point: LatLng, decimals = 4): string {
   return `${point.lat.toFixed(decimals)}:${point.lng.toFixed(decimals)}`;
 }
+
+/**
+ * The longest straight hop between two consecutive points of a polyline.
+ *
+ * A provider-routed line bends with the road, so its steps stay short. A line
+ * that was stitched shut by hand, or drawn straight between waypoints, shows
+ * up here as one long jump — which is exactly the "over houses and water"
+ * failure. Used as evidence that geometry came back from the router.
+ */
+export function maxPointGapMeters(points: LatLng[]): number {
+  let worst = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const gap = haversineMeters(points[i - 1], points[i]);
+    if (gap > worst) worst = gap;
+  }
+  return worst;
+}
+
+/**
+ * Points taken at even arc-length intervals along a polyline, endpoints kept.
+ * `count` is the number of interior points asked for.
+ */
+export function sampleAlongPolyline(points: LatLng[], count: number): LatLng[] {
+  if (points.length < 2 || count <= 0) return [];
+
+  const cumulative = [0];
+  for (let i = 1; i < points.length; i += 1) {
+    cumulative.push(cumulative[i - 1] + haversineMeters(points[i - 1], points[i]));
+  }
+
+  const total = cumulative[cumulative.length - 1];
+  if (total <= 0) return [];
+
+  const sampled: LatLng[] = [];
+  let cursor = 1;
+
+  for (let n = 1; n <= count; n += 1) {
+    const wanted = (total * n) / (count + 1);
+    while (cursor < cumulative.length - 1 && cumulative[cursor] < wanted) cursor += 1;
+    sampled.push(points[cursor]);
+  }
+
+  return sampled;
+}

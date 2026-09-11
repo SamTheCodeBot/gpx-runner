@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
-import { buildLoopWaypointCandidates } from "./candidates";
+import { buildLoopWaypointCandidates, type CandidateWaypoints } from "./candidates";
 import { familiarityRangeForMode } from "./config";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "./familiarity";
-import { buildFamiliarGraph, findGraphLoops, routeDistanceOnGraph } from "./familiarityGraph";
+import { buildFamiliarGraph, searchGraphLoops } from "./familiarityGraph";
 import { parseGpxToTrackPoints } from "./gpx";
 import {
-  computeClosureErrorMeters,
-  computeLoopShapeMetrics,
-  computeOutAndBackRatio,
+  LOOP_SHAPE_LIMITS,
+  type LoopShapeAssessment,
+  assessLoopShape,
   scoreRoute,
 } from "./scoring/quality";
 import { evaluateTrafficSafety } from "./scoring/traffic";
@@ -21,10 +21,50 @@ import {
   RouteTrafficSummary,
 } from "../types";
 
+/** Default wall-clock budget for a whole generation, if the caller sets none. */
+export const DEFAULT_GENERATE_BUDGET_MS = 25_000;
+/** Slice of the remaining budget the graph search may spend, and its ceiling. */
+const GRAPH_BUDGET_FRACTION = 0.2;
+const GRAPH_BUDGET_MAX_MS = 2_500;
+const GRAPH_BUDGET_MIN_MS = 150;
+/** Head-room kept back so the answer can still be scored and assembled. */
+const ASSEMBLY_RESERVE_MS = 1_200;
+/** Below this there is no point starting another provider batch. */
+const MIN_PROVIDER_BATCH_MS = 1_500;
+const BATCH_SIZE = 3;
+/** How many loops to ask the graph search for before picking the roundest. */
+const GRAPH_PROPOSAL_POOL = 400;
+
+/**
+ * How poor a proposal is as the *shape* of a run, before a provider is paid to
+ * draw it. Routing cannot rescue a scribble: the provider follows the waypoints
+ * it is given, so a proposal that crosses its own middle produces a route that
+ * crosses its own middle. Ranking here decides which handful of proposals are
+ * worth a call.
+ */
+function proposalCost(
+  candidate: { loop: { pathDistanceMeters: number; closureStitchMeters: number }; shape: LoopShapeAssessment },
+  targetMeters: number,
+): number {
+  const { shape, loop } = candidate;
+  const shortfall = (limit: number, value: number) => Math.max(0, limit - value);
+
+  return (
+    (shape.ok ? 0 : 1_000) +
+    shape.centerCrossPenalty * 400 +
+    shortfall(LOOP_SHAPE_LIMITS.minRadiusRatio, shape.minRadiusRatio) * 400 +
+    shortfall(LOOP_SHAPE_LIMITS.minAngularCoverage, shape.angularCoverage) * 400 +
+    Math.max(0, shape.outAndBackRatio - LOOP_SHAPE_LIMITS.maxOutAndBackRatio) * 400 +
+    Math.abs(loop.pathDistanceMeters - targetMeters) / 100 +
+    loop.closureStitchMeters / 10
+  );
+}
+
 export async function generateRoutes(
   provider: RouteProvider,
   input: GenerateRouteInput,
 ): Promise<GenerateRouteResult> {
+  const deadlineAt = input.deadlineAt ?? Date.now() + DEFAULT_GENERATE_BUDGET_MS;
   const toleranceKm = input.toleranceKm ?? 0.5;
   const familiarityMode = input.familiarityMode ?? "mixed";
   const maxCandidates = input.maxCandidates ?? 20;
@@ -42,12 +82,27 @@ export async function generateRoutes(
   const familiarGraph = buildFamiliarGraph(parsedTracks, input.start);
 
   const accepted: GeneratedRoute[] = [];
-  /** Good runs that miss only the familiarity band — we still want to show one. */
+  /**
+   * Good runs that miss only the familiarity band — we still want to show one,
+   * with its true percentage. This is the engine's *only* best-effort bucket:
+   * length, loop shape and road safety are hard, so a route that fails those is
+   * not a near miss, it is not a route.
+   */
   const nearMisses: GeneratedRoute[] = [];
+  /**
+   * Every loop that cleared the non-negotiable gates — drawn by the provider,
+   * genuinely loop-shaped, safe — whatever its length or familiarity. Only the
+   * caller of last resort touches this, and only ever as "closest real loop",
+   * never as a match for what was asked.
+   */
+  const bestEffort: GeneratedRoute[] = [];
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
+  let timedOut = false;
 
   const collect = (built: EvaluatedRoute) => {
+    if (built.reasons.hardConstraintsOk) bestEffort.push(built.route);
+
     if (built.decision === "accept") {
       accepted.push(built.route);
       return;
@@ -57,85 +112,148 @@ export async function generateRoutes(
     if (built.reasons.familiarityOnly) nearMisses.push(built.route);
   };
 
+  /** Nothing that no routing provider drew ever leaves this function. */
+  const routedOnly = (routes: GeneratedRoute[]) => routes.filter((route) => route.routedByProvider);
+
   const finish = (): GenerateRouteResult => ({
-    routes: dedupeRoutes(accepted).sort(byDistanceThenScore(targetMeters)).slice(0, alternatives),
-    nearMisses: dedupeRoutes(nearMisses)
-      .sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters))
-      .slice(0, alternatives),
+    routes: routedOnly(dedupeRoutes(accepted).sort(byDistanceThenScore(targetMeters))).slice(0, alternatives),
+    nearMisses: routedOnly(
+      dedupeRoutes(nearMisses).sort(byFamiliarityDistance(targetFamiliarityRange, targetMeters)),
+    ).slice(0, alternatives),
+    bestEffort: routedOnly(dedupeRoutes(bestEffort).sort(byDistanceThenScore(targetMeters))).slice(
+      0,
+      alternatives,
+    ),
     rejectedCount,
     unsafeRejectedCount,
+    timedOut,
   });
 
-  const graphLoops =
-    familiarityMode !== "new" && parsedTracks.length > 0
-      ? findGraphLoops(familiarGraph, targetMeters, toleranceMeters, Math.max(10, alternatives * 8))
-      : [];
+  /**
+   * Routes a batch of waypoint proposals through the provider.
+   *
+   * Every route the engine can return is born here: the provider's geometry is
+   * the only geometry that follows real ways, so it is the only geometry that
+   * ever reaches a runner. Each call is given what is left of the deadline,
+   * and the fan-out stops when there is no longer time for another batch.
+   */
+  const routeCandidates = async (
+    candidates: CandidateWaypoints[],
+    source: GeneratedRoute["source"],
+  ): Promise<void> => {
+    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= MIN_PROVIDER_BATCH_MS) {
+        timedOut = true;
+        return;
+      }
 
-  for (const geometry of graphLoops) {
-    collect(
-      evaluateBuiltRoute({
-        geometry,
-        distanceMeters: routeDistanceOnGraph(geometry),
-        source: "familiar-graph",
-        seed: "graph-loop",
-        input,
-        familiarityIndex,
-        targetMeters,
-        targetFamiliarityRange,
-      }),
-    );
-  }
+      const batch = candidates.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (candidate) => {
+          const providerResult = await provider.route({
+            coordinates: [input.start, ...candidate.waypoints, input.start],
+            routeStyle: input.routeStyle,
+            preferQuiet: input.preferQuiet,
+            preferGreen: input.preferGreen,
+            timeoutMs: Math.max(1_000, remaining - ASSEMBLY_RESERVE_MS),
+          });
+          if (!providerResult || providerResult.geometry.length < 2) return null;
 
-  if (accepted.length >= alternatives) return finish();
+          return evaluateBuiltRoute({
+            geometry: providerResult.geometry,
+            requestedWaypoints: candidate.waypoints,
+            distanceMeters: providerResult.distanceMeters,
+            elevationGainMeters: providerResult.elevationGainMeters,
+            extras: providerResult.extras,
+            source,
+            seed: candidate.seed,
+            input,
+            familiarityIndex,
+            targetMeters,
+            targetFamiliarityRange,
+          });
+        }),
+      );
 
-  const candidateWaypoints = buildLoopWaypointCandidates(
-    input.start,
-    targetMeters,
-    Math.min(maxCandidates, familiarityMode === "familiar" ? 12 : 20),
-    familiarityMode,
-    parsedTracks,
+      for (const built of results) {
+        if (!built) rejectedCount += 1;
+        else collect(built);
+      }
+
+      if (accepted.length >= alternatives) return;
+    }
+  };
+
+  // ── 1. The runner's own ground ─────────────────────────────────────────────
+  // The graph search only proposes where to go. It works on 11 m-quantised GPS
+  // history and closes its loops with a straight stitch, so its own geometry is
+  // not routable — we take waypoints off it and let the provider draw the line.
+  const graphBudgetMs = Math.min(
+    GRAPH_BUDGET_MAX_MS,
+    Math.max(0, (deadlineAt - Date.now() - ASSEMBLY_RESERVE_MS) * GRAPH_BUDGET_FRACTION),
   );
 
-  const BATCH_SIZE = 3;
-  for (let i = 0; i < candidateWaypoints.length; i += BATCH_SIZE) {
-    const batch = candidateWaypoints.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map(async (candidate) => {
-        const requestPoints = [input.start, ...candidate.waypoints, input.start];
-        const providerResult = await provider.route({
-          coordinates: requestPoints,
-          routeStyle: input.routeStyle,
-          preferQuiet: input.preferQuiet,
-          preferGreen: input.preferGreen,
-        });
-        if (!providerResult || providerResult.geometry.length < 2) {
-          return { candidate, built: null };
-        }
-        const built = evaluateBuiltRoute({
-          geometry: providerResult.geometry,
-          distanceMeters: providerResult.distanceMeters,
-          elevationGainMeters: providerResult.elevationGainMeters,
-          extras: providerResult.extras,
-          source: "provider",
-          seed: candidate.seed,
-          input,
-          familiarityIndex,
-          targetMeters,
-          targetFamiliarityRange,
-        });
-        return { candidate, built };
-      }),
-    );
+  const graphSearch =
+    familiarityMode !== "new" && parsedTracks.length > 0 && graphBudgetMs >= GRAPH_BUDGET_MIN_MS
+      ? searchGraphLoops(familiarGraph, targetMeters, toleranceMeters, {
+          // Ask widely, then route only the roundest. The search finds loops of
+          // the right *length* quickly, but plenty of them are scribbles that
+          // weave back across their own middle; asking for 24 and routing all
+          // of them spent the whole provider budget on candidates the shape
+          // gate was always going to throw away. Widening the ask is cheap —
+          // 400 loops on a 2,537-node graph takes ~220 ms — and it is the only
+          // way a round one gets into the running at all.
+          maxResults: GRAPH_PROPOSAL_POOL,
+          budgetMs: graphBudgetMs,
+          waypointCount: waypointCountFor(targetMeters),
+        })
+      : null;
 
-    for (const { built } of results) {
-      if (!built) rejectedCount += 1;
-      else collect(built);
-    }
+  const graphCandidates: CandidateWaypoints[] = (graphSearch?.loops ?? [])
+    .filter((loop) => loop.waypoints.length >= 2)
+    .map((loop) => ({ loop, shape: assessLoopShape(loop.path, input.start, targetMeters) }))
+    .sort((a, b) => proposalCost(a, targetMeters) - proposalCost(b, targetMeters))
+    .slice(0, Math.max(3, alternatives * 2))
+    .map(({ loop }, index) => ({ seed: `graph-loop-${index}`, waypoints: loop.waypoints }));
 
-    if (accepted.length >= alternatives) break;
-  }
+  await routeCandidates(graphCandidates, "familiar-graph");
+  if (accepted.length >= alternatives) return finish();
+
+  // ── 2. Geometric loop candidates around the start ──────────────────────────
+  await routeCandidates(
+    buildLoopWaypointCandidates(
+      input.start,
+      targetMeters,
+      Math.min(maxCandidates, familiarityMode === "familiar" ? 12 : 20),
+      familiarityMode,
+      parsedTracks,
+    ),
+    "provider",
+  );
 
   return finish();
+}
+
+/**
+ * How many waypoints to pin a proposed loop down with.
+ *
+ * The provider takes the shortest way between consecutive waypoints, so every
+ * waypoint left out is licence to cut a corner. Measured against a street-grid
+ * router, a 5,001 m proposal came back as 2,797 m through 6 waypoints and
+ * 4,595 m through 22 — the loop was not being followed, it was being
+ * shortcut, and the runner would have been sold a 5 km route that is 2.8 km.
+ *
+ * So: roughly one every 250 m. The ceiling keeps the request well inside
+ * openrouteservice's 50-coordinate limit for a directions call, counting the
+ * start at both ends.
+ */
+const METERS_PER_WAYPOINT = 250;
+const MIN_WAYPOINTS = 6;
+const MAX_WAYPOINTS = 24;
+
+export function waypointCountFor(targetMeters: number): number {
+  return Math.max(MIN_WAYPOINTS, Math.min(MAX_WAYPOINTS, Math.round(targetMeters / METERS_PER_WAYPOINT)));
 }
 
 function byDistanceThenScore(targetMeters: number) {
@@ -174,11 +292,32 @@ export type EvaluatedRoute = {
     unsafeRoads: boolean;
     /** True when familiarity is the only thing standing between this route and acceptance. */
     familiarityOnly: boolean;
+    /**
+     * True when every constraint that is never negotiable holds: the geometry
+     * came from the router, it is a loop of the right shape, and it is safe.
+     * Such a route is runnable even if it is the wrong length or the wrong
+     * familiarity, which is what makes it usable as a last resort.
+     */
+    hardConstraintsOk: boolean;
   };
 };
 
+/**
+ * Judges one routed candidate.
+ *
+ * Hard constraints — never relaxed, on any path, to avoid an empty answer:
+ *   distance within tolerance, loop shape (`assessLoopShape`), road safety,
+ *   and the geometry having come from the routing provider at all.
+ *
+ * Soft constraint — the only one:
+ *   the familiarity band. A route that clears every hard gate and misses only
+ *   this is a *near miss*, returned with its measured percentage attached so
+ *   the runner is told the truth rather than shown nothing.
+ */
 export function evaluateBuiltRoute(params: {
   geometry: GenerateRouteInput["start"][];
+  /** The waypoints the provider was asked to visit, when this came from a request. */
+  requestedWaypoints?: GenerateRouteInput["start"][];
   distanceMeters: number;
   elevationGainMeters?: number;
   extras?: RouteProviderExtras;
@@ -205,9 +344,8 @@ export function evaluateBuiltRoute(params: {
 
   familiarityRatio = Math.max(0, Math.min(1, familiarityRatio));
 
-  const outAndBackRatio = computeOutAndBackRatio(segments);
-  const closureErrorMeters = computeClosureErrorMeters(loopGeometry);
-  const loopMetrics = computeLoopShapeMetrics(loopGeometry, params.input.start, params.targetMeters);
+  const shape = assessLoopShape(loopGeometry, params.input.start, params.targetMeters);
+  const { ok: loopOk, outAndBackRatio, closureErrorMeters, ...loopMetrics } = shape;
 
   const traffic: RouteTrafficSummary = evaluateTrafficSafety({
     distanceMeters: params.distanceMeters,
@@ -221,13 +359,6 @@ export function evaluateBuiltRoute(params: {
   const familiarityOk =
     !hasFamiliarData ||
     (familiarityRatio >= params.targetFamiliarityRange.min && familiarityRatio <= params.targetFamiliarityRange.max);
-
-  const loopOk =
-    outAndBackRatio <= 0.2 &&
-    closureErrorMeters <= 50 &&
-    loopMetrics.angularCoverage >= 0.72 &&
-    loopMetrics.minRadiusRatio >= 0.46 &&
-    loopMetrics.centerCrossPenalty <= 0.12;
 
   const { score: shapeScore, debug } = scoreRoute({
     distanceMeters: params.distanceMeters,
@@ -256,6 +387,8 @@ export function evaluateBuiltRoute(params: {
     segments,
     familiarityRatio,
     familiarityMeasured: hasFamiliarData,
+    // Only ever built from a provider response; graph geometry never gets here.
+    routedByProvider: true,
     traffic,
     score,
     debug: {
@@ -279,10 +412,15 @@ export function evaluateBuiltRoute(params: {
   };
 
   // ── Provider sanity check ──────────────────────────────────────────────────
-  // If the provider returned a route that is less than 40% of the target distance
-  // AND less than 1.15× the straight-line waypoint path, it may have ignored the
-  // intermediate waypoints and returned a near-straight-line shortcut.
-  const waypointPathDistance = computeStraightLineDistance([params.input.start, ...params.geometry.slice(0, -1)]);
+  // Every waypoint we asked for has to be visited, so the route can never be
+  // shorter than the straight lines between them. Coming back at barely that
+  // length means the provider dropped the waypoints and answered with a
+  // shortcut — a different route from the one that was proposed.
+  const waypointPathDistance = computeStraightLineDistance([
+    params.input.start,
+    ...(params.requestedWaypoints ?? params.geometry.slice(0, -1)),
+    params.input.start,
+  ]);
   const providerShortcut =
     params.distanceMeters < waypointPathDistance * 1.15 && params.distanceMeters < params.targetMeters * 0.4;
 
@@ -293,6 +431,7 @@ export function evaluateBuiltRoute(params: {
     safetyOk,
     unsafeRoads: traffic.unsafeRoads,
     familiarityOnly: !familiarityOk && distanceOk && !providerShortcut && loopOk && safetyOk,
+    hardConstraintsOk: loopOk && safetyOk && !providerShortcut,
   };
 
   if (providerShortcut) {
