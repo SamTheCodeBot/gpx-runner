@@ -1,8 +1,14 @@
 import { generateRoutes } from "../engine/generateRoute";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
+import { assessLoopShape } from "../engine/scoring/quality";
 import { evaluateTrafficSafety } from "../engine/scoring/traffic";
 import { GenerateRouteInput, LatLng, RouteProviderResult } from "../types";
 import { haversineMeters } from "../engine/utils/geo";
+
+/** Head-room kept back so the answer can still be assembled before the deadline. */
+const ASSEMBLY_RESERVE_MS = 1_200;
+/** Below this there is no point starting another round-trip batch. */
+const MIN_BATCH_MS = 1_500;
 
 export async function generateTrainingRoutes(input: GenerateRouteInput) {
   const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
@@ -12,6 +18,8 @@ export async function generateTrainingRoutes(input: GenerateRouteInput) {
 export type RoundTripSuggestionInput = {
   start: LatLng;
   targetDistanceKm: number;
+  /** Epoch-ms the fan-out must finish by. Whatever was found by then is returned. */
+  deadlineAt?: number;
   toleranceKm?: number;
   alternatives?: number;
   routeStyle?: "road" | "mixed" | "trail";
@@ -42,6 +50,10 @@ export type RoundTripSuggestionResult = {
     elevationScore: number;
     directionBucket: number;
     directionPenalty: number;
+    outAndBackRatio: number;
+    angularCoverage: number;
+    minRadiusRatio: number;
+    centerCrossPenalty: number;
   };
 };
 
@@ -74,7 +86,7 @@ function angleDelta(a: number, b: number): number {
   return delta > 180 ? 360 - delta : delta;
 }
 
-function routeQuality(route: RouteProviderResult) {
+function routeQuality(route: RouteProviderResult, start: LatLng, targetMeters: number) {
   const points = route.geometry;
   let hairpins = 0;
   let tinyLoops = 0;
@@ -109,13 +121,21 @@ function routeQuality(route: RouteProviderResult) {
     }
   }
 
+  // The same hard loop-shape gate the familiarity engine applies. Without it
+  // this fallback path would happily hand back an out-and-back, which is the
+  // one thing a "loop from A back to A" must never be.
+  const shape = assessLoopShape(points, start, targetMeters);
+
   return {
     hairpins,
     tinyLoops,
     backtracks,
     ...evaluateTrafficSafety(route),
-    geometryPenalty: hairpins * 18 + tinyLoops * 28 + backtracks * 12,
-    geometryReject: hairpins >= 4 || tinyLoops >= 2 || backtracks >= 4,
+    shape,
+    geometryPenalty:
+      hairpins * 18 + tinyLoops * 28 + backtracks * 12 + Math.round(shape.outAndBackRatio * 200),
+    geometryReject: hairpins >= 4 || tinyLoops >= 2 || backtracks >= 4 || !shape.ok,
+    loopShapeReject: !shape.ok,
   };
 }
 
@@ -163,10 +183,12 @@ export async function generateOpenRouteServiceRoundTrip(
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = (input.toleranceKm ?? 0.5) * 1000;
   const alternatives = input.alternatives ?? 3;
+  const deadlineAt = input.deadlineAt ?? Number.POSITIVE_INFINITY;
   const accepted: RoundTripSuggestionResult[] = [];
   const closest: RoundTripSuggestionResult[] = [];
   let rejectedCount = 0;
   let unsafeRejectedCount = 0;
+  let outOfTime = false;
   const points = pointsForDistance(targetMeters);
   const seeds = shiftedSeeds(ROUND_TRIP_SEEDS, input.directionShift);
   const phases: Array<{
@@ -182,6 +204,12 @@ export async function generateOpenRouteServiceRoundTrip(
     let phaseHadResponse = false;
 
     for (let i = 0; i < phase.seeds.length; i += ROUND_TRIP_BATCH_SIZE) {
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= MIN_BATCH_MS) {
+        outOfTime = true;
+        break;
+      }
+
       const batch = phase.seeds.slice(i, i + ROUND_TRIP_BATCH_SIZE);
       const routes = await Promise.all(batch.map(async (seed) => {
         const route = await provider.roundTrip({
@@ -193,12 +221,13 @@ export async function generateOpenRouteServiceRoundTrip(
           preferQuiet: input.preferQuiet,
           preferGreen: input.preferGreen,
           requestMode: phase.requestMode,
+          timeoutMs: Number.isFinite(remaining) ? Math.max(1_000, remaining - ASSEMBLY_RESERVE_MS) : undefined,
         });
 
         if (!route || route.geometry.length < 2) return null;
 
         const distanceDeltaMeters = Math.abs(route.distanceMeters - targetMeters);
-        const quality = routeQuality(route);
+        const quality = routeQuality(route, input.start, targetMeters);
         const gain = Math.round(route.elevationGainMeters ?? 0);
         const elevScore = elevationScore(gain, input.targetDistanceKm, input.elevationPreference ?? "any");
         const directionBucket = directionBucketFromStart(input.start, route.geometry);
@@ -225,8 +254,14 @@ export async function generateOpenRouteServiceRoundTrip(
             elevationScore: elevScore,
             directionBucket,
             directionPenalty: dirPenalty,
+            outAndBackRatio: quality.shape.outAndBackRatio,
+            angularCoverage: quality.shape.angularCoverage,
+            minRadiusRatio: quality.shape.minRadiusRatio,
+            centerCrossPenalty: quality.shape.centerCrossPenalty,
           },
           reject: quality.geometryReject || quality.unsafeRoads,
+          // Hard gate: a shape-invalid route is not a fallback, it is not a route.
+          loopShapeReject: quality.loopShapeReject,
         };
       }));
 
@@ -237,7 +272,15 @@ export async function generateOpenRouteServiceRoundTrip(
         }
 
         phaseHadResponse = true;
-        const { reject, ...route } = result;
+        const { reject, loopShapeReject, ...route } = result;
+
+        // Never offered, not even as a "closest match": the runner asked for a
+        // loop, and this is not one.
+        if (loopShapeReject) {
+          rejectedCount += 1;
+          continue;
+        }
+
         closest.push(route);
         closest.sort((a, b) => {
           const scoreA = a.debug.directionPenalty + a.debug.distanceDeltaMeters + a.debug.qualityPenalty - a.debug.elevationScore;
@@ -256,7 +299,7 @@ export async function generateOpenRouteServiceRoundTrip(
       if (accepted.length > 0) break;
     }
 
-    if (accepted.length > 0 || phaseHadResponse) break;
+    if (accepted.length > 0 || phaseHadResponse || outOfTime) break;
   }
 
   accepted.sort((a, b) => {
