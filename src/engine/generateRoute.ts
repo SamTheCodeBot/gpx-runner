@@ -4,7 +4,12 @@ import { familiarityRangeForMode } from "./config";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "./familiarity";
 import { buildFamiliarGraph, searchGraphLoops } from "./familiarityGraph";
 import { parseGpxToTrackPoints } from "./gpx";
-import { assessLoopShape, scoreRoute } from "./scoring/quality";
+import {
+  LOOP_SHAPE_LIMITS,
+  type LoopShapeAssessment,
+  assessLoopShape,
+  scoreRoute,
+} from "./scoring/quality";
 import { evaluateTrafficSafety } from "./scoring/traffic";
 import { canonicalPointKey, computeStraightLineDistance, normalizeLoop, toSegments } from "./utils/geo";
 import {
@@ -27,6 +32,33 @@ const ASSEMBLY_RESERVE_MS = 1_200;
 /** Below this there is no point starting another provider batch. */
 const MIN_PROVIDER_BATCH_MS = 1_500;
 const BATCH_SIZE = 3;
+/** How many loops to ask the graph search for before picking the roundest. */
+const GRAPH_PROPOSAL_POOL = 400;
+
+/**
+ * How poor a proposal is as the *shape* of a run, before a provider is paid to
+ * draw it. Routing cannot rescue a scribble: the provider follows the waypoints
+ * it is given, so a proposal that crosses its own middle produces a route that
+ * crosses its own middle. Ranking here decides which handful of proposals are
+ * worth a call.
+ */
+function proposalCost(
+  candidate: { loop: { pathDistanceMeters: number; closureStitchMeters: number }; shape: LoopShapeAssessment },
+  targetMeters: number,
+): number {
+  const { shape, loop } = candidate;
+  const shortfall = (limit: number, value: number) => Math.max(0, limit - value);
+
+  return (
+    (shape.ok ? 0 : 1_000) +
+    shape.centerCrossPenalty * 400 +
+    shortfall(LOOP_SHAPE_LIMITS.minRadiusRatio, shape.minRadiusRatio) * 400 +
+    shortfall(LOOP_SHAPE_LIMITS.minAngularCoverage, shape.angularCoverage) * 400 +
+    Math.max(0, shape.outAndBackRatio - LOOP_SHAPE_LIMITS.maxOutAndBackRatio) * 400 +
+    Math.abs(loop.pathDistanceMeters - targetMeters) / 100 +
+    loop.closureStitchMeters / 10
+  );
+}
 
 export async function generateRoutes(
   provider: RouteProvider,
@@ -165,7 +197,14 @@ export async function generateRoutes(
   const graphSearch =
     familiarityMode !== "new" && parsedTracks.length > 0 && graphBudgetMs >= GRAPH_BUDGET_MIN_MS
       ? searchGraphLoops(familiarGraph, targetMeters, toleranceMeters, {
-          maxResults: Math.max(3, alternatives * 2),
+          // Ask widely, then route only the roundest. The search finds loops of
+          // the right *length* quickly, but plenty of them are scribbles that
+          // weave back across their own middle; asking for 24 and routing all
+          // of them spent the whole provider budget on candidates the shape
+          // gate was always going to throw away. Widening the ask is cheap —
+          // 400 loops on a 2,537-node graph takes ~220 ms — and it is the only
+          // way a round one gets into the running at all.
+          maxResults: GRAPH_PROPOSAL_POOL,
           budgetMs: graphBudgetMs,
           waypointCount: waypointCountFor(targetMeters),
         })
@@ -173,7 +212,10 @@ export async function generateRoutes(
 
   const graphCandidates: CandidateWaypoints[] = (graphSearch?.loops ?? [])
     .filter((loop) => loop.waypoints.length >= 2)
-    .map((loop, index) => ({ seed: `graph-loop-${index}`, waypoints: loop.waypoints }));
+    .map((loop) => ({ loop, shape: assessLoopShape(loop.path, input.start, targetMeters) }))
+    .sort((a, b) => proposalCost(a, targetMeters) - proposalCost(b, targetMeters))
+    .slice(0, Math.max(3, alternatives * 2))
+    .map(({ loop }, index) => ({ seed: `graph-loop-${index}`, waypoints: loop.waypoints }));
 
   await routeCandidates(graphCandidates, "familiar-graph");
   if (accepted.length >= alternatives) return finish();
@@ -193,9 +235,25 @@ export async function generateRoutes(
   return finish();
 }
 
-/** Enough waypoints to hold the provider to the proposed loop, not so many that it cannot route. */
-function waypointCountFor(targetMeters: number): number {
-  return Math.max(4, Math.min(10, Math.round(targetMeters / 800)));
+/**
+ * How many waypoints to pin a proposed loop down with.
+ *
+ * The provider takes the shortest way between consecutive waypoints, so every
+ * waypoint left out is licence to cut a corner. Measured against a street-grid
+ * router, a 5,001 m proposal came back as 2,797 m through 6 waypoints and
+ * 4,595 m through 22 — the loop was not being followed, it was being
+ * shortcut, and the runner would have been sold a 5 km route that is 2.8 km.
+ *
+ * So: roughly one every 250 m. The ceiling keeps the request well inside
+ * openrouteservice's 50-coordinate limit for a directions call, counting the
+ * start at both ends.
+ */
+const METERS_PER_WAYPOINT = 250;
+const MIN_WAYPOINTS = 6;
+const MAX_WAYPOINTS = 24;
+
+export function waypointCountFor(targetMeters: number): number {
+  return Math.max(MIN_WAYPOINTS, Math.min(MAX_WAYPOINTS, Math.round(targetMeters / METERS_PER_WAYPOINT)));
 }
 
 function byDistanceThenScore(targetMeters: number) {
