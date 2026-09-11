@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, Polyline, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import BaseMapLayer from "./BaseMapLayer";
 import L from "leaflet";
 // Use canvas renderer for much faster rendering of many polylines
 const canvasRenderer = L.canvas({ padding: 0.5 });
@@ -640,13 +641,7 @@ export default function Map({
       dragging={!isSelectingStartPoint}
       renderer={canvasRenderer}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url={darkMode
-          ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        }
-      />
+      <BaseMapLayer darkMode={darkMode} />
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapResizeHandler />

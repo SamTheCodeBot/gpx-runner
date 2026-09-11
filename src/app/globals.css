@@ -139,6 +139,13 @@ body {
 .leaflet-shadow-pane { z-index: 2 !important; }
 .leaflet-tile-pane { z-index: 1 !important; }
 
+/* Dark-mode tint for the raster fallback basemap (vector style has its own dark theme) */
+.basemap-raster-dark { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9); }
+
+/* MapLibre basemap canvas sits in the Leaflet tile pane */
+.leaflet-maplibre-gl-pane { z-index: 1 !important; }
+.leaflet-maplibre-gl-pane .maplibregl-map { pointer-events: none; }
+
 @keyframes slideIn {
   from { transform: translateX(-100%); }
   to { transform: translateX(0); }

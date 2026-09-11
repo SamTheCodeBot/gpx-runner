@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, Polyline, Marker, Popup, useMap } from "react-leaflet";
+import BaseMapLayer from "./BaseMapLayer";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -163,13 +164,7 @@ export default function MapAdmin({ routes, darkMode = true, clusteringEnabled = 
       scrollWheelZoom={true}
       attributionControl={false}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url={darkMode
-          ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        }
-      />
+      <BaseMapLayer darkMode={darkMode} />
       <MapBoundsController routes={routes} />
       <ClusterMarkers routes={routes} enabled={clusteringEnabled} />
       {routes.map((route) => (
