@@ -27,12 +27,16 @@ export function getBasemapProvider(): BasemapProvider {
   return configured && PROVIDERS.includes(configured) ? configured : "osm";
 }
 
-/** Vector style URL for the MapLibre basemap, or null when raster tiles are used. */
+/**
+ * Vector style URL for the MapLibre basemap, or null when raster tiles are used.
+ *
+ * These styles are served from our own `public/map-styles/` so they can be
+ * edited visually in Maputnik (https://maplibre.org/maputnik/) and committed
+ * back. They still pull tiles, fonts and sprites from OpenFreeMap.
+ */
 export function getVectorStyleUrl(darkMode: boolean): string | null {
   if (getBasemapProvider() !== "openfreemap") return null;
-  return darkMode
-    ? "https://tiles.openfreemap.org/styles/dark"
-    : "https://tiles.openfreemap.org/styles/positron";
+  return darkMode ? "/map-styles/gpx-dark.json" : "/map-styles/gpx-light.json";
 }
 
 /** Raster tile URL. Also used as the fallback when a vector basemap fails. */
@@ -64,6 +68,18 @@ export function getRasterTileUrl(darkMode: boolean): string {
 export function rasterHasDarkStyle(): boolean {
   const provider = getBasemapProvider();
   return provider === "stadia" || provider === "maptiler" || provider === "carto";
+}
+
+/**
+ * CSS class applied to raster tiles. Plain OSM tiles are far more colourful
+ * than the Positron-style basemap this app is designed around, so they get
+ * desaturated in light mode and inverted in dark mode. Route polylines are
+ * unaffected - the filter only applies to the tile images.
+ */
+export function getRasterFilterClass(darkMode: boolean): string | undefined {
+  if (rasterHasDarkStyle()) return undefined;
+  if (darkMode) return "basemap-raster-dark";
+  return getBasemapProvider() === "osm" ? "basemap-raster-muted" : undefined;
 }
 
 export function getRasterAttribution(): string {

@@ -5,10 +5,10 @@ import { TileLayer, useMap } from "react-leaflet";
 import type L from "leaflet";
 import {
   getRasterAttribution,
+  getRasterFilterClass,
   getRasterTileUrl,
   getVectorAttribution,
   getVectorStyleUrl,
-  rasterHasDarkStyle,
 } from "@/lib/basemap";
 
 /** Minimal shape of the MapLibre map exposed by the Leaflet plugin. */
@@ -139,7 +139,7 @@ export default function BaseMapLayer({ darkMode }: BaseMapLayerProps) {
       attribution={getRasterAttribution()}
       url={getRasterTileUrl(darkMode)}
       maxZoom={19}
-      className={darkMode && !rasterHasDarkStyle() ? "basemap-raster-dark" : undefined}
+      className={getRasterFilterClass(darkMode)}
     />
   );
 }

@@ -142,6 +142,9 @@ body {
 /* Dark-mode tint for the raster fallback basemap (vector style has its own dark theme) */
 .basemap-raster-dark { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9); }
 
+/* Desaturate plain OSM raster tiles towards the light Positron-style basemap */
+.basemap-raster-muted { filter: grayscale(0.92) brightness(1.06) contrast(0.88); }
+
 /* MapLibre basemap canvas sits in the Leaflet tile pane */
 .leaflet-maplibre-gl-pane { z-index: 1 !important; }
 .leaflet-maplibre-gl-pane .maplibregl-map { pointer-events: none; }
