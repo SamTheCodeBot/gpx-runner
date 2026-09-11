@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SIGNUP_DATA_SUMMARY } from "@/lib/privacy";
+import type { RunProvenance } from "@/lib/ingestion/activityMerge";
 
 interface IconProps {
   name: string;
@@ -45,6 +46,53 @@ export function StatCard({ label, value, unit, icon }: StatCardProps) {
   );
 }
 
+// ─── ProvenanceChip ──────────────────────────────────────────────────────────
+
+interface ProvenanceChipProps {
+  provenance: RunProvenance;
+  /** Other sources holding the same run, collapsed into this row. */
+  alsoFrom?: RunProvenance[];
+}
+
+/**
+ * Where a run came from: the owner's own GPX upload, or a provider sync.
+ *
+ * Deliberately the same pill the filter bar already uses — rounded-full, 9–10px
+ * bold, surface-container background — rather than a new component language.
+ * A synced run is tinted with the primary colour so it reads as "arrived by
+ * itself"; an upload stays neutral.
+ *
+ * When two records of one run were collapsed, this says so and names the other
+ * source. That is the only place the user is told a merge happened, so it must
+ * never be silent: both records still exist, and the one not shown is not gone.
+ */
+export function ProvenanceChip({ provenance, alsoFrom = [] }: ProvenanceChipProps) {
+  const synced = provenance.origin === "provider_sync";
+  const others = alsoFrom.map((source) => source.label).join(", ");
+  const title = others
+    ? `Shown from ${provenance.label}. The same run is also held from ${others} — both records are kept, nothing was deleted.`
+    : synced
+      ? `Synced from ${provenance.label}`
+      : "Uploaded by you";
+
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-0.5 shrink-0 px-1.5 py-px rounded-full text-[9px] font-bold leading-normal ${
+        synced
+          ? "bg-primary-container text-on-primary-container"
+          : "bg-surface-container-high text-on-surface-variant"
+      }`}
+    >
+      <Icon name={provenance.icon} className="text-[10px]" />
+      {provenance.label}
+      {alsoFrom.length > 0 && (
+        <span className="opacity-70 font-medium">+{alsoFrom.length}</span>
+      )}
+    </span>
+  );
+}
+
 // ─── RouteRow ────────────────────────────────────────────────────────────────
 
 interface GPXRoute {
@@ -56,6 +104,9 @@ interface GPXRoute {
   elevationGain: number;
   color?: string;
   type?: string;
+  /** Set by the unified read layer; absent on plain route documents. */
+  provenance?: RunProvenance;
+  alsoFrom?: RunProvenance[];
 }
 
 interface RouteRowProps {
@@ -94,11 +145,16 @@ export function RouteRow({
           {isFavorite && <Icon name="star" filled className="text-yellow-500 text-sm shrink-0" />}
           <p className="text-sm font-bold text-on-surface truncate">{route.name}</p>
         </div>
-        <p className="text-[10px] text-on-surface-variant mt-0.5">
-          {date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-          &nbsp;·&nbsp;{distKm} km&nbsp;·&nbsp;{elevM}m ↑&nbsp;
-          {route.type && <>·&nbsp;<span className={`capitalize ${route.type === "road" ? "text-pink-400" : route.type === "trail" ? "text-cyan-400" : "text-purple-400"}`}>{route.type}</span></>}
-        </p>
+        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+          <p className="text-[10px] text-on-surface-variant">
+            {date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+            &nbsp;·&nbsp;{distKm} km&nbsp;·&nbsp;{elevM}m ↑&nbsp;
+            {route.type && <>·&nbsp;<span className={`capitalize ${route.type === "road" ? "text-pink-400" : route.type === "trail" ? "text-cyan-400" : "text-purple-400"}`}>{route.type}</span></>}
+          </p>
+          {route.provenance && (
+            <ProvenanceChip provenance={route.provenance} alsoFrom={route.alsoFrom} />
+          )}
+        </div>
       </div>
       {/* Row action buttons — always visible when selected on mobile; hover-reveal on desktop */}
       <div className={`flex items-center gap-0.5 sm:opacity-0 transition-opacity supports-hover:hover:opacity-100 group-hover:sm:opacity-100 ${selected ? "opacity-100" : "opacity-0 sm:opacity-0"}`}>

@@ -4,9 +4,11 @@ import { useState } from "react";
 import { Icon, RouteRow } from "./ui";
 import { UploadRoutePrompt } from "./Sidebar";
 import type { GPXRoute } from "@/app/types";
+import type { UnifiedRun } from "@/lib/ingestion/activityMerge";
 
 interface RouteListProps {
-  filteredRoutes: GPXRoute[];
+  /** Unified runs: route documents plus the provenance the read layer attached. */
+  filteredRoutes: UnifiedRun[];
   selectedRoute: GPXRoute | null;
   searchQuery: string;
   onSearchChange: (q: string) => void;
