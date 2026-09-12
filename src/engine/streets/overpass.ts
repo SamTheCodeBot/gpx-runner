@@ -24,6 +24,11 @@ export const OVERPASS_TIMEOUT_SECONDS = 120;
  * feature: a circle is simply a polygon whose ring came from a radius. Asking
  * Overpass the same way for both is what keeps the street count the owner is
  * shown before creating a project identical to the one he gets after.
+ *
+ * Access is filtered in `isRunnableStreetWay` rather than in the query. A
+ * negated regex makes Overpass test every way it has already selected, and the
+ * five ways it removes around one town are not worth the extra work asked of a
+ * free shared service.
  */
 export function buildStreetQuery(scope: StreetScope): string {
   const highways = RUNNABLE_HIGHWAY_VALUES.join("|");
@@ -31,7 +36,7 @@ export function buildStreetQuery(scope: StreetScope): string {
 
   return [
     `[out:json][timeout:${OVERPASS_TIMEOUT_SECONDS}];`,
-    `way["highway"~"^(${highways})$"]["name"]["access"!~"^(private|no)$"](poly:"${poly}");`,
+    `way["highway"~"^(${highways})$"]["name"](poly:"${poly}");`,
     "out body geom;",
   ].join("");
 }
