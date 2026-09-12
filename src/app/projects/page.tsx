@@ -57,6 +57,7 @@ const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), 
 
 const DEFAULT_RADIUS_METERS = 3000;
 const PREVIEW_DEBOUNCE_MS = 700;
+const EMPTY_STREETS: Street[] = [];
 
 function formatKm(meters: number): string {
   return `${Math.round(meters / 100) / 10} km`;
@@ -129,7 +130,13 @@ export default function StreetProjectsPage() {
   }, [streetsById, familiarityIndex]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
-  const selectedStreets = selectedId ? streetsById[selectedId] ?? [] : [];
+  // Memoised because the map split below is the one genuinely expensive thing
+  // on this page: a fresh `[]` every render would redraw a whole town's streets
+  // on every keystroke.
+  const selectedStreets = useMemo(
+    () => (selectedId ? streetsById[selectedId] ?? EMPTY_STREETS : EMPTY_STREETS),
+    [selectedId, streetsById],
+  );
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
   const selectedPending = selectedId ? pendingById[selectedId] ?? null : null;
 

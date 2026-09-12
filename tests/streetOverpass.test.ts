@@ -15,10 +15,21 @@ import { FALKENBERG_HOME } from "./helpers/falkenbergStreets";
 describe("what we ask Overpass for", () => {
   const scope = circleScope(FALKENBERG_HOME, 3000);
 
-  it("asks by polygon, so a circle and a boundary are the same question", () => {
+  it("asks by bounding box, and lets the ring do the clipping in code", () => {
     const query = buildStreetQuery(scope);
-    assert.match(query, /poly:"/);
+    assert.match(query, /\(56\.\d+,12\.\d+,56\.\d+,12\.\d+\);/, "a box Overpass can answer from an index");
+    assert.doesNotMatch(query, /poly:/, "a hundred-edge polygon filter is how you earn a 504");
     assert.doesNotMatch(query, /around:/);
+  });
+
+  it("asks the same question for a boundary as for a circle", () => {
+    const asBoundary = boundaryScope(scope.ring, {
+      kind: "boundary",
+      osmId: 1,
+      osmType: "relation",
+      name: "Same shape",
+    });
+    assert.equal(buildStreetQuery(asBoundary), buildStreetQuery(scope), "one scope concept, one query");
   });
 
   it("asks only for named runnable streets, and for the geometry and nodes it needs", () => {
@@ -29,10 +40,9 @@ describe("what we ask Overpass for", () => {
     assert.match(query, /out body geom;/);
   });
 
-  it("keeps the polygon short enough to be polite about", () => {
-    const bigRing = circleScope(FALKENBERG_HOME, 12_000, 4000);
-    const coordinates = buildStreetQuery(bigRing).match(/poly:"([^"]+)"/)?.[1]?.split(" ") ?? [];
-    assert.ok(coordinates.length / 2 <= 180, `thinned to ${coordinates.length / 2} points`);
+  it("stays one short query however detailed the ring is", () => {
+    const detailed = circleScope(FALKENBERG_HOME, 12_000, 4000);
+    assert.ok(buildStreetQuery(detailed).length < 250, "a 4,000-point ring must not become a 4,000-point query");
   });
 
   it("asks which administrative areas contain a point", () => {

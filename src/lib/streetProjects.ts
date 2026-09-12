@@ -249,6 +249,49 @@ export async function adoptPendingAdditions(
   return { project: toSummary(fresh.id, fresh.data() as ProjectDoc), adopted };
 }
 
+/**
+ * Every project of one owner, gone.
+ *
+ * The street lists themselves are OSM's data, but *which* areas a person chose
+ * to chase, and when, is a map of where they live, work and travel. It goes
+ * with the rest on erasure.
+ */
+export async function deleteProjectsForOwner(ownerUid: string): Promise<number> {
+  const db = adminDb();
+  const snap = await db.collection(PROJECT_COLLECTION).where("ownerUid", "==", ownerUid).get();
+  let deleted = 0;
+
+  for (const doc of snap.docs) {
+    const chunks = await doc.ref.collection(INVENTORY_SUBCOLLECTION).get();
+    const batch = db.batch();
+    for (const chunk of chunks.docs) batch.delete(chunk.ref);
+    batch.delete(doc.ref);
+    await batch.commit();
+    deleted += 1;
+  }
+
+  return deleted;
+}
+
+/** Project records for a data export: the choices, not OSM's street geometry. */
+export async function exportProjectsForOwner(ownerUid: string): Promise<Record<string, unknown>[]> {
+  const snap = await adminDb().collection(PROJECT_COLLECTION).where("ownerUid", "==", ownerUid).get();
+
+  return snap.docs.map((doc) => {
+    const data = doc.data() as ProjectDoc;
+    return {
+      id: doc.id,
+      name: data.name,
+      createdAt: data.createdAt,
+      archivedAt: data.archivedAt ?? null,
+      scope: data.scope,
+      streetCount: data.streetCount,
+      totalMeters: data.totalMeters,
+      snapshotTakenAt: data.snapshotTakenAt,
+    };
+  });
+}
+
 export async function deleteProjectData(ownerUid: string, projectId: string): Promise<boolean> {
   const ref = adminDb().collection(PROJECT_COLLECTION).doc(projectId);
   const doc = await ref.get();

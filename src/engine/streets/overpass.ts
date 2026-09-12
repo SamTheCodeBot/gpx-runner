@@ -1,7 +1,7 @@
 import { LatLng } from "../../types";
 import { haversineMeters } from "../utils/geo";
 import { RUNNABLE_HIGHWAY_VALUES, type OsmWay } from "./inventory";
-import { overpassPolyString, type StreetScope } from "./scope";
+import { scopeBounds, type StreetScope } from "./scope";
 
 /**
  * Talking to Overpass: what to ask, and how to read the answer.
@@ -20,23 +20,29 @@ export const OVERPASS_TIMEOUT_SECONDS = 120;
 /**
  * Streets inside the scope polygon.
  *
- * `poly:` rather than `around:` because there is only one scope concept in this
- * feature: a circle is simply a polygon whose ring came from a radius. Asking
- * Overpass the same way for both is what keeps the street count the owner is
- * shown before creating a project identical to the one he gets after.
+ * Asked as a bounding box, answered as a polygon.
  *
- * Access is filtered in `isRunnableStreetWay` rather than in the query. A
- * negated regex makes Overpass test every way it has already selected, and the
- * five ways it removes around one town are not worth the extra work asked of a
- * free shared service.
+ * A `poly:` filter with a hundred-point ring makes Overpass test every way it
+ * selects against every edge, and around one Swedish town that reliably earns a
+ * 504 from a service other people are also using. A bounding box is an index
+ * lookup. The few extra ways in the corners cost nothing, because the ring is
+ * applied in `buildStreetInventory` anyway — which is also what keeps a circle
+ * and an administrative boundary the same single concept downstream.
+ *
+ * Access is filtered in `isRunnableStreetWay` rather than in the query, for the
+ * same reason: a negated regex makes Overpass test every way it has already
+ * selected, to remove five of them.
  */
 export function buildStreetQuery(scope: StreetScope): string {
   const highways = RUNNABLE_HIGHWAY_VALUES.join("|");
-  const poly = overpassPolyString(scope);
+  const bounds = scopeBounds(scope);
+  const box = [bounds.minLat, bounds.minLng, bounds.maxLat, bounds.maxLng]
+    .map((value) => value.toFixed(6))
+    .join(",");
 
   return [
     `[out:json][timeout:${OVERPASS_TIMEOUT_SECONDS}];`,
-    `way["highway"~"^(${highways})$"]["name"](poly:"${poly}");`,
+    `way["highway"~"^(${highways})$"]["name"](${box});`,
     "out body geom;",
   ].join("");
 }
