@@ -186,6 +186,20 @@ export type RouteProviderFailureSummary = {
   unauthorized: boolean;
 };
 
+/** A `round_trip` ask: one start point, a length and a seed, and no more control than that. */
+export type RoundTripRequest = {
+  start: LatLng;
+  targetDistanceMeters: number;
+  points?: number;
+  seed?: number;
+  routeStyle?: RouteStyle;
+  preferQuiet?: boolean;
+  preferGreen?: boolean;
+  requestMode?: "preferred" | "basic" | "basic-no-elevation";
+  /** Upper bound for this call, clamped to the provider's own timeout. */
+  timeoutMs?: number;
+};
+
 export interface RouteProvider {
   route(input: RouteRequest): Promise<RouteProviderResult | null>;
   /**
@@ -193,4 +207,9 @@ export interface RouteProvider {
    * test double can stay a two-line object.
    */
   takeFailures?(): RouteProviderFailure[];
+}
+
+/** A provider that can also be asked for a `round_trip`. */
+export interface RoundTripCapableProvider extends RouteProvider {
+  roundTrip(input: RoundTripRequest): Promise<RouteProviderResult | null>;
 }

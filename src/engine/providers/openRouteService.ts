@@ -1,7 +1,8 @@
 import {
   LatLng,
+  RoundTripCapableProvider,
+  RoundTripRequest,
   RouteExtraSummary,
-  RouteProvider,
   RouteProviderFailure,
   RouteProviderFailureKind,
   RouteProviderResult,
@@ -81,23 +82,12 @@ function describeError(error: unknown): string {
   return String(error);
 }
 
-type RoundTripInput = {
-  start: LatLng;
-  /** Upper bound for this call, clamped to the provider timeout. */
-  timeoutMs?: number;
-  targetDistanceMeters: number;
-  points?: number;
-  seed?: number;
-  routeStyle?: RouteStyle;
-  preferQuiet?: boolean;
-  preferGreen?: boolean;
-  requestMode?: "preferred" | "basic" | "basic-no-elevation";
-};
+type RoundTripInput = RoundTripRequest;
 
 /** How much of a provider error message is worth keeping. */
 const MAX_PROVIDER_MESSAGE_CHARS = 300;
 
-export class OpenRouteServiceProvider implements RouteProvider {
+export class OpenRouteServiceProvider implements RoundTripCapableProvider {
   /**
    * Why calls came back empty. Collapsing a 401, a 429 and "no route exists"
    * into the same `null` is what made this provider undiagnosable, so every

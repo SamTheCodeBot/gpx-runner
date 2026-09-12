@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
+import { ProviderBudget } from "@/engine/providers/budget";
 import { generateOpenRouteServiceRoundTrip, generateTrainingRoutes } from "@/api/routeGeneratorService";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "@/engine/familiarity";
 import {
@@ -93,6 +94,10 @@ const REQUEST_BUDGET_MS = 25_000;
 
 export async function POST(request: NextRequest) {
   const deadlineAt = Date.now() + REQUEST_BUDGET_MS;
+  // One purse for the whole click. The engine draws first because a loop the
+  // runner knows beats anything the plain generator can offer; whatever it
+  // leaves is what the round-trip fallback has to work with.
+  const budget = new ProviderBudget();
 
   try {
     const body = (await request.json()) as SuggestionRequest;
@@ -133,13 +138,13 @@ export async function POST(request: NextRequest) {
           toleranceKm: 0.5,
           familiarityMode: toEngineMode(target),
           routeCollections: tracks,
-          maxCandidates: 18,
+          maxCandidates: 6,
           alternatives: 3,
           routeStyle,
           preferQuiet,
           preferGreen,
           deadlineAt,
-        })
+        }, budget)
       : null;
 
     if (engine) {
@@ -191,7 +196,7 @@ export async function POST(request: NextRequest) {
       elevationPreference: body.elevationPreference ?? 'any',
       directionShift: Number.isFinite(body.directionShift) ? Number(body.directionShift) : 0,
       deadlineAt,
-    });
+    }, budget);
 
     const fromFallback = (
       route: RoundTripSuggestionResult | undefined,

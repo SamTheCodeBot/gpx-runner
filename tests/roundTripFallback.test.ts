@@ -5,6 +5,7 @@ import { afterEach, describe, it } from "node:test";
 
 import type { NextRequest } from "next/server";
 
+import { resetRouteCache } from "@/engine/providers/budget";
 import { assessLoopShape } from "@/engine/scoring/quality";
 import { maxPointGapMeters, polylineDistanceMeters } from "@/engine/utils/geo";
 import type { LatLng } from "@/types";
@@ -58,6 +59,10 @@ let stub: OrsStub | null = null;
 afterEach(() => {
   stub?.restore();
   stub = null;
+  // Routed geometry is cached by waypoint signature so one click cannot pay for
+  // the same line twice. Left standing between cases, a route an earlier case
+  // proved would answer this one's empty provider, and a refusal would read 200.
+  resetRouteCache();
 });
 
 function roundTrip(overrides: Record<string, unknown> = {}) {

@@ -18,6 +18,73 @@ export type OrsStub = {
   restore: () => void;
 };
 
+/** A geojson directions response, shaped the way openrouteservice shapes one. */
+export function orsRouteBody(
+  geometry: LatLng[],
+  extras?: {
+    waytype?: Array<{ value: number; distance: number; amount: number }>;
+    noise?: Array<{ value: number; distance: number; amount: number }>;
+  },
+): string {
+  const distance = polylineDistanceMeters(geometry);
+  return JSON.stringify({
+    features: [
+      {
+        geometry: {
+          coordinates: geometry.map((point) => [point.lng, point.lat, point.elevation ?? 10]),
+        },
+        properties: {
+          summary: { distance },
+          ascent: 42,
+          descent: 42,
+          extras: {
+            waytype: { summary: extras?.waytype ?? [{ value: 6, distance, amount: 100 }] },
+            noise: { summary: extras?.noise ?? [{ value: 2, distance, amount: 100 }] },
+          },
+        },
+      },
+    ],
+  });
+}
+
+/**
+ * openrouteservice, answered by the test itself.
+ *
+ * The handler sees each request and returns the whole `Response`, so a test can
+ * route realistically, refuse with a 429, or answer a waypoint call differently
+ * from a `round_trip`. `stubOpenRouteService` is the fixed-geometry shorthand
+ * over the top of it.
+ */
+export function stubOpenRouteServiceWith(
+  handler: (call: OrsCall) => Response | Promise<Response>,
+): OrsStub {
+  const originalFetch = globalThis.fetch;
+  const calls: OrsCall[] = [];
+
+  globalThis.fetch = (async (input: any, init: any) => {
+    const url = typeof input === "string" ? input : String(input?.url ?? input);
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    const call: OrsCall = { url, body, isRoundTrip: Boolean(body?.options?.round_trip) };
+    calls.push(call);
+    return handler(call);
+  }) as typeof globalThis.fetch;
+
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+/** A refusal from openrouteservice, in its own error envelope. */
+export function orsErrorResponse(status: number, code: number, message: string): Response {
+  return new Response(JSON.stringify({ error: { code, message } }), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export function stubOpenRouteService(options: {
   geometry: LatLng[];
   waytype?: Array<{ value: number; distance: number; amount: number }>;

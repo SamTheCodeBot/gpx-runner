@@ -8,6 +8,7 @@ import type { NextRequest } from "next/server";
 import { polylineDistanceMeters } from "../src/engine/utils/geo";
 import { LatLng } from "../src/types";
 import { circleLoop, radiusForLoopDistance } from "./helpers/geometry";
+import { resetRouteCache } from "../src/engine/providers/budget";
 import { stubOpenRouteService, type OrsStub } from "./helpers/orsStub";
 
 // The endpoint reads the key only to decide whether it is configured; the stub
@@ -43,6 +44,10 @@ let stub: OrsStub | null = null;
 afterEach(() => {
   stub?.restore();
   stub = null;
+  // Routed geometry is cached by waypoint signature so one click cannot pay for
+  // the same line twice. Left standing between cases, a route an earlier case
+  // proved would answer this one's refusal stub and a 429 would read as 200.
+  resetRouteCache();
 });
 
 describe("POST /api/routes/suggest", () => {
