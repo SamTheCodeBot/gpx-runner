@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { buildLoopWaypointCandidates, type CandidateWaypoints } from "./candidates";
 import { familiarityRangeForMode } from "./config";
+import { familiarityBandDistance } from "./familiarityAdvice";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "./familiarity";
 import { buildFamiliarGraph, searchGraphLoops } from "./familiarityGraph";
 import { parseGpxToTrackPoints } from "./gpx";
@@ -13,8 +14,15 @@ import {
   scoreRoute,
 } from "./scoring/quality";
 import { evaluateTrafficSafety } from "./scoring/traffic";
-import { canonicalPointKey, computeStraightLineDistance, normalizeLoop, toSegments } from "./utils/geo";
 import {
+  canonicalPointKey,
+  computeStraightLineDistance,
+  haversineMeters,
+  normalizeLoop,
+  toSegments,
+} from "./utils/geo";
+import {
+  FamiliaritySearchEvidence,
   GenerateRouteInput,
   GenerateRouteResult,
   GeneratedRoute,
@@ -110,6 +118,31 @@ export async function generateRoutes(
   let unsafeRejectedCount = 0;
   let timedOut = false;
   const providerFailures: RouteProviderFailure[] = [];
+  /**
+   * What the search saw, kept whatever the verdict is. A refusal that claims
+   * the band is out of reach has to be able to say how many loops it drew and
+   * how far out it looked, or it is just a different way of saying "no".
+   */
+  const evidence: FamiliaritySearchEvidence = {
+    loopsMeasured: 0,
+    lowestFamiliarity: null,
+    highestFamiliarity: null,
+    searchRadiusMeters: 0,
+  };
+
+  const recordEvidence = (built: EvaluatedRoute) => {
+    // Only real loops count towards a claim about loops: an out-and-back or a
+    // shape the gate threw out says nothing about what loops are possible.
+    if (!built.reasons.hardConstraintsOk || !built.route.familiarityMeasured) return;
+
+    const ratio = built.route.familiarityRatio;
+    evidence.loopsMeasured += 1;
+    evidence.lowestFamiliarity = Math.min(evidence.lowestFamiliarity ?? ratio, ratio);
+    evidence.highestFamiliarity = Math.max(evidence.highestFamiliarity ?? ratio, ratio);
+    for (const point of built.route.geometry) {
+      evidence.searchRadiusMeters = Math.max(evidence.searchRadiusMeters, haversineMeters(input.start, point));
+    }
+  };
 
   /**
    * Drains whatever the provider recorded since the last batch.
@@ -126,6 +159,7 @@ export async function generateRoutes(
   let providerGaveUp = false;
 
   const collect = (built: EvaluatedRoute) => {
+    recordEvidence(built);
     if (built.reasons.hardConstraintsOk) bestEffort.push(built.route);
     if (built.reasons.outAndBackFallback) outAndBacks.push(built.route);
 
@@ -162,6 +196,7 @@ export async function generateRoutes(
     unsafeRejectedCount,
     timedOut,
     providerFailures: summarizeProviderFailures(providerFailures),
+    familiaritySearch: evidence,
   });
 
   /**
@@ -268,6 +303,7 @@ export async function generateRoutes(
       Math.min(maxCandidates, familiarityMode === "familiar" ? 12 : 20),
       familiarityMode,
       parsedTracks,
+      familiarityIndex,
     ),
     "provider",
   );
@@ -316,12 +352,6 @@ function byDistanceThenScore(targetMeters: number) {
   };
 }
 
-/** How far outside the requested familiarity band a route sits. */
-export function familiarityBandDistance(ratio: number, range: { min: number; max: number }): number {
-  if (ratio < range.min) return range.min - ratio;
-  if (ratio > range.max) return ratio - range.max;
-  return 0;
-}
 
 function byFamiliarityDistance(range: { min: number; max: number }, targetMeters: number) {
   return (a: GeneratedRoute, b: GeneratedRoute) => {

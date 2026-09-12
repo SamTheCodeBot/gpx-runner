@@ -3,6 +3,11 @@ import { ProviderBudget } from "@/engine/providers/budget";
 import { generateOpenRouteServiceRoundTrip, generateTrainingRoutes } from "@/api/routeGeneratorService";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "@/engine/familiarity";
 import {
+  decideFamiliarityOutcome,
+  describeUnreachableBand,
+  probeDistanceForBand,
+} from "@/engine/familiarityAdvice";
+import {
   buildFamiliarityReport,
   isFamiliarityTarget,
   toEngineMode,
@@ -22,6 +27,7 @@ import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engi
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
 import type { RoundTripSuggestionResult } from "@/api/routeGeneratorService";
 import type {
+  FamiliaritySearchEvidence,
   GeneratedRoute,
   LatLng,
   RouteProviderFailureSummary,
@@ -173,6 +179,31 @@ export async function POST(request: NextRequest) {
       candidates['loop-familiarity-missed'] = fromEngine(engine.nearMisses[0], 'familiarity-engine');
       candidates['loop-off-distance'] = fromEngine(engine.bestEffort[0], 'familiarity-engine-best-effort');
       candidates['out-and-back'] = fromEngine(engine.outAndBacks[0], 'familiarity-engine-out-and-back');
+
+      // ── Is the near miss worth showing, or is the band simply out of reach? ──
+      // Only the near-miss tier is asked this. A matched route has nothing to
+      // answer for, and the tiers below it are already labelled as compromises
+      // on length or shape rather than presented as what was asked for.
+      const nearMiss = candidates['loop-familiarity-missed'];
+      if (nearMiss && !candidates['loop-familiarity-matched']) {
+        const outcome = decideFamiliarityOutcome({
+          bestRatio: nearMiss.ratio,
+          target,
+          evidence: engine.familiaritySearch,
+        });
+
+        if (outcome === 'band-unreachable') {
+          return refuseUnreachableBand({
+            start,
+            target,
+            tracks,
+            targetDistanceKm,
+            evidence: engine.familiaritySearch,
+            measuredRatio: nearMiss.ratio,
+            budget,
+          });
+        }
+      }
     }
 
     // A loop the runner knows beats anything the plain generator can offer, so
@@ -233,6 +264,7 @@ export async function POST(request: NextRequest) {
         outOfTime: Date.now() >= deadlineAt || Boolean(engine?.timedOut),
         tracksConsidered: tracks.length,
         rejectedCount: fallback.rejectedCount + (engine?.rejectedCount ?? 0),
+        budget,
       });
     }
 
