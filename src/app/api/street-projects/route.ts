@@ -6,12 +6,15 @@ import {
   inventoryForScope,
   overpassErrorResponse,
   parseScopeInput,
+  requestDeadline,
   requireUid,
   resolveScope,
 } from "./shared";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+// Hobby kills a function at 60 s whatever a larger number here claims, so claim
+// what we actually get and keep our own deadline below it.
+export const maxDuration = 60;
 
 /** Every project the owner has, archived ones last. */
 export async function GET(req: NextRequest) {
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const scope = await resolveScope(parseScopeInput(body));
-    const inventory = await inventoryForScope(scope);
+    const inventory = await inventoryForScope(scope, { deadlineAt: requestDeadline() });
 
     if (inventory.streets.length === 0) {
       return NextResponse.json(

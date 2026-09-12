@@ -71,9 +71,25 @@ export function parseScopeInput(body: any): ScopeInput {
   };
 }
 
+/**
+ * How long a request may spend before it must answer with something.
+ *
+ * Vercel's Hobby plan kills a function at 60 s whatever `maxDuration` claims,
+ * and the Overpass client used to be willing to spend 785 s (four attempts at a
+ * 180 s timeout, plus 65 s of backoff). The platform always won that race, so
+ * the browser got a bare 504 with nothing in it explaining why. Our own
+ * deadline sits below the platform's so we lose the race deliberately, with a
+ * sentence the runner can act on.
+ */
+export const REQUEST_BUDGET_MS = 50_000;
+
+export function requestDeadline(): number {
+  return Date.now() + REQUEST_BUDGET_MS;
+}
+
 export async function inventoryForScope(
   scope: StreetScope,
-  options: { cachedOnly?: boolean; maxAgeMs?: number } = {},
+  options: { cachedOnly?: boolean; maxAgeMs?: number; deadlineAt?: number } = {},
 ): Promise<StreetInventory> {
   if (scopeAreaKm2(scope) > MAX_SCOPE_AREA_KM2) {
     throw new OverpassError("That area is too large to inventory in one project", "bad_response");

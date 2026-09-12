@@ -93,7 +93,24 @@ export type OverpassOptions = {
   maxAgeMs?: number;
   /** Fail instead of calling out when nothing is cached. */
   cachedOnly?: boolean;
+  /**
+   * When the caller's own budget runs out, as an epoch ms timestamp.
+   *
+   * Without this the retry ladder could spend 4 x 180 s of request timeout plus
+   * 65 s of backoff — 785 s — inside a serverless function the platform kills
+   * after 60. The platform won, the browser got a bare 504, and nothing in the
+   * response said why. So every wait here is now clamped to the time actually
+   * left, and an attempt that cannot finish is never started.
+   */
+  deadlineAt?: number;
 };
+
+/** Leave enough after the last call to parse the answer and build a response. */
+const DEADLINE_RESERVE_MS = 3_000;
+
+function msLeft(deadlineAt: number | undefined): number {
+  return deadlineAt === undefined ? Number.POSITIVE_INFINITY : deadlineAt - Date.now() - DEADLINE_RESERVE_MS;
+}
 
 /**
  * Run one Overpass query, cache-first.
@@ -118,7 +135,7 @@ export async function runOverpassQuery(query: string, options: OverpassOptions =
     throw new OverpassError("No cached street data for this area", "unavailable");
   }
 
-  const run = queue.then(() => fetchWithBackoff(query));
+  const run = queue.then(() => fetchWithBackoff(query, options.deadlineAt));
   queue = run.catch(() => undefined);
 
   try {
@@ -135,34 +152,46 @@ export async function runOverpassQuery(query: string, options: OverpassOptions =
   }
 }
 
-async function fetchWithBackoff(query: string): Promise<unknown> {
+async function fetchWithBackoff(query: string, deadlineAt?: number): Promise<unknown> {
   let lastError: OverpassError = new OverpassError("Overpass did not answer", "unavailable");
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     const endpoint = ENDPOINTS[attempt % ENDPOINTS.length];
 
     const gap = Date.now() - lastCallAt;
-    if (gap < MIN_CALL_GAP_MS) await sleep(MIN_CALL_GAP_MS - gap);
+    if (gap < MIN_CALL_GAP_MS) await sleep(Math.min(MIN_CALL_GAP_MS - gap, Math.max(0, msLeft(deadlineAt))));
+
+    // No point opening a socket we cannot wait on.
+    const budget = msLeft(deadlineAt);
+    if (budget <= 0) {
+      throw new OverpassError(
+        "Ran out of time waiting for Overpass. It is busy right now \u2014 please try again in a minute.",
+        "busy",
+      );
+    }
 
     try {
-      return await callOverpass(endpoint, query);
+      return await callOverpass(endpoint, query, Math.min(REQUEST_TIMEOUT_MS, budget));
     } catch (error) {
       lastError = error instanceof OverpassError ? error : new OverpassError(String(error), "unavailable");
       if (lastError.code === "bad_response") throw lastError;
 
       // 5 s, 15 s, 45 s. Overpass says "too busy" far more often than it says
-      // anything else, and the cure for a busy shared service is waiting.
+      // anything else, and the cure for a busy shared service is waiting — but
+      // only when there is time to both wait and then ask.
       const backoff = 5000 * 3 ** attempt;
-      if (attempt < MAX_ATTEMPTS - 1) await sleep(backoff);
+      const remaining = msLeft(deadlineAt);
+      if (attempt < MAX_ATTEMPTS - 1 && remaining > backoff + 5_000) await sleep(backoff);
+      else if (attempt < MAX_ATTEMPTS - 1 && remaining <= backoff + 5_000) break;
     }
   }
 
   throw lastError;
 }
 
-async function callOverpass(endpoint: string, query: string): Promise<unknown> {
+async function callOverpass(endpoint: string, query: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   lastCallAt = Date.now();
 
   try {

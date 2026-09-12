@@ -4,6 +4,7 @@ import { encodeScope } from "@/engine/streets/serialize";
 import { scopeAreaKm2 } from "@/engine/streets/scope";
 import {
   inventoryForScope,
+  requestDeadline,
   overpassErrorResponse,
   parseScopeInput,
   requireUid,
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const scope = await resolveScope(parseScopeInput(body));
-    const inventory = await inventoryForScope(scope);
+    const inventory = await inventoryForScope(scope, { deadlineAt: requestDeadline() });
 
     const longest = [...inventory.streets]
       .sort((a, b) => b.lengthMeters - a.lengthMeters)
