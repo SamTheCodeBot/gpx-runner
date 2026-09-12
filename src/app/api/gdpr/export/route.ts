@@ -5,6 +5,7 @@ import { listConnections, publicConnectionView } from "@/lib/ingestion/connectio
 import { listConsents } from "@/lib/ingestion/consent";
 import { retentionSummary } from "@/lib/ingestion/retention";
 import { ACTIVITY_COLLECTION, RAW_PAYLOAD_COLLECTION, ROUTE_COLLECTION } from "@/lib/ingestion/store";
+import { exportProjectsForOwner } from "@/lib/streetProjects";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     const db = adminDb();
     const includeRaw = req.nextUrl.searchParams.get("includeRaw") === "1";
 
-    const [profileById, profileByField, activitySnap, routeSnap, connections, consents] =
+    const [profileById, profileByField, activitySnap, routeSnap, connections, consents, streetProjects] =
       await Promise.all([
         db.collection("userProfiles").doc(uid).get(),
         db.collection("userProfiles").where("userId", "==", uid).get(),
@@ -38,6 +39,9 @@ export async function GET(req: NextRequest) {
         db.collection(ROUTE_COLLECTION).where("userId", "==", uid).get(),
         listConnections(uid),
         listConsents(uid),
+        // The areas chosen, not OSM's street geometry: which towns a person
+        // chases is personal data, the map of them is not ours to export.
+        exportProjectsForOwner(uid),
       ]);
 
     const profiles = [
@@ -102,6 +106,7 @@ export async function GET(req: NextRequest) {
       providerConnections: connections.map(publicConnectionView),
       consents,
       rawProviderPayloads: rawPayloadSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      streetProjects,
     };
 
     return new NextResponse(JSON.stringify(body, null, 2), {

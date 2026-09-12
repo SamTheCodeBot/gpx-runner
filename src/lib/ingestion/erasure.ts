@@ -5,6 +5,7 @@ import { CONSENT_COLLECTION } from "./consent";
 import { CONNECTION_COLLECTION, listConnections, openCredentials } from "./connections";
 import { getActivitySource } from "./registry";
 import { ACTIVITY_COLLECTION, RAW_PAYLOAD_COLLECTION, ROUTE_COLLECTION } from "./store";
+import { deleteProjectsForOwner } from "@/lib/streetProjects";
 import type { ActivitySourceId } from "@/app/types";
 
 /**
@@ -123,7 +124,14 @@ export async function eraseUserData(input: {
       ? await deleteQuery(db.collection(CONSENT_COLLECTION).where("uid", "==", uid))
       : await deleteQuery(db.collection(CONSENT_COLLECTION).where("uid", "==", uid).where("source", "==", scope));
 
-  // 7. The profile document itself, on a full account erasure.
+  // 7. Street completion projects. Not source-scoped: a project is the user's
+  //    own choice of area, not anything a provider sent us, so it survives a
+  //    single provider being erased and goes with a full account erasure.
+  if (scope === "account") {
+    deleted.streetProjects = await deleteProjectsForOwner(uid);
+  }
+
+  // 8. The profile document itself, on a full account erasure.
   if (scope === "account") {
     deleted.profiles = await deleteQuery(db.collection("userProfiles").where("userId", "==", uid));
     const byId = db.collection("userProfiles").doc(uid);

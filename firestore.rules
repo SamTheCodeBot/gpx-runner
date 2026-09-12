@@ -45,5 +45,16 @@ service cloud.firestore {
     match /erasureLog/{receiptId} {
       allow read, write: if false;
     }
+
+    // Street completion projects and their frozen street lists. Server-only on
+    // purpose: the snapshot taken when a project is created is the denominator
+    // behind every percentage the owner is shown, and a denominator a browser
+    // could edit would not be worth showing him.
+    match /streetProjects/{projectId} {
+      allow read, write: if false;
+      match /inventory/{chunkId} {
+        allow read, write: if false;
+      }
+    }
   }
 }
