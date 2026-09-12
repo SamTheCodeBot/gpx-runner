@@ -94,7 +94,7 @@ describe("POST /api/routes/suggest", () => {
     assert.ok(call.url.includes("foot-hiking"), `trail should use foot-hiking, got ${call.url}`);
   });
 
-  it("tells the user the actual percentage when the result misses the requested band", async () => {
+  it("says the band is out of reach rather than offering a different run", async () => {
     stub = stubOpenRouteService({ geometry: LOOP });
 
     const { response, data } = await postJson({
@@ -105,11 +105,15 @@ describe("POST /api/routes/suggest", () => {
       tracks: [LOOP_COORDS],
     });
 
-    assert.equal(response.status, 200);
+    // Asked for 20% or less; every loop here is ground he has run before. That
+    // is not a near miss, it is a different run, and handing it over as the
+    // answer is what wasted an afternoon. Say so, and still show the number.
+    assert.equal(response.status, 422);
     assert.equal(data.familiarity.withinTarget, false);
+    assert.equal(data.familiarity.bandReachable, false);
     assert.ok(data.familiarity.percent >= 80);
-    assert.match(data.familiarity.message, /not enough new ground/);
-    assert.ok(data.coordinates.length > 2, "a near miss is still returned, with the number attached");
+    assert.match(data.error, /outside what you asked for/);
+    assert.equal(data.coordinates, undefined, "no route is offered when the band is unreachable");
   });
 
   it("falls back to round_trip when the runner has no history near the start", async () => {
@@ -160,9 +164,12 @@ describe("POST /api/routes/suggest", () => {
       existingRoutes: [{ coordinates: LOOP_COORDS }],
     });
 
-    assert.equal(response.status, 200);
+    // The legacy shape maps avoidFamiliar:true onto the unfamiliar target, and
+    // this history cannot reach it — so the refusal is the correct answer. What
+    // is under test is that the old field names were understood at all.
+    assert.equal(response.status, 422);
     assert.equal(data.familiarity.target, "unfamiliar");
-    assert.equal(data.source, "familiarity-engine");
+    assert.ok(data.familiarity.percent >= 80);
   });
 
   it("rejects malformed requests", async () => {

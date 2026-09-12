@@ -285,16 +285,77 @@ export async function POST(request: NextRequest) {
  * provider's own answer decides both the status and the wording, and the raw
  * counts ride along in `debug`.
  */
+/**
+ * The band is out of reach from here — say so, instead of quietly handing back
+ * something that misses it.
+ *
+ * "It should rather tell me that instead of trying to map something out. Maybe
+ * with the advice to increase the length or choose another start point."
+ *
+ * What this may never do is quote a share of the streets nearby. The app knows
+ * where the runner has BEEN; it has no inventory of what exists that he has
+ * not run, so any such figure would be invented. Every number here comes from
+ * loops the search actually drew and measured.
+ */
+function refuseUnreachableBand(context: {
+  start: LatLng;
+  target: FamiliarityTarget;
+  tracks: LatLng[][];
+  targetDistanceKm: number;
+  evidence: FamiliaritySearchEvidence;
+  measuredRatio: number | null;
+  budget: ProviderBudget;
+}): NextResponse {
+  const requestedMeters = context.targetDistanceKm * 1000;
+  const { suggestedMeters, probedToMeters } = probeDistanceForBand({
+    start: context.start,
+    index: buildFamiliarityIndex(context.tracks),
+    requestedMeters,
+    target: context.target,
+  });
+
+  return NextResponse.json(
+    {
+      error: describeUnreachableBand({
+        target: context.target,
+        evidence: context.evidence,
+        requestedMeters,
+        suggestedMeters,
+        probedToMeters,
+      }),
+      familiarity: {
+        target: context.target,
+        measuredRatio: context.measuredRatio,
+        percent: context.measuredRatio === null ? null : Math.round(context.measuredRatio * 100),
+        withinTarget: false,
+        bandReachable: false,
+        suggestedDistanceKm: suggestedMeters === null ? null : suggestedMeters / 1000,
+      },
+      debug: {
+        ...context.budget.toDebug(),
+        loopsMeasured: context.evidence.loopsMeasured,
+        lowestFamiliarity: context.evidence.lowestFamiliarity,
+        highestFamiliarity: context.evidence.highestFamiliarity,
+        searchRadiusMeters: context.evidence.searchRadiusMeters,
+        probedToMeters,
+      },
+    },
+    { status: 422 },
+  );
+}
+
 function refuse(context: {
   providerFailures: RouteProviderFailureSummary;
   unsafeRejectedCount: number;
   outOfTime: boolean;
   tracksConsidered: number;
   rejectedCount: number;
+  budget: ProviderBudget;
 }): NextResponse {
   const { providerFailures: failures } = context;
   const debug = {
     ...providerFailureDebug(failures),
+    ...context.budget.toDebug(),
     tracksConsidered: context.tracksConsidered,
     rejectedCount: context.rejectedCount,
     unsafeRejectedCount: context.unsafeRejectedCount,
