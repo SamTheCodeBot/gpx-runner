@@ -103,6 +103,12 @@ export default function StreetProjectsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "creating" | "refreshing" | "adopting">(null);
   const [mode, setMode] = useState<"list" | "create">("list");
+  // The scope being drawn while creating a project. It lives up here because the
+  // big map on the right draws it: one map, not a large one plus a cramped
+  // duplicate under the form. Declared with the other hooks, above the
+  // unauthenticated early return, so the hook order never changes.
+  const [createPin, setCreatePin] = useState<LatLng | null>(null);
+  const [createRing, setCreateRing] = useState<LatLng[]>([]);
   const [focusStreetId, setFocusStreetId] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
 
@@ -362,6 +368,7 @@ export default function StreetProjectsPage() {
   const activeProjects = projects.filter((project) => !project.archivedAt);
   const archivedProjects = projects.filter((project) => project.archivedAt);
   const defaultPin: LatLng | null = tracks.length > 0 ? tracks[0][0] : null;
+  const creating = mode === "create";
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -417,6 +424,9 @@ export default function StreetProjectsPage() {
               <CreateProjectPanel
                 user={user}
                 defaultPin={defaultPin}
+                pin={createPin ?? defaultPin}
+                onPinChange={setCreatePin}
+                onRingChange={setCreateRing}
                 onCancel={() => setMode("list")}
                 onCreated={handleCreated}
                 busy={busy === "creating"}
@@ -484,11 +494,22 @@ export default function StreetProjectsPage() {
           <div className="flex-1 flex flex-col overflow-hidden border-t lg:border-t-0 lg:border-l border-outline-variant/30">
             <div className="h-[45vh] lg:h-[55%] shrink-0 relative">
               <StreetProjectMap
-                ring={selectedProject ? selectedProject.scope.ring : []}
-                lines={mapLines}
-                focus={focusGeometry}
-                pin={selectedProject ? scopeCenter(selectedProject.scope) : defaultPin}
-                fitKey={selectedProject?.id}
+                ring={creating ? createRing : selectedProject ? selectedProject.scope.ring : []}
+                lines={creating ? undefined : mapLines}
+                focus={creating ? undefined : focusGeometry}
+                pin={
+                  creating
+                    ? createPin ?? defaultPin
+                    : selectedProject
+                      ? scopeCenter(selectedProject.scope)
+                      : defaultPin
+                }
+                onMapClick={creating ? (lat, lng) => setCreatePin({ lat, lng }) : undefined}
+                fitKey={
+                  creating
+                    ? `create:${createRing.length}:${(createPin ?? defaultPin)?.lat.toFixed(3)}`
+                    : selectedProject?.id
+                }
               />
             </div>
 
@@ -756,6 +777,9 @@ function StreetRow({
 function CreateProjectPanel({
   user,
   defaultPin,
+  pin,
+  onPinChange,
+  onRingChange,
   onCancel,
   onCreated,
   busy,
@@ -764,13 +788,17 @@ function CreateProjectPanel({
 }: {
   user: NonNullable<ReturnType<typeof useAuth>["user"]>;
   defaultPin: LatLng | null;
+  /** Owned by the page, because the page's map is where it is placed. */
+  pin: LatLng | null;
+  onPinChange: (point: LatLng | null) => void;
+  onRingChange: (ring: LatLng[]) => void;
   onCancel: () => void;
   onCreated: (project: ProjectSummary, streets: Street[]) => void;
   busy: boolean;
   setBusy: (value: boolean) => void;
   onError: (message: string | null) => void;
 }) {
-  const [pin, setPin] = useState<LatLng | null>(defaultPin);
+  const setPin = onPinChange;
   const [radiusMeters, setRadiusMeters] = useState(DEFAULT_RADIUS_METERS);
   const [name, setName] = useState("");
   const [preview, setPreview] = useState<ScopePreview | null>(null);
@@ -880,7 +908,7 @@ function CreateProjectPanel({
             <input
               value={pin ? pin.lat.toFixed(4) : ""}
               onChange={(event) =>
-                setPin((current) => ({ lat: Number(event.target.value), lng: current?.lng ?? 0 }))
+                setPin({ lat: Number(event.target.value), lng: pin?.lng ?? 0 })
               }
               placeholder="lat"
               className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
@@ -888,7 +916,7 @@ function CreateProjectPanel({
             <input
               value={pin ? pin.lng.toFixed(4) : ""}
               onChange={(event) =>
-                setPin((current) => ({ lat: current?.lat ?? 0, lng: Number(event.target.value) }))
+                setPin({ lat: pin?.lat ?? 0, lng: Number(event.target.value) })
               }
               placeholder="lng"
               className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
@@ -995,29 +1023,19 @@ function CreateProjectPanel({
         </p>
       </div>
 
-      <MapPinHint ring={previewRing} pin={pin} onPick={setPin} />
+      <ScopeReporter ring={previewRing} onChange={onRingChange} />
     </div>
   );
 }
 
-/** The map on the right is the real one; this is the "tap it" affordance. */
-function MapPinHint({
-  ring,
-  pin,
-  onPick,
-}: {
-  ring: LatLng[];
-  pin: LatLng | null;
-  onPick: (point: LatLng) => void;
-}) {
-  return (
-    <div className="h-64 rounded-2xl overflow-hidden border border-outline-variant/30">
-      <StreetProjectMap
-        ring={ring}
-        pin={pin}
-        onMapClick={(lat, lng) => onPick({ lat, lng })}
-        fitKey={ring.length > 0 ? `${ring.length}:${pin?.lat.toFixed(3)}:${pin?.lng.toFixed(3)}` : undefined}
-      />
-    </div>
-  );
+/**
+ * Hands the scope being drawn up to the page, which draws it on the one real
+ * map. Renders nothing: there used to be a second, smaller map here showing the
+ * same circle, and two maps of the same thing is one map too many.
+ */
+function ScopeReporter({ ring, onChange }: { ring: LatLng[]; onChange: (ring: LatLng[]) => void }) {
+  useEffect(() => {
+    onChange(ring);
+  }, [ring, onChange]);
+  return null;
 }

@@ -21,9 +21,22 @@ export type WireStreet = {
   part: number;
   wayIds: number[];
   lengthMeters: number;
-  /** Each piece is [lat, lng, lat, lng, ...]. */
-  geometry: number[][];
+  /**
+   * Every point of every piece, flat: [lat, lng, lat, lng, ...].
+   *
+   * Flat because **Firestore refuses an array nested inside an array** — it
+   * answers `INVALID_ARGUMENT: Property array contains an invalid nested
+   * entity` and refuses the whole document. A street is naturally several
+   * pieces, so the obvious `number[][]` cannot be stored at all; the run is
+   * kept flat and `pieces` says where to cut it.
+   */
+  geometry: number[];
+  /** Point count per piece, in order, so the flat run can be split back up. */
+  pieces: number[];
 };
+
+/** The shape written before the Firestore nesting limit was discovered. */
+type LegacyWireStreet = Omit<WireStreet, "geometry" | "pieces"> & { geometry: number[][]; pieces?: undefined };
 
 export type WireSnapshot = {
   takenAt: string;
@@ -41,25 +54,58 @@ function round(value: number): number {
 }
 
 export function encodeStreet(street: Street): WireStreet {
+  const geometry: number[] = [];
+  const pieces: number[] = [];
+
+  for (const piece of street.geometry) {
+    if (piece.length < 2) continue;
+    pieces.push(piece.length);
+    for (const point of piece) geometry.push(round(point.lat), round(point.lng));
+  }
+
   return {
     id: street.id,
     name: street.name,
     part: street.part,
     wayIds: street.wayIds,
     lengthMeters: Math.round(street.lengthMeters * 10) / 10,
-    geometry: street.geometry.map((piece) => piece.flatMap((point) => [round(point.lat), round(point.lng)])),
+    geometry,
+    pieces,
   };
 }
 
-export function decodeStreet(wire: WireStreet): Street {
+export function decodeStreet(wire: WireStreet | LegacyWireStreet): Street {
   return {
     id: wire.id,
     name: wire.name,
     part: wire.part ?? 0,
     wayIds: Array.isArray(wire.wayIds) ? wire.wayIds : [],
     lengthMeters: wire.lengthMeters ?? 0,
-    geometry: (wire.geometry ?? []).map(decodePiece).filter((piece) => piece.length >= 2),
+    geometry: decodeGeometry(wire).filter((piece) => piece.length >= 2),
   };
+}
+
+/** Reads both the flat form and anything written in the old nested form. */
+function decodeGeometry(wire: WireStreet | LegacyWireStreet): LatLng[][] {
+  const geometry = wire.geometry ?? [];
+  if (geometry.length > 0 && Array.isArray(geometry[0])) {
+    return (geometry as number[][]).map(decodePiece);
+  }
+
+  const flat = geometry as number[];
+  const pieces = wire.pieces;
+  if (!Array.isArray(pieces) || pieces.length === 0) {
+    // No cut list: the whole run is one piece.
+    return flat.length >= 4 ? [decodePiece(flat)] : [];
+  }
+
+  const out: LatLng[][] = [];
+  let offset = 0;
+  for (const count of pieces) {
+    out.push(decodePiece(flat.slice(offset, offset + count * 2)));
+    offset += count * 2;
+  }
+  return out;
 }
 
 function decodePiece(flat: number[]): LatLng[] {
@@ -72,7 +118,7 @@ export function encodeStreets(streets: Street[]): WireStreet[] {
   return streets.map(encodeStreet);
 }
 
-export function decodeStreets(wire: WireStreet[] | undefined): Street[] {
+export function decodeStreets(wire: Array<WireStreet | LegacyWireStreet> | undefined): Street[] {
   if (!Array.isArray(wire)) return [];
   return wire.map(decodeStreet).filter((street) => street.geometry.length > 0);
 }
