@@ -1,13 +1,19 @@
 import "./helpers/alias";
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 
+import { resetRouteCache } from "@/engine/providers/budget";
 import { generateRoutes } from "@/engine/generateRoute";
 import { SUGGESTION_TIERS, pickByTier } from "@/engine/routeTiers";
 import { destinationPoint, maxPointGapMeters, polylineDistanceMeters } from "@/engine/utils/geo";
 import type { LatLng, RouteProvider, RouteRequest } from "@/types";
 import { radiusForLoopDistance, straightTrack } from "./helpers/geometry";
+
+// Routed geometry is cached by waypoint signature so one click cannot pay for
+// the same line twice. These cases share start points and distances, so without
+// this a loop proved in one would answer the next one's provider.
+beforeEach(resetRouteCache);
 
 /**
  * "Sometimes an out and back might be the only solution. But hey, then it is

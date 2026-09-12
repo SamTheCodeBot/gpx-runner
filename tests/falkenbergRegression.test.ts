@@ -5,6 +5,7 @@ import { describe, it, afterEach } from "node:test";
 
 import type { NextRequest } from "next/server";
 
+import { resetRouteCache } from "@/engine/providers/budget";
 import { assessLoopShape } from "@/engine/scoring/quality";
 import type { LatLng } from "@/types";
 import { FALKENBERG_HOME, buildFalkenbergHistory } from "./helpers/denseHistory";
@@ -111,6 +112,10 @@ let stub: OrsStub | null = null;
 afterEach(() => {
   stub?.restore();
   stub = null;
+  // Routed geometry is cached by waypoint signature so one click cannot pay
+  // for the same line twice. Left standing between cases, the route a previous
+  // case proved would answer this one's refusal stub, and a 429 would read 200.
+  resetRouteCache();
 });
 
 describe("the Falkenberg outage", () => {

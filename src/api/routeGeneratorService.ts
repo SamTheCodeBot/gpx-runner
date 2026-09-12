@@ -1,4 +1,5 @@
 import { generateRoutes } from "../engine/generateRoute";
+import { BudgetedProvider, ProviderBudget } from "../engine/providers/budget";
 import { summarizeProviderFailures } from "../engine/providers/failures";
 import { OpenRouteServiceProvider } from "../engine/providers/openRouteService";
 import { assessLoopShape } from "../engine/scoring/quality";
@@ -17,9 +18,14 @@ const ASSEMBLY_RESERVE_MS = 1_200;
 /** Below this there is no point starting another round-trip batch. */
 const MIN_BATCH_MS = 1_500;
 
-export async function generateTrainingRoutes(input: GenerateRouteInput) {
+/**
+ * `budget` is shared, not created here: the engine and the round-trip fallback
+ * are two generators working on one click, and a purse each is how a click ends
+ * up costing thirty calls.
+ */
+export async function generateTrainingRoutes(input: GenerateRouteInput, budget?: ProviderBudget) {
   const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
-  return generateRoutes(provider, input);
+  return generateRoutes(budget ? new BudgetedProvider(provider, budget) : provider, input);
 }
 
 export type RoundTripSuggestionInput = {
@@ -186,6 +192,7 @@ function directionPenalty(bucket: number, directionShift = 0): number {
 
 export async function generateOpenRouteServiceRoundTrip(
   input: RoundTripSuggestionInput,
+  budget?: ProviderBudget,
 ): Promise<{
   routes: RoundTripSuggestionResult[];
   /** Right length and safe, but there-and-back. Never mixed into `routes`. */
@@ -195,7 +202,8 @@ export async function generateOpenRouteServiceRoundTrip(
   /** What the provider did when it did not return a route. */
   providerFailures: RouteProviderFailureSummary;
 }> {
-  const provider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
+  const rawProvider = new OpenRouteServiceProvider(process.env.OPENROUTESERVICE_API_KEY ?? "");
+  const provider = budget ? new BudgetedProvider(rawProvider, budget) : rawProvider;
   const targetMeters = input.targetDistanceKm * 1000;
   const toleranceMeters = (input.toleranceKm ?? 0.5) * 1000;
   const alternatives = input.alternatives ?? 3;
@@ -216,9 +224,13 @@ export async function generateOpenRouteServiceRoundTrip(
     requestMode: "preferred" | "basic" | "basic-no-elevation";
     seeds: number[];
   }> = [
-    { requestMode: "preferred", seeds: seeds.slice(0, 8) },
-    { requestMode: "basic", seeds: seeds.slice(0, 8) },
-    { requestMode: "basic-no-elevation", seeds: seeds.slice(0, 4) },
+    // Three phases of 8/8/4 was 20 calls for one click. The phases exist to
+    // retry with fewer demands when openrouteservice refuses the fancy request,
+    // not to sweep the seed space: two seeds is enough to learn that, and the
+    // shared budget stops the sweep regardless.
+    { requestMode: "preferred", seeds: seeds.slice(0, 4) },
+    { requestMode: "basic", seeds: seeds.slice(0, 2) },
+    { requestMode: "basic-no-elevation", seeds: seeds.slice(0, 2) },
   ];
 
   for (const phase of phases) {
