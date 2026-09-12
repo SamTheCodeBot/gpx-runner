@@ -115,6 +115,29 @@ export type GenerateRouteResult = {
   timedOut: boolean;
   /** What the routing provider did when it did not return a route. */
   providerFailures: RouteProviderFailureSummary;
+  /** What the search actually saw, so a refusal can be about evidence. */
+  familiaritySearch: FamiliaritySearchEvidence;
+};
+
+/**
+ * The record of what this search observed — not what it concluded.
+ *
+ * When the requested familiarity band cannot be reached, the runner deserves to
+ * be told so plainly rather than handed a route that misses it by forty points.
+ * But "cannot be reached" is a claim, and the only claim this app can support is
+ * about the loops it actually drew and measured: it has no street inventory, so
+ * it knows where the runner *has* been and nothing whatever about the roads he
+ * has not. Everything here is a count or a measurement, and the wording built
+ * from it never reaches past them.
+ */
+export type FamiliaritySearchEvidence = {
+  /** Provider-drawn, loop-shaped, safe routes whose familiarity was measured. */
+  loopsMeasured: number;
+  /** Lowest and highest measured familiarity among them, or null if there were none. */
+  lowestFamiliarity: number | null;
+  highestFamiliarity: number | null;
+  /** How far from the start the search actually reached, in metres. */
+  searchRadiusMeters: number;
 };
 
 export type RouteRequest = {

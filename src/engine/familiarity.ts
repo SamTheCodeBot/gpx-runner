@@ -123,16 +123,55 @@ export function familiarityWeight(segment: RouteSegment, index: FamiliarityIndex
   const samples = densifyPolyline([segment.from, segment.to], 12);
   let matches = 0;
 
-  for (const sample of samples) {
-    const bestDistance = nearestFamiliarDistanceMeters(sample, index);
-
-    if (bestDistance <= 10) matches += 1;
-    else if (bestDistance <= 16) matches += 0.8;
-    else if (bestDistance <= 24) matches += 0.45;
-    else if (bestDistance <= MATCH_RADIUS_METERS) matches += 0.15;
-  }
+  for (const sample of samples) matches += knownnessAt(sample, index);
 
   return samples.length === 0 ? 0 : Math.max(0, Math.min(1, matches / samples.length));
+}
+
+/**
+ * How well the runner knows one spot: 1 for ground he has run, 0 for ground he
+ * has never been near.
+ *
+ * The same ladder `familiarityWeight` scores a route with, exposed as a single
+ * point query so the search can ask the question *before* paying a provider to
+ * draw anything. One definition of "familiar", used both to steer and to judge
+ * — if these two ever drifted apart the engine would be aiming at one thing and
+ * reporting another.
+ */
+export function knownnessAt(point: LatLng, index: FamiliarityIndex): number {
+  const distance = nearestFamiliarDistanceMeters(point, index);
+
+  if (distance <= 10) return 1;
+  if (distance <= 16) return 0.8;
+  if (distance <= 24) return 0.45;
+  if (distance <= MATCH_RADIUS_METERS) return 0.15;
+  return 0;
+}
+
+/**
+ * The runner's history, read backwards: how much of a proposed line is ground
+ * he already knows, judged on the straight polyline rather than on routed
+ * geometry.
+ *
+ * This is a *prediction*, not a measurement — the provider will not follow the
+ * proposal exactly, so the number the runner is finally shown always comes from
+ * `computeFamiliarityRatio` on what came back. Its job is only to decide which
+ * handful of proposals are worth one of the eight routing calls a request may
+ * spend, and for that it costs nothing but arithmetic.
+ */
+export function estimatePathKnownness(
+  points: LatLng[],
+  index: FamiliarityIndex,
+  sampleMeters = 40,
+): number {
+  if (points.length < 2 || index.familiarSegments.length === 0) return 0;
+
+  const samples = densifyPolyline(points, sampleMeters);
+  if (samples.length === 0) return 0;
+
+  let total = 0;
+  for (const sample of samples) total += knownnessAt(sample, index);
+  return Math.max(0, Math.min(1, total / samples.length));
 }
 
 export function nearestFamiliarDistanceMeters(point: LatLng, index: FamiliarityIndex): number {

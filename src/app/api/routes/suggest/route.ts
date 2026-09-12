@@ -3,6 +3,11 @@ import { ProviderBudget } from "@/engine/providers/budget";
 import { generateOpenRouteServiceRoundTrip, generateTrainingRoutes } from "@/api/routeGeneratorService";
 import { buildFamiliarityIndex, computeFamiliarityRatio } from "@/engine/familiarity";
 import {
+  decideFamiliarityOutcome,
+  describeUnreachableBand,
+  probeDistanceForBand,
+} from "@/engine/familiarityAdvice";
+import {
   buildFamiliarityReport,
   isFamiliarityTarget,
   toEngineMode,
@@ -22,6 +27,7 @@ import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engi
 import { simplifyByDistance, toSegments } from "@/engine/utils/geo";
 import type { RoundTripSuggestionResult } from "@/api/routeGeneratorService";
 import type {
+  FamiliaritySearchEvidence,
   GeneratedRoute,
   LatLng,
   RouteProviderFailureSummary,
@@ -173,6 +179,31 @@ export async function POST(request: NextRequest) {
       candidates['loop-familiarity-missed'] = fromEngine(engine.nearMisses[0], 'familiarity-engine');
       candidates['loop-off-distance'] = fromEngine(engine.bestEffort[0], 'familiarity-engine-best-effort');
       candidates['out-and-back'] = fromEngine(engine.outAndBacks[0], 'familiarity-engine-out-and-back');
+
+      // ── Is the near miss worth showing, or is the band simply out of reach? ──
+      // Only the near-miss tier is asked this. A matched route has nothing to
+      // answer for, and the tiers below it are already labelled as compromises
+      // on length or shape rather than presented as what was asked for.
+      const nearMiss = candidates['loop-familiarity-missed'];
+      if (nearMiss && !candidates['loop-familiarity-matched']) {
+        const outcome = decideFamiliarityOutcome({
+          bestRatio: nearMiss.ratio,
+          target,
+          evidence: engine.familiaritySearch,
+        });
+
+        if (outcome === 'band-unreachable') {
+          return refuseUnreachableBand({
+            start,
+            target,
+            tracks,
+            targetDistanceKm,
+            evidence: engine.familiaritySearch,
+            measuredRatio: nearMiss.ratio,
+            budget,
+          });
+        }
+      }
     }
 
     // A loop the runner knows beats anything the plain generator can offer, so
@@ -233,6 +264,7 @@ export async function POST(request: NextRequest) {
         outOfTime: Date.now() >= deadlineAt || Boolean(engine?.timedOut),
         tracksConsidered: tracks.length,
         rejectedCount: fallback.rejectedCount + (engine?.rejectedCount ?? 0),
+        budget,
       });
     }
 
@@ -253,16 +285,77 @@ export async function POST(request: NextRequest) {
  * provider's own answer decides both the status and the wording, and the raw
  * counts ride along in `debug`.
  */
+/**
+ * The band is out of reach from here — say so, instead of quietly handing back
+ * something that misses it.
+ *
+ * "It should rather tell me that instead of trying to map something out. Maybe
+ * with the advice to increase the length or choose another start point."
+ *
+ * What this may never do is quote a share of the streets nearby. The app knows
+ * where the runner has BEEN; it has no inventory of what exists that he has
+ * not run, so any such figure would be invented. Every number here comes from
+ * loops the search actually drew and measured.
+ */
+function refuseUnreachableBand(context: {
+  start: LatLng;
+  target: FamiliarityTarget;
+  tracks: LatLng[][];
+  targetDistanceKm: number;
+  evidence: FamiliaritySearchEvidence;
+  measuredRatio: number | null;
+  budget: ProviderBudget;
+}): NextResponse {
+  const requestedMeters = context.targetDistanceKm * 1000;
+  const { suggestedMeters, probedToMeters } = probeDistanceForBand({
+    start: context.start,
+    index: buildFamiliarityIndex(context.tracks),
+    requestedMeters,
+    target: context.target,
+  });
+
+  return NextResponse.json(
+    {
+      error: describeUnreachableBand({
+        target: context.target,
+        evidence: context.evidence,
+        requestedMeters,
+        suggestedMeters,
+        probedToMeters,
+      }),
+      familiarity: {
+        target: context.target,
+        measuredRatio: context.measuredRatio,
+        percent: context.measuredRatio === null ? null : Math.round(context.measuredRatio * 100),
+        withinTarget: false,
+        bandReachable: false,
+        suggestedDistanceKm: suggestedMeters === null ? null : suggestedMeters / 1000,
+      },
+      debug: {
+        ...context.budget.toDebug(),
+        loopsMeasured: context.evidence.loopsMeasured,
+        lowestFamiliarity: context.evidence.lowestFamiliarity,
+        highestFamiliarity: context.evidence.highestFamiliarity,
+        searchRadiusMeters: context.evidence.searchRadiusMeters,
+        probedToMeters,
+      },
+    },
+    { status: 422 },
+  );
+}
+
 function refuse(context: {
   providerFailures: RouteProviderFailureSummary;
   unsafeRejectedCount: number;
   outOfTime: boolean;
   tracksConsidered: number;
   rejectedCount: number;
+  budget: ProviderBudget;
 }): NextResponse {
   const { providerFailures: failures } = context;
   const debug = {
     ...providerFailureDebug(failures),
+    ...context.budget.toDebug(),
     tracksConsidered: context.tracksConsidered,
     rejectedCount: context.rejectedCount,
     unsafeRejectedCount: context.unsafeRejectedCount,
