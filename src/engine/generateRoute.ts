@@ -284,13 +284,24 @@ export async function generateRoutes(
  * 4,595 m through 22 — the loop was not being followed, it was being
  * shortcut, and the runner would have been sold a 5 km route that is 2.8 km.
  *
- * So: roughly one every 250 m. The ceiling keeps the request well inside
- * openrouteservice's 50-coordinate limit for a directions call, counting the
- * start at both ends.
+ * So: roughly one every 250 m.
+ *
+ * The ceiling used to be 24, which quietly made fidelity a function of length.
+ * A 5.5 km loop wants 22 and got them, and came back 93% familiar. An 8.5 km
+ * loop wants 34, got 24, and its pins stretched to ~354 m apart — the router
+ * took its own way between them, left the runner's own streets, and the same
+ * request came back 57% familiar. Same start, same history, same settings:
+ * only the spacing differed.
+ *
+ * openrouteservice accepts 50 coordinates on a directions call and the request
+ * spends two of them on the start, at both ends. 46 keeps a safety margin while
+ * holding 250 m spacing out to ~11.5 km, and past that the spacing widens
+ * gracefully instead of falling off a cliff at 6 km. Costs nothing: waypoints
+ * are coordinates in one call, not extra calls.
  */
 const METERS_PER_WAYPOINT = 250;
 const MIN_WAYPOINTS = 6;
-const MAX_WAYPOINTS = 24;
+const MAX_WAYPOINTS = 46;
 
 export function waypointCountFor(targetMeters: number): number {
   return Math.max(MIN_WAYPOINTS, Math.min(MAX_WAYPOINTS, Math.round(targetMeters / METERS_PER_WAYPOINT)));
