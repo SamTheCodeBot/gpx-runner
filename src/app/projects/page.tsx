@@ -17,6 +17,7 @@ import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { circleScope, scopeCenter } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
+import { MAX_SELECTED_STREETS } from "@/engine/streets/streetRoute";
 import { toLatLngTrack } from "@/engine/trackHistory";
 import { logout, useAuth } from "@/lib/auth";
 import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
@@ -31,12 +32,15 @@ import {
   listProjects,
   loadProject,
   patchProject,
+  planStreetRoute,
   previewScope,
   refreshProject,
+  type PlannedStreetRoute,
   type ProjectSummary,
   type ScopePreview,
   type ScopeRequest,
 } from "@/lib/streetProjectClient";
+import { downloadGPXFile } from "@/lib/utils";
 import type { LatLng } from "@/types";
 
 const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), {
@@ -118,6 +122,13 @@ export default function StreetProjectsPage() {
   const [focusStreetId, setFocusStreetId] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
+  // Ticked streets, the start they are run from, and the route that came back.
+  const [checkedStreetIds, setCheckedStreetIds] = useState<string[]>([]);
+  const [routeStart, setRouteStart] = useState<LatLng | null>(null);
+  const [pickingStart, setPickingStart] = useState(false);
+  const [plannedRoute, setPlannedRoute] = useState<PlannedStreetRoute | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [planningRoute, setPlanningRoute] = useState(false);
 
   // ── The history every project is measured against ────────────────────────
   // One history, many scopes: a Varberg run counts towards Varberg and nothing
@@ -174,6 +185,75 @@ export default function StreetProjectsPage() {
     () => selectedCoverage?.streets.find((street) => street.streetId === focusStreetId) ?? null,
     [selectedCoverage, focusStreetId],
   );
+
+  // ── The ticked streets, and the route they become ─────────────────────────
+
+  const effectiveStart = useMemo<LatLng | null>(
+    () => routeStart ?? (selectedProject ? scopeCenter(selectedProject.scope) : null),
+    [routeStart, selectedProject],
+  );
+
+  const routeGeometry = useMemo<LatLng[] | undefined>(() => {
+    if (!plannedRoute || plannedRoute.coordinates.length < 2) return undefined;
+    return plannedRoute.coordinates.map(([lng, lat]) => ({ lat, lng }));
+  }, [plannedRoute]);
+
+  const checkedMeters = useMemo(() => {
+    if (!selectedCoverage) return 0;
+    const checked = new Set(checkedStreetIds);
+    return selectedCoverage.streets
+      .filter((street) => checked.has(street.streetId))
+      .reduce((sum, street) => sum + street.lengthMeters, 0);
+  }, [selectedCoverage, checkedStreetIds]);
+
+  // Switching projects throws all of it away: a tick list and a route belong to
+  // the town they were made in.
+  useEffect(() => {
+    setCheckedStreetIds([]);
+    setPlannedRoute(null);
+    setRouteError(null);
+    setPickingStart(false);
+    setRouteStart(null);
+  }, [selectedId]);
+
+  const toggleChecked = useCallback((streetId: string) => {
+    setRouteError(null);
+    setCheckedStreetIds((current) => {
+      if (current.includes(streetId)) return current.filter((id) => id !== streetId);
+      // Stop at the cap rather than accepting a tick the route will silently
+      // drop later. The bar below the list says why the box would not go on.
+      if (current.length >= MAX_SELECTED_STREETS) return current;
+      return [...current, streetId];
+    });
+  }, []);
+
+  const handleBuildRoute = useCallback(async () => {
+    if (!user || !selectedProject || checkedStreetIds.length === 0 || !effectiveStart) return;
+    setPlanningRoute(true);
+    setRouteError(null);
+    try {
+      const route = await planStreetRoute(user, selectedProject.id, {
+        start: effectiveStart,
+        streetIds: checkedStreetIds,
+      });
+      setPlannedRoute(route);
+      setFocusStreetId(null);
+      setStatusMessage(
+        `${Math.round(route.distanceMeters / 100) / 10} km through ${route.streetNames.length} street${
+          route.streetNames.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (error) {
+      setRouteError(error instanceof Error ? error.message : "Could not build that route.");
+    } finally {
+      setPlanningRoute(false);
+    }
+  }, [user, selectedProject, checkedStreetIds, effectiveStart]);
+
+  const handleDownloadRoute = useCallback(() => {
+    if (!plannedRoute) return;
+    downloadGPXFile({ name: plannedRoute.name, coordinates: plannedRoute.coordinates });
+  }, [plannedRoute]);
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -513,22 +593,44 @@ export default function StreetProjectsPage() {
                 // answer to "which one is it?" is a pink line in a haystack.
                 lines={creating || focusStreetId ? undefined : mapLines}
                 focus={creating ? undefined : focusGeometry}
+                route={creating ? undefined : routeGeometry}
                 pin={
                   creating
                     ? createPin ?? defaultPin
-                    : selectedProject
-                      ? scopeCenter(selectedProject.scope)
-                      : defaultPin
+                    : effectiveStart ?? defaultPin
                 }
-                onMapClick={creating ? (lat, lng) => setCreatePin({ lat, lng }) : undefined}
+                onMapClick={
+                  creating
+                    ? (lat, lng) => setCreatePin({ lat, lng })
+                    : pickingStart
+                      ? (lat, lng) => {
+                          setRouteStart({ lat, lng });
+                          setPickingStart(false);
+                        }
+                      : undefined
+                }
                 fitKey={
                   creating
                     ? `create:${createRing.length}:${(createPin ?? defaultPin)?.lat.toFixed(3)}`
                     : focusStreetId
                       ? `${selectedProject?.id}:street:${focusStreetId}`
-                      : selectedProject?.id
+                      : plannedRoute
+                        ? `${selectedProject?.id}:route:${plannedRoute.streetOrder.join(",")}`
+                        : selectedProject?.id
                 }
               />
+
+              {!creating && pickingStart && (
+                <div className="absolute inset-0 z-[500] flex items-start justify-center pt-4 pointer-events-none">
+                  <div className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs font-bold shadow-lg pointer-events-auto flex items-center gap-2">
+                    <Icon name="place" className="text-xs" />
+                    Click the map to set where the route starts
+                    <button onClick={() => setPickingStart(false)} className="underline font-extrabold">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {!creating && focusedStreet && (
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] max-w-[90%]">
@@ -567,6 +669,25 @@ export default function StreetProjectsPage() {
                   onSortChange={setStreetSort}
                   onFocus={setFocusStreetId}
                   focusStreetId={focusStreetId}
+                  checkedStreetIds={checkedStreetIds}
+                  onToggleChecked={toggleChecked}
+                  onClearChecked={() => {
+                    setCheckedStreetIds([]);
+                    setRouteError(null);
+                  }}
+                  checkedMeters={checkedMeters}
+                  customStart={routeStart}
+                  onPickStart={() => setPickingStart(true)}
+                  onResetStart={() => setRouteStart(null)}
+                  onBuildRoute={handleBuildRoute}
+                  planningRoute={planningRoute}
+                  plannedRoute={plannedRoute}
+                  routeError={routeError}
+                  onDownloadRoute={handleDownloadRoute}
+                  onClearRoute={() => {
+                    setPlannedRoute(null);
+                    setRouteError(null);
+                  }}
                   onRefresh={handleRefresh}
                   onAdoptAll={handleAdoptAll}
                   onArchiveToggle={handleArchiveToggle}
@@ -654,6 +775,19 @@ function ProjectDetail({
   onSortChange,
   onFocus,
   focusStreetId,
+  checkedStreetIds,
+  onToggleChecked,
+  onClearChecked,
+  checkedMeters,
+  customStart,
+  onPickStart,
+  onResetStart,
+  onBuildRoute,
+  planningRoute,
+  plannedRoute,
+  routeError,
+  onDownloadRoute,
+  onClearRoute,
   onRefresh,
   onAdoptAll,
   onArchiveToggle,
@@ -668,6 +802,19 @@ function ProjectDetail({
   onSortChange: (sort: StreetSort) => void;
   onFocus: (id: string | null) => void;
   focusStreetId: string | null;
+  checkedStreetIds: string[];
+  onToggleChecked: (streetId: string) => void;
+  onClearChecked: () => void;
+  checkedMeters: number;
+  customStart: LatLng | null;
+  onPickStart: () => void;
+  onResetStart: () => void;
+  onBuildRoute: () => void;
+  planningRoute: boolean;
+  plannedRoute: PlannedStreetRoute | null;
+  routeError: string | null;
+  onDownloadRoute: () => void;
+  onClearRoute: () => void;
   onRefresh: () => void;
   onAdoptAll: () => void;
   onArchiveToggle: () => void;
@@ -758,6 +905,21 @@ function ProjectDetail({
 
         {!showDone && <StreetSortControl sort={streetSort} onChange={onSortChange} />}
 
+        <StreetRouteBar
+          checkedCount={checkedStreetIds.length}
+          checkedMeters={checkedMeters}
+          onClearChecked={onClearChecked}
+          customStart={customStart}
+          onPickStart={onPickStart}
+          onResetStart={onResetStart}
+          onBuildRoute={onBuildRoute}
+          planningRoute={planningRoute}
+          plannedRoute={plannedRoute}
+          routeError={routeError}
+          onDownloadRoute={onDownloadRoute}
+          onClearRoute={onClearRoute}
+        />
+
         <ul className="divide-y divide-outline-variant/20">
           {(showDone ? done : remaining).slice(0, 300).map((street) => (
             <StreetRow
@@ -765,6 +927,11 @@ function ProjectDetail({
               street={street}
               focused={street.streetId === focusStreetId}
               onFocus={() => onFocus(street.streetId === focusStreetId ? null : street.streetId)}
+              checked={checkedStreetIds.includes(street.streetId)}
+              onToggleChecked={() => onToggleChecked(street.streetId)}
+              checkDisabled={
+                checkedStreetIds.length >= MAX_SELECTED_STREETS && !checkedStreetIds.includes(street.streetId)
+              }
             />
           ))}
         </ul>
@@ -825,28 +992,176 @@ function StreetSortControl({ sort, onChange }: { sort: StreetSort; onChange: (so
   );
 }
 
+/**
+ * The ticked streets, and what can be done with them.
+ *
+ * Deliberately plain: a start, the streets, and back. No familiarity band, no
+ * percentage, no opinion about whether this is a good run — he has already
+ * decided that by ticking the boxes. The only judgement the app makes is the
+ * order, and that is arithmetic.
+ */
+function StreetRouteBar({
+  checkedCount,
+  checkedMeters,
+  onClearChecked,
+  customStart,
+  onPickStart,
+  onResetStart,
+  onBuildRoute,
+  planningRoute,
+  plannedRoute,
+  routeError,
+  onDownloadRoute,
+  onClearRoute,
+}: {
+  checkedCount: number;
+  checkedMeters: number;
+  onClearChecked: () => void;
+  customStart: LatLng | null;
+  onPickStart: () => void;
+  onResetStart: () => void;
+  onBuildRoute: () => void;
+  planningRoute: boolean;
+  plannedRoute: PlannedStreetRoute | null;
+  routeError: string | null;
+  onDownloadRoute: () => void;
+  onClearRoute: () => void;
+}) {
+  if (checkedCount === 0 && !plannedRoute && !routeError) return null;
+
+  const atCap = checkedCount >= MAX_SELECTED_STREETS;
+
+  return (
+    <div className="rounded-2xl border border-primary/30 bg-primary-container/30 p-3 space-y-3">
+      {checkedCount > 0 && (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-extrabold text-on-surface">
+              {checkedCount} street{checkedCount === 1 ? "" : "s"} ticked
+              <span className="font-medium text-on-surface-variant"> · {formatKm(checkedMeters)} of street</span>
+            </p>
+            <button onClick={onClearChecked} className="text-xs font-extrabold text-error shrink-0">
+              Clear
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap text-[11px] text-on-surface-variant">
+            <Icon name="place" className="text-sm" />
+            <span>{customStart ? "Starting from your pin" : "Starting from the middle of the project"}</span>
+            <button onClick={onPickStart} className="font-extrabold text-primary">
+              {customStart ? "Move it" : "Pick a start"}
+            </button>
+            {customStart && (
+              <button onClick={onResetStart} className="font-extrabold text-on-surface-variant underline">
+                Reset
+              </button>
+            )}
+          </div>
+
+          {atCap && (
+            <p className="text-[11px] text-on-surface">
+              That is the most one route can cover ({MAX_SELECTED_STREETS}). Untick something to swap it for another
+              street, or build this one and come back for the rest.
+            </p>
+          )}
+
+          <button
+            onClick={onBuildRoute}
+            disabled={planningRoute}
+            className="w-full rounded-xl bg-primary text-on-primary px-3 py-2.5 text-xs font-extrabold disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            <Icon name={planningRoute ? "progress_activity" : "route"} className={`text-sm ${planningRoute ? "animate-spin" : ""}`} />
+            {planningRoute ? "Finding a way round…" : `Build a route through ${checkedCount === 1 ? "it" : "them"}`}
+          </button>
+        </>
+      )}
+
+      {routeError && (
+        <p className="text-[11px] text-error font-medium flex items-start gap-1.5">
+          <Icon name="error" className="text-sm shrink-0" />
+          <span>{routeError}</span>
+        </p>
+      )}
+
+      {plannedRoute && (
+        <div className="rounded-xl bg-surface-container-lowest p-3 space-y-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-extrabold text-on-surface">
+              {Math.round(plannedRoute.distanceMeters / 100) / 10} km
+            </p>
+            <span className="text-[11px] text-on-surface-variant">
+              {plannedRoute.streetNames.length} street{plannedRoute.streetNames.length === 1 ? "" : "s"}
+              {plannedRoute.elevationGainMeters ? ` · ${Math.round(plannedRoute.elevationGainMeters)} m up` : ""}
+            </span>
+          </div>
+          <p className="text-[11px] text-on-surface-variant">
+            In order: {plannedRoute.streetNames.slice(0, 6).join(" → ")}
+            {plannedRoute.streetNames.length > 6 ? ` → … → back to the start` : " → back to the start"}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onDownloadRoute}
+              className="flex-1 rounded-xl bg-surface-container-high px-3 py-2 text-xs font-extrabold text-on-surface flex items-center justify-center gap-1.5"
+            >
+              <Icon name="download" className="text-sm" />
+              Download GPX
+            </button>
+            <button onClick={onClearRoute} className="rounded-xl px-3 py-2 text-xs font-extrabold text-on-surface-variant">
+              Hide
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StreetRow({
   street,
   focused,
   onFocus,
+  checked,
+  onToggleChecked,
+  checkDisabled,
 }: {
   street: StreetCoverage;
   focused: boolean;
   onFocus: () => void;
+  checked: boolean;
+  onToggleChecked: () => void;
+  checkDisabled: boolean;
 }) {
   return (
-    <li>
+    <li
+      className={`flex items-center rounded-lg transition-colors ${
+        focused ? "bg-surface-container-high" : "hover:bg-surface-container"
+      }`}
+    >
+      {/* The ring he asked for, now a box you can tick. Its own button rather
+          than part of the row, so picking a street to look at and picking a
+          street to run are two different gestures in the same place. */}
       <button
-        onClick={onFocus}
-        className={`w-full text-left py-2.5 px-2 rounded-lg flex items-center gap-3 transition-colors ${
-          focused ? "bg-surface-container-high" : "hover:bg-surface-container"
-        }`}
+        role="checkbox"
+        aria-checked={checked}
+        aria-label={`Include ${street.name} in a route`}
+        onClick={onToggleChecked}
+        disabled={checkDisabled}
+        title={checkDisabled ? `That is the most one route can cover (${MAX_SELECTED_STREETS})` : undefined}
+        className="py-2.5 pl-2 pr-1 shrink-0 disabled:opacity-30"
       >
         <Icon
-          name={street.complete ? "check_circle" : "radio_button_unchecked"}
-          filled={street.complete}
-          className={`text-base shrink-0 ${street.complete ? "text-secondary" : "text-on-surface-variant"}`}
+          name={checked ? "check_circle" : "radio_button_unchecked"}
+          filled={checked}
+          className={`text-base ${
+            checked ? "text-primary" : street.complete ? "text-secondary" : "text-on-surface-variant"
+          }`}
         />
+      </button>
+
+      <button
+        onClick={onFocus}
+        className="flex-1 min-w-0 text-left py-2.5 px-2 flex items-center gap-3"
+      >
         <span className="flex-1 min-w-0">
           <span className="block text-sm text-on-surface truncate">
             {street.name}

@@ -178,6 +178,46 @@ export async function adoptStreetAdditions(
   return { project: toSummary(payload.project), adopted: decodeStreets(payload.adopted as WireStreet[]) };
 }
 
+/**
+ * A route through the streets he ticked — start, all of them, home again.
+ *
+ * Only ids go up: the geometry is already on the server and it is the copy the
+ * project is measured against. No familiarity comes back, because none is
+ * asked for.
+ */
+export type PlannedStreetRoute = {
+  name: string;
+  /** [lng, lat], the shape every other route in the app travels in. */
+  coordinates: [number, number][];
+  distanceMeters: number;
+  elevationGainMeters?: number;
+  streetOrder: string[];
+  streetNames: string[];
+  streetMeters: number;
+};
+
+export async function planStreetRoute(
+  user: User,
+  projectId: string,
+  input: { start: { lat: number; lng: number }; streetIds: string[] },
+): Promise<PlannedStreetRoute> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/plan-route`, {
+    method: "POST",
+    body: JSON.stringify({ start: input.start, streetIds: input.streetIds }),
+  });
+
+  const route = payload.route ?? {};
+  return {
+    name: String(route.name ?? "Street route"),
+    coordinates: (route.geometry ?? []) as [number, number][],
+    distanceMeters: Number(route.distanceMeters ?? 0),
+    elevationGainMeters: Number.isFinite(route.elevationGainMeters) ? Number(route.elevationGainMeters) : undefined,
+    streetOrder: (route.streetOrder ?? []).map(String),
+    streetNames: (route.streetNames ?? []).map(String),
+    streetMeters: Number(route.streetMeters ?? 0),
+  };
+}
+
 export async function findBoundaries(user: User, lat: number, lng: number): Promise<BoundaryCandidate[]> {
   const payload = await authed(user, `/api/street-projects/boundaries?lat=${lat}&lng=${lng}`);
   return payload.candidates ?? [];
