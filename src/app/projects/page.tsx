@@ -239,10 +239,14 @@ export default function StreetProjectsPage() {
     const out: LatLng[][] = [];
     for (const id of checkedStreetIds) {
       const detail = coverageDetailById.get(id);
-      if (detail) out.push(...detail.missing, ...detail.covered);
+      if (!detail) continue;
+      out.push(...detail.missing);
+      // Ticking a street does not put the half he has already run back on a map
+      // he asked to show only what he has not.
+      if (mapMode === "all") out.push(...detail.covered);
     }
     return out;
-  }, [checkedStreetIds, coverageDetailById]);
+  }, [checkedStreetIds, coverageDetailById, mapMode]);
 
   // Handed to the map to frame, never to draw.
   const focusGeometry = useMemo(() => {
