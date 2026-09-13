@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { buildFamiliarityIndex } from "../src/engine/familiarity";
+import { describeStreetCoverage } from "../src/engine/streets/coverage";
 import { buildStreetInventory, type OsmWay } from "../src/engine/streets/inventory";
 import { buildStreetPickIndex, pickStreetAt } from "../src/engine/streets/pick";
 import { circleScope } from "../src/engine/streets/scope";
@@ -109,6 +111,27 @@ describe("picking across a whole town", () => {
     }
 
     assert.equal(hits, sample.length, "a click on a street always finds a street");
+  });
+
+  it("cannot pick a finished street off a map that is only showing unrun ones", () => {
+    // The "left to run" view: half the town run, the finished half off the map
+    // entirely. Clicking where a finished street used to be must find the
+    // nearest unrun street or nothing — never the street that is not drawn.
+    const history = streets.slice(0, 60).flatMap((street) => street.geometry);
+    const familiar = buildFamiliarityIndex(history);
+    const done = new Set(
+      streets.filter((street) => describeStreetCoverage(street, familiar).complete).map((street) => street.id),
+    );
+    assert.ok(done.size > 10, `expected the history to finish streets, got ${done.size}`);
+
+    const unrunIndex = buildStreetPickIndex(streets.filter((street) => !done.has(street.id)));
+
+    for (const street of streets.filter((candidate) => done.has(candidate.id)).slice(0, 40)) {
+      const piece = street.geometry.find((part) => part.length >= 2);
+      if (!piece) continue;
+      const pick = pickStreetAt(piece[Math.floor(piece.length / 2)], unrunIndex, 40);
+      if (pick) assert.equal(done.has(pick.streetId), false, "picked a street that is not on the map");
+    }
   });
 
   it("answers a town-sized index fast enough to run on every tap", () => {

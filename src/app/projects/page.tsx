@@ -141,11 +141,16 @@ export default function StreetProjectsPage() {
   const [createPin, setCreatePin] = useState<LatLng | null>(null);
   const [createRing, setCreateRing] = useState<LatLng[]>([]);
   const [focusStreetId, setFocusStreetId] = useState<string | null>(null);
-  // Whether that street was picked off the map rather than out of the list. A
-  // list click means "show me where this is" and the map should fly to it; a
-  // map click means "what is this one", and flying to it would snatch away the
-  // surroundings he clicked it out of.
-  const [focusPickedOnMap, setFocusPickedOnMap] = useState(false);
+  // What the map was last told to fly to, which is not the same as what is
+  // selected. A list click means "show me where this is", so the map goes
+  // there. A map click means "what is this one" — he is already looking at it,
+  // and flying to it would snatch away the surroundings he picked it out of.
+  // Only list clicks touch this, and the nonce is what makes picking the same
+  // street twice fly to it twice.
+  const [fitTarget, setFitTarget] = useState<{ streetId: string | null; nonce: number }>({
+    streetId: null,
+    nonce: 0,
+  });
   const [mapMode, setMapMode] = useState<MapMode>("all");
   const [showDone, setShowDone] = useState(false);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
@@ -239,10 +244,11 @@ export default function StreetProjectsPage() {
     return out;
   }, [checkedStreetIds, coverageDetailById]);
 
+  // Handed to the map to frame, never to draw.
   const focusGeometry = useMemo(() => {
-    if (!focusStreetId) return undefined;
-    return selectedStreets.find((street) => street.id === focusStreetId)?.geometry;
-  }, [focusStreetId, selectedStreets]);
+    if (!fitTarget.streetId) return undefined;
+    return selectedStreets.find((street) => street.id === fitTarget.streetId)?.geometry;
+  }, [fitTarget, selectedStreets]);
 
   const focusDetail = focusStreetId ? coverageDetailById.get(focusStreetId) ?? null : null;
 
@@ -258,7 +264,7 @@ export default function StreetProjectsPage() {
 
   const focusFromList = useCallback((streetId: string | null) => {
     setFocusStreetId(streetId);
-    setFocusPickedOnMap(false);
+    setFitTarget((current) => ({ streetId, nonce: current.nonce + 1 }));
   }, []);
 
   // ── The ticked streets, and the route they become ─────────────────────────
@@ -290,7 +296,7 @@ export default function StreetProjectsPage() {
     setPickingStart(false);
     setRouteStart(null);
     setFocusStreetId(null);
-    setFocusPickedOnMap(false);
+    setFitTarget({ streetId: null, nonce: 0 });
   }, [selectedId]);
 
   const toggleChecked = useCallback((streetId: string) => {
@@ -320,14 +326,15 @@ export default function StreetProjectsPage() {
     (lat: number, lng: number, toleranceMeters: number) => {
       const pick = pickStreetAt({ lat, lng }, pickIndex, toleranceMeters);
 
+      // Clicking away drops the selection without moving the map. He is
+      // looking at a cluster; refitting to the whole town for a missed tap
+      // would throw it off screen.
       if (!pick) {
         setFocusStreetId(null);
-        setFocusPickedOnMap(false);
         return;
       }
 
       setFocusStreetId(pick.streetId);
-      setFocusPickedOnMap(true);
       // The list has two halves and only one is on screen. Show the half the
       // street he just picked actually lives in, or the row he is being scrolled
       // to is not rendered at all.
@@ -355,7 +362,7 @@ export default function StreetProjectsPage() {
         streetIds: checkedStreetIds,
       });
       setPlannedRoute(route);
-      setFocusStreetId(null);
+      focusFromList(null);
       setStatusMessage(
         `${Math.round(route.distanceMeters / 100) / 10} km through ${route.streetNames.length} street${
           route.streetNames.length === 1 ? "" : "s"
@@ -366,7 +373,7 @@ export default function StreetProjectsPage() {
     } finally {
       setPlanningRoute(false);
     }
-  }, [user, selectedProject, checkedStreetIds, effectiveStart]);
+  }, [user, selectedProject, checkedStreetIds, effectiveStart, focusFromList]);
 
   const handleDownloadRoute = useCallback(() => {
     if (!plannedRoute) return;
@@ -733,8 +740,8 @@ export default function StreetProjectsPage() {
                 fitKey={
                   creating
                     ? `create:${createRing.length}:${(createPin ?? defaultPin)?.lat.toFixed(3)}`
-                    : focusStreetId && !focusPickedOnMap
-                      ? `${selectedProject?.id}:street:${focusStreetId}`
+                    : fitTarget.streetId
+                      ? `${selectedProject?.id}:street:${fitTarget.streetId}#${fitTarget.nonce}`
                       : plannedRoute
                         ? `${selectedProject?.id}:route:${plannedRoute.streetOrder.join(",")}`
                         : selectedProject?.id

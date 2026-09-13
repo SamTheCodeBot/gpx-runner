@@ -32,7 +32,14 @@ interface StreetProjectMapProps {
   lines?: StreetLines;
   /** Ticked for a route, so the list's checkboxes are visible on the map. */
   checked?: LatLng[][];
-  /** Framed by the map when the list picks a street. */
+  /**
+   * Framed by the map, never drawn by it.
+   *
+   * Separate from `focusLines` because what the map should fly to and what the
+   * map should colour are two different questions with two different answers:
+   * a street picked out of the list wants both, a street picked off the map is
+   * already on screen and wants only the second.
+   */
   focus?: LatLng[][];
   /** The picked street in green and red: what he has run, what he has not. */
   focusLines?: StreetLines;
@@ -241,14 +248,7 @@ export default function StreetProjectMap({
         />
       ))}
 
-      {!focusLines &&
-        focus?.map((piece, index) => (
-          <Polyline
-            key={`focus-${index}`}
-            positions={toLeaflet(piece)}
-            pathOptions={{ color: "rgb(255 65 164)", weight: 6, opacity: 1 }}
-          />
-        ))}
+
 
       {pin && (
         <CircleMarker
