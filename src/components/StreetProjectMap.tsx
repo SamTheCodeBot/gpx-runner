@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { MapContainer, Polygon, Polyline, CircleMarker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 
@@ -44,13 +44,38 @@ function ClickCatcher({ onMapClick }: { onMapClick?: (lat: number, lng: number) 
   return null;
 }
 
-function FitToRing({ ring, fitKey }: { ring: LatLng[]; fitKey?: string }) {
+/** Zoomed in on one short street, this keeps enough town around it to place it. */
+const FOCUS_MAX_ZOOM = 17;
+
+/**
+ * Frames whatever is being looked at: one street when the list has picked one,
+ * the whole project otherwise.
+ *
+ * The same bargain the routes map makes — selecting a route flies to it,
+ * dropping the selection returns to the overview — so the two lists feel like
+ * the same gesture rather than two features that happen to both use Leaflet.
+ */
+function FitToTarget({ ring, focus, fitKey }: { ring: LatLng[]; focus?: LatLng[][]; fitKey?: string }) {
   const map = useMap();
+  const lastFitKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (ring.length < 3) return;
-    const bounds = L.latLngBounds(toLeaflet(ring));
-    map.fitBounds(bounds, { padding: [24, 24] });
+    const focusPoints = (focus ?? []).flat();
+    const focused = focusPoints.length >= 2;
+    const target = focused ? focusPoints : ring.length >= 3 ? ring : [];
+    if (target.length === 0) return;
+
+    // Composed with what is being framed, so clearing a street refits to the
+    // project even though the caller's key has returned to a value it has
+    // already used once.
+    const key = `${fitKey ?? ""}|${focused ? "focus" : "ring"}`;
+    if (lastFitKeyRef.current === key) return;
+    lastFitKeyRef.current = key;
+
+    map.fitBounds(L.latLngBounds(toLeaflet(target)), {
+      padding: focused ? [60, 60] : [24, 24],
+      maxZoom: focused ? FOCUS_MAX_ZOOM : undefined,
+    });
     // `fitKey` lets the caller decide when a refit is wanted: dragging a radius
     // slider should reframe, panning the map by hand should not.
   }, [map, fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,7 +111,7 @@ export default function StreetProjectMap({
     >
       <BaseMapLayer darkMode={darkMode} />
       <ClickCatcher onMapClick={onMapClick} />
-      <FitToRing ring={ring} fitKey={fitKey} />
+      <FitToTarget ring={ring} focus={focus} fitKey={fitKey} />
 
       {ring.length >= 3 && (
         <Polygon

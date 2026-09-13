@@ -163,6 +163,11 @@ export default function StreetProjectsPage() {
     return selectedStreets.find((street) => street.id === focusStreetId)?.geometry;
   }, [focusStreetId, selectedStreets]);
 
+  const focusedStreet = useMemo(
+    () => selectedCoverage?.streets.find((street) => street.streetId === focusStreetId) ?? null,
+    [selectedCoverage, focusStreetId],
+  );
+
   // ── Loading ───────────────────────────────────────────────────────────────
 
   const reloadProjects = useCallback(async () => {
@@ -495,7 +500,11 @@ export default function StreetProjectsPage() {
             <div className="h-[45vh] lg:h-[55%] shrink-0 relative">
               <StreetProjectMap
                 ring={creating ? createRing : selectedProject ? selectedProject.scope.ring : []}
-                lines={creating ? undefined : mapLines}
+                // One street at a time: while the list has picked one, the
+                // green-and-grey coverage of every other street comes off, the
+                // way selecting a route hides the other routes. Otherwise the
+                // answer to "which one is it?" is a pink line in a haystack.
+                lines={creating || focusStreetId ? undefined : mapLines}
                 focus={creating ? undefined : focusGeometry}
                 pin={
                   creating
@@ -508,9 +517,34 @@ export default function StreetProjectsPage() {
                 fitKey={
                   creating
                     ? `create:${createRing.length}:${(createPin ?? defaultPin)?.lat.toFixed(3)}`
-                    : selectedProject?.id
+                    : focusStreetId
+                      ? `${selectedProject?.id}:street:${focusStreetId}`
+                      : selectedProject?.id
                 }
               />
+
+              {!creating && focusedStreet && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] max-w-[90%]">
+                  <div className="flex items-center gap-2 rounded-full bg-surface-container-lowest/95 backdrop-blur-md px-3 py-1.5 shadow-lg">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                    <span className="text-xs font-extrabold text-on-surface truncate">
+                      {focusedStreet.name}
+                      {focusedStreet.part > 0 && (
+                        <span className="font-medium text-on-surface-variant"> · part {focusedStreet.part}</span>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-on-surface-variant shrink-0 hidden sm:inline">
+                      coverage hidden
+                    </span>
+                    <button
+                      onClick={() => setFocusStreetId(null)}
+                      className="text-[10px] font-extrabold text-primary shrink-0"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
