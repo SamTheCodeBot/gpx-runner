@@ -57,6 +57,45 @@ export type ProjectCoverage = {
   distanceRatio: number;
 };
 
+/**
+ * The orders a street list can be read in.
+ *
+ * `progress` is the default because it answers the question he actually asks
+ * the list: which streets am I nearly done with, so I can go and close them
+ * out. `remaining` is the older ordering, kept because "what can I finish in
+ * the next twenty minutes" is a different question from "what is nearly
+ * done" — a 2 km road at 90% still has 200 m left in it, and a 60 m stub at
+ * 10% is a two-minute detour.
+ */
+export type StreetSort = "progress" | "remaining" | "name";
+
+function byName(a: StreetCoverage, b: StreetCoverage): number {
+  return a.name.localeCompare(b.name, "sv-SE") || a.part - b.part;
+}
+
+/**
+ * A street list in the order the runner wants to act on it.
+ *
+ * Completed streets always sink to the bottom, whatever the sort. They are the
+ * ones with nothing left to do, so a town where most streets are done would
+ * otherwise open on a wall of green and bury the one street sitting at 94%
+ * — which is the only line on the page worth a pair of shoes.
+ */
+export function sortStreetCoverage(streets: StreetCoverage[], sort: StreetSort = "progress"): StreetCoverage[] {
+  const compare = (a: StreetCoverage, b: StreetCoverage): number => {
+    if (a.complete !== b.complete) return a.complete ? 1 : -1;
+    if (a.complete) return byName(a, b);
+
+    if (sort === "name") return byName(a, b);
+    if (sort === "remaining") return a.remainingMeters - b.remainingMeters || byName(a, b);
+    // Ties at 0% are common on a fresh project, and a short street is the more
+    // actionable of two equally untouched ones.
+    return b.ratio - a.ratio || a.remainingMeters - b.remainingMeters || byName(a, b);
+  };
+
+  return [...streets].sort(compare);
+}
+
 export function isStreetComplete(lengthMeters: number, coveredMeters: number): boolean {
   if (lengthMeters <= 0) return false;
   if (coveredMeters / lengthMeters >= STREET_COMPLETE_RATIO) return true;

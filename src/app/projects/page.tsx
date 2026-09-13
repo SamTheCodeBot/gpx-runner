@@ -6,7 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, LoginScreen } from "@/components/ui";
 import { MobileDrawer, Sidebar } from "@/components/Sidebar";
 import { buildFamiliarityIndex } from "@/engine/familiarity";
-import { computeProjectCoverage, splitStreetByCoverage, type StreetCoverage } from "@/engine/streets/coverage";
+import {
+  computeProjectCoverage,
+  sortStreetCoverage,
+  splitStreetByCoverage,
+  type StreetCoverage,
+  type StreetSort,
+} from "@/engine/streets/coverage";
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { circleScope, scopeCenter } from "@/engine/streets/scope";
@@ -111,6 +117,7 @@ export default function StreetProjectsPage() {
   const [createRing, setCreateRing] = useState<LatLng[]>([]);
   const [focusStreetId, setFocusStreetId] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
+  const [streetSort, setStreetSort] = useState<StreetSort>("progress");
 
   // ── The history every project is measured against ────────────────────────
   // One history, many scopes: a Varberg run counts towards Varberg and nothing
@@ -556,6 +563,8 @@ export default function StreetProjectsPage() {
                   busy={busy}
                   showDone={showDone}
                   onToggleDone={() => setShowDone((current) => !current)}
+                  streetSort={streetSort}
+                  onSortChange={setStreetSort}
                   onFocus={setFocusStreetId}
                   focusStreetId={focusStreetId}
                   onRefresh={handleRefresh}
@@ -641,6 +650,8 @@ function ProjectDetail({
   busy,
   showDone,
   onToggleDone,
+  streetSort,
+  onSortChange,
   onFocus,
   focusStreetId,
   onRefresh,
@@ -653,16 +664,22 @@ function ProjectDetail({
   busy: null | "creating" | "refreshing" | "adopting";
   showDone: boolean;
   onToggleDone: () => void;
+  streetSort: StreetSort;
+  onSortChange: (sort: StreetSort) => void;
   onFocus: (id: string | null) => void;
   focusStreetId: string | null;
   onRefresh: () => void;
   onAdoptAll: () => void;
   onArchiveToggle: () => void;
 }) {
-  const remaining = coverage.streets
-    .filter((street) => !street.complete)
-    .sort((a, b) => a.remainingMeters - b.remainingMeters);
-  const done = coverage.streets.filter((street) => street.complete);
+  const remaining = sortStreetCoverage(
+    coverage.streets.filter((street) => !street.complete),
+    streetSort,
+  );
+  const done = sortStreetCoverage(
+    coverage.streets.filter((street) => street.complete),
+    streetSort,
+  );
 
   return (
     <div className="space-y-5">
@@ -739,6 +756,8 @@ function ProjectDetail({
           </button>
         </div>
 
+        {!showDone && <StreetSortControl sort={streetSort} onChange={onSortChange} />}
+
         <ul className="divide-y divide-outline-variant/20">
           {(showDone ? done : remaining).slice(0, 300).map((street) => (
             <StreetRow
@@ -761,6 +780,47 @@ function ProjectDetail({
         Street list taken from OpenStreetMap on {new Date(project.snapshotTakenAt).toLocaleDateString()} — {project.wayCount}{" "}
         mapped ways, {project.streetCount} streets. Data © OpenStreetMap contributors.
       </p>
+    </div>
+  );
+}
+
+const STREET_SORTS: Array<{ id: StreetSort; label: string; hint: string }> = [
+  { id: "progress", label: "Most done", hint: "Nearly finished streets first" },
+  { id: "remaining", label: "Least left", hint: "Fewest metres still to run first" },
+  { id: "name", label: "A\u2013Z", hint: "Alphabetical" },
+];
+
+/**
+ * Which way the list is pointing, said out loud.
+ *
+ * A list that silently reorders itself is a list you cannot trust: the same
+ * street is at the top for two different reasons on two different days. The
+ * active sort is named, and the line underneath says what that means, because
+ * "most done" and "least left" disagree more often than they sound like they
+ * should.
+ */
+function StreetSortControl({ sort, onChange }: { sort: StreetSort; onChange: (sort: StreetSort) => void }) {
+  const active = STREET_SORTS.find((option) => option.id === sort) ?? STREET_SORTS[0];
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <Icon name="sort" className="text-sm text-on-surface-variant" />
+        {STREET_SORTS.map((option) => (
+          <button
+            key={option.id}
+            onClick={() => onChange(option.id)}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold transition-colors ${
+              option.id === sort
+                ? "bg-primary-container text-on-primary-container"
+                : "bg-surface-container text-on-surface-variant hover:text-on-surface"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-on-surface-variant pl-1">{active.hint} · finished streets sit under “Done”.</p>
     </div>
   );
 }
@@ -799,8 +859,15 @@ function StreetRow({
           </span>
         </span>
         {!street.complete && (
-          <span className="w-12 shrink-0">
-            <ProgressBar ratio={street.ratio} tone="secondary" />
+          <span className="flex items-center gap-1.5 shrink-0">
+            {/* The number the “most done” sort is ordering on, so the order is
+                something he can check rather than take on faith. */}
+            <span className="text-[11px] font-extrabold text-on-surface-variant tabular-nums w-8 text-right">
+              {Math.round(street.ratio * 100)}%
+            </span>
+            <span className="w-12">
+              <ProgressBar ratio={street.ratio} tone="secondary" />
+            </span>
           </span>
         )}
       </button>
