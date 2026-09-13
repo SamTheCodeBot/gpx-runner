@@ -13,6 +13,11 @@ import type { LatLng } from "@/types";
  * Deliberately dumb — it draws what it is handed. The split between covered and
  * missing comes from the same function that computes the percentage, so the
  * green on this map and the number above it can never disagree.
+ *
+ * Four layers, bottom to top: every street in the project, the ones ticked for
+ * a route, the route itself, and the one street he is looking at. The last of
+ * those is drawn green for what he has run and red for what he has not, which
+ * is the only place on the map where red means anything.
  */
 
 const canvasRenderer = L.canvas({ padding: 0.4 });
@@ -25,12 +30,16 @@ export type StreetLines = {
 interface StreetProjectMapProps {
   ring: LatLng[];
   lines?: StreetLines;
-  /** Highlighted above everything else — a street picked from the list. */
+  /** Ticked for a route, so the list's checkboxes are visible on the map. */
+  checked?: LatLng[][];
+  /** Framed by the map when the list picks a street. */
   focus?: LatLng[][];
+  /** The picked street in green and red: what he has run, what he has not. */
+  focusLines?: StreetLines;
   /** A built route through the ticked streets, drawn over the lot. */
   route?: LatLng[];
   pin?: LatLng | null;
-  onMapClick?: (lat: number, lng: number) => void;
+  onMapClick?: (lat: number, lng: number, toleranceMeters: number) => void;
   fitKey?: string;
   darkMode?: boolean;
 }
@@ -39,9 +48,30 @@ function toLeaflet(points: LatLng[]): [number, number][] {
   return points.map((point) => [point.lat, point.lng]);
 }
 
-function ClickCatcher({ onMapClick }: { onMapClick?: (lat: number, lng: number) => void }) {
-  useMapEvents({
-    click: (event) => onMapClick?.(event.latlng.lat, event.latlng.lng),
+/**
+ * How wide of the mark a click may be and still mean a street.
+ *
+ * In pixels, because that is the unit a finger is aimed in. Converted to metres
+ * against the current zoom before it leaves here: forty metres is a
+ * neighbouring street when you are zoomed in on one road and less than a pixel
+ * when you are looking at the whole town, and a fixed distance would be wrong
+ * at one end or the other.
+ */
+const CLICK_SLOP_PIXELS = 18;
+const MIN_CLICK_TOLERANCE_METERS = 12;
+const MAX_CLICK_TOLERANCE_METERS = 120;
+
+function ClickCatcher({ onMapClick }: { onMapClick?: (lat: number, lng: number, toleranceMeters: number) => void }) {
+  const map = useMapEvents({
+    click: (event) => {
+      if (!onMapClick) return;
+      const offset = map.containerPointToLatLng(event.containerPoint.add(L.point(CLICK_SLOP_PIXELS, 0)));
+      const tolerance = Math.max(
+        MIN_CLICK_TOLERANCE_METERS,
+        Math.min(MAX_CLICK_TOLERANCE_METERS, map.distance(event.latlng, offset)),
+      );
+      onMapClick(event.latlng.lat, event.latlng.lng, tolerance);
+    },
   });
   return null;
 }
@@ -106,7 +136,9 @@ function FitToTarget({
 export default function StreetProjectMap({
   ring,
   lines,
+  checked,
   focus,
+  focusLines,
   route,
   pin,
   onMapClick,
@@ -157,6 +189,15 @@ export default function StreetProjectMap({
         />
       ))}
 
+      {/* Ticked streets, in the colour of the checkbox that ticked them. */}
+      {checked?.map((piece, index) => (
+        <Polyline
+          key={`checked-${index}`}
+          positions={toLeaflet(piece)}
+          pathOptions={{ color: "rgb(255 65 164)", weight: 5, opacity: 0.95 }}
+        />
+      ))}
+
       {route && route.length >= 2 && (
         <>
           {/* A casing under the line so it reads over green streets too. */}
@@ -171,13 +212,43 @@ export default function StreetProjectMap({
         </>
       )}
 
-      {focus?.map((piece, index) => (
+      {/* The picked street: a white casing so it reads out of a town of lines,
+          then green for the part he has run and red for the part he has not.
+          Drawn last, over everything, because it is the thing he just asked
+          about. */}
+      {focusLines &&
+        [...focusLines.covered, ...focusLines.missing].map((piece, index) => (
+          <Polyline
+            key={`focus-casing-${index}`}
+            positions={toLeaflet(piece)}
+            pathOptions={{ color: "#ffffff", weight: 10, opacity: 0.85 }}
+          />
+        ))}
+
+      {focusLines?.covered.map((piece, index) => (
         <Polyline
-          key={`focus-${index}`}
+          key={`focus-covered-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(255 65 164)", weight: 6, opacity: 1 }}
+          pathOptions={{ color: "rgb(34 197 94)", weight: 6, opacity: 1 }}
         />
       ))}
+
+      {focusLines?.missing.map((piece, index) => (
+        <Polyline
+          key={`focus-missing-${index}`}
+          positions={toLeaflet(piece)}
+          pathOptions={{ color: "rgb(239 68 68)", weight: 6, opacity: 1 }}
+        />
+      ))}
+
+      {!focusLines &&
+        focus?.map((piece, index) => (
+          <Polyline
+            key={`focus-${index}`}
+            positions={toLeaflet(piece)}
+            pathOptions={{ color: "rgb(255 65 164)", weight: 6, opacity: 1 }}
+          />
+        ))}
 
       {pin && (
         <CircleMarker

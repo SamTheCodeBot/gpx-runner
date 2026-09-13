@@ -8,13 +8,15 @@ import { MobileDrawer, Sidebar } from "@/components/Sidebar";
 import { buildFamiliarityIndex } from "@/engine/familiarity";
 import {
   computeProjectCoverage,
+  describeStreetCoverage,
   sortStreetCoverage,
-  splitStreetByCoverage,
   type StreetCoverage,
+  type StreetCoverageSplit,
   type StreetSort,
 } from "@/engine/streets/coverage";
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
+import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
 import { circleScope, scopeCenter } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
 import { MAX_SELECTED_STREETS } from "@/engine/streets/streetRoute";
@@ -68,6 +70,25 @@ const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), 
 const DEFAULT_RADIUS_METERS = 3000;
 const PREVIEW_DEBOUNCE_MS = 700;
 const EMPTY_STREETS: Street[] = [];
+/** More rows than this and the browser starts to feel the list. */
+const STREET_LIST_CAP = 300;
+
+/**
+ * What the map is drawing.
+ *
+ * "Everything" is the progress view this page opened life with: green for done,
+ * grey for not. "Left to run" drops every finished street off the map entirely,
+ * which is the view he asked for — with the done streets gone, the gaps that
+ * are left stop being a texture and start being clusters, and a cluster is a
+ * run. Picking between them is his, because they answer different questions and
+ * the page cannot know which one he is asking today.
+ */
+type MapMode = "all" | "left";
+
+const MAP_MODES: Array<{ id: MapMode; label: string }> = [
+  { id: "all", label: "Everything" },
+  { id: "left", label: "Left to run" },
+];
 
 function formatKm(meters: number): string {
   return `${Math.round(meters / 100) / 10} km`;
@@ -120,6 +141,12 @@ export default function StreetProjectsPage() {
   const [createPin, setCreatePin] = useState<LatLng | null>(null);
   const [createRing, setCreateRing] = useState<LatLng[]>([]);
   const [focusStreetId, setFocusStreetId] = useState<string | null>(null);
+  // Whether that street was picked off the map rather than out of the list. A
+  // list click means "show me where this is" and the map should fly to it; a
+  // map click means "what is this one", and flying to it would snatch away the
+  // surroundings he clicked it out of.
+  const [focusPickedOnMap, setFocusPickedOnMap] = useState(false);
+  const [mapMode, setMapMode] = useState<MapMode>("all");
   const [showDone, setShowDone] = useState(false);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
   // Ticked streets, the start they are run from, and the route that came back.
@@ -164,27 +191,75 @@ export default function StreetProjectsPage() {
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
   const selectedPending = selectedId ? pendingById[selectedId] ?? null : null;
 
+  // Every street cut into the part he has run and the part he has not, once.
+  // This is the expensive thing on the page — a town is tens of thousands of
+  // sampled points — so it is computed against the history and then read from,
+  // rather than recomputed every time a checkbox moves.
+  const coverageDetailById = useMemo(() => {
+    const result = new Map<string, StreetCoverageSplit>();
+    for (const street of selectedStreets) result.set(street.id, describeStreetCoverage(street, familiarityIndex));
+    return result;
+  }, [selectedStreets, familiarityIndex]);
+
+  const mapStreets = useMemo(
+    () =>
+      mapMode === "left"
+        ? selectedStreets.filter((street) => !coverageDetailById.get(street.id)?.complete)
+        : selectedStreets,
+    [mapMode, selectedStreets, coverageDetailById],
+  );
+
   const mapLines = useMemo(() => {
-    if (!selectedProject || selectedStreets.length === 0) return undefined;
+    if (!selectedProject || mapStreets.length === 0) return undefined;
     const covered: LatLng[][] = [];
     const missing: LatLng[][] = [];
-    for (const street of selectedStreets) {
-      const split = splitStreetByCoverage(street, familiarityIndex);
-      covered.push(...split.covered);
-      missing.push(...split.missing);
+    for (const street of mapStreets) {
+      const detail = coverageDetailById.get(street.id);
+      if (!detail) continue;
+      missing.push(...detail.missing);
+      // In "left to run" the green comes off too. Half a street he has run is
+      // not what he is looking for, and leaving it drawn puts the clusters back
+      // in the noise they were hiding in.
+      if (mapMode === "all") covered.push(...detail.covered);
     }
     return { covered, missing };
-  }, [selectedProject, selectedStreets, familiarityIndex]);
+  }, [selectedProject, mapStreets, coverageDetailById, mapMode]);
+
+  // Built over what is drawn, so a map showing only unrun streets cannot select
+  // a finished one.
+  const pickIndex = useMemo(() => buildStreetPickIndex(mapStreets), [mapStreets]);
+
+  const checkedLines = useMemo(() => {
+    if (checkedStreetIds.length === 0) return undefined;
+    const out: LatLng[][] = [];
+    for (const id of checkedStreetIds) {
+      const detail = coverageDetailById.get(id);
+      if (detail) out.push(...detail.missing, ...detail.covered);
+    }
+    return out;
+  }, [checkedStreetIds, coverageDetailById]);
 
   const focusGeometry = useMemo(() => {
     if (!focusStreetId) return undefined;
     return selectedStreets.find((street) => street.id === focusStreetId)?.geometry;
   }, [focusStreetId, selectedStreets]);
 
+  const focusDetail = focusStreetId ? coverageDetailById.get(focusStreetId) ?? null : null;
+
+  const focusLines = useMemo(() => {
+    const detail = focusStreetId ? coverageDetailById.get(focusStreetId) : undefined;
+    return detail ? { covered: detail.covered, missing: detail.missing } : undefined;
+  }, [focusStreetId, coverageDetailById]);
+
   const focusedStreet = useMemo(
     () => selectedCoverage?.streets.find((street) => street.streetId === focusStreetId) ?? null,
     [selectedCoverage, focusStreetId],
   );
+
+  const focusFromList = useCallback((streetId: string | null) => {
+    setFocusStreetId(streetId);
+    setFocusPickedOnMap(false);
+  }, []);
 
   // ── The ticked streets, and the route they become ─────────────────────────
 
@@ -214,6 +289,8 @@ export default function StreetProjectsPage() {
     setRouteError(null);
     setPickingStart(false);
     setRouteStart(null);
+    setFocusStreetId(null);
+    setFocusPickedOnMap(false);
   }, [selectedId]);
 
   const toggleChecked = useCallback((streetId: string) => {
@@ -226,6 +303,47 @@ export default function StreetProjectsPage() {
       return [...current, streetId];
     });
   }, []);
+
+  /**
+   * A click on the map: name that street, and tick it.
+   *
+   * One gesture doing two things on purpose. What he asked for was to see the
+   * gaps near each other and then run them, and making him find the same street
+   * again in a list of six hundred to tick it would be the app losing the thread
+   * between those two halves. Clicking it again unticks it, which is the same
+   * bargain the checkbox makes.
+   *
+   * A click on open ground drops the selection, because that is what clicking
+   * away means everywhere else.
+   */
+  const handleMapPick = useCallback(
+    (lat: number, lng: number, toleranceMeters: number) => {
+      const pick = pickStreetAt({ lat, lng }, pickIndex, toleranceMeters);
+
+      if (!pick) {
+        setFocusStreetId(null);
+        setFocusPickedOnMap(false);
+        return;
+      }
+
+      setFocusStreetId(pick.streetId);
+      setFocusPickedOnMap(true);
+      // The list has two halves and only one is on screen. Show the half the
+      // street he just picked actually lives in, or the row he is being scrolled
+      // to is not rendered at all.
+      setShowDone(coverageDetailById.get(pick.streetId)?.complete ?? false);
+
+      if (!checkedStreetIds.includes(pick.streetId) && checkedStreetIds.length >= MAX_SELECTED_STREETS) {
+        setRouteError(
+          `That is the most one route can cover (${MAX_SELECTED_STREETS}). Untick one to make room for this street.`,
+        );
+        return;
+      }
+
+      toggleChecked(pick.streetId);
+    },
+    [pickIndex, checkedStreetIds, coverageDetailById, toggleChecked],
+  );
 
   const handleBuildRoute = useCallback(async () => {
     if (!user || !selectedProject || checkedStreetIds.length === 0 || !effectiveStart) return;
@@ -560,7 +678,7 @@ export default function StreetProjectsPage() {
                     selected={project.id === selectedId}
                     onSelect={() => {
                       setSelectedId(project.id);
-                      setFocusStreetId(null);
+                      focusFromList(null);
                     }}
                   />
                 ))}
@@ -587,12 +705,15 @@ export default function StreetProjectsPage() {
             <div className="h-[45vh] lg:h-[55%] shrink-0 relative">
               <StreetProjectMap
                 ring={creating ? createRing : selectedProject ? selectedProject.scope.ring : []}
-                // One street at a time: while the list has picked one, the
-                // green-and-grey coverage of every other street comes off, the
-                // way selecting a route hides the other routes. Otherwise the
-                // answer to "which one is it?" is a pink line in a haystack.
-                lines={creating || focusStreetId ? undefined : mapLines}
+                // The surrounding streets stay drawn while one is picked. The
+                // whole point of picking a street off this map is to see what
+                // else is near it, and hiding its neighbours to make it stand
+                // out would hide the only thing worth looking at. It stands out
+                // by being cased in white and coloured instead.
+                lines={creating ? undefined : mapLines}
+                checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
+                focusLines={creating ? undefined : focusLines}
                 route={creating ? undefined : routeGeometry}
                 pin={
                   creating
@@ -607,18 +728,43 @@ export default function StreetProjectsPage() {
                           setRouteStart({ lat, lng });
                           setPickingStart(false);
                         }
-                      : undefined
+                      : handleMapPick
                 }
                 fitKey={
                   creating
                     ? `create:${createRing.length}:${(createPin ?? defaultPin)?.lat.toFixed(3)}`
-                    : focusStreetId
+                    : focusStreetId && !focusPickedOnMap
                       ? `${selectedProject?.id}:street:${focusStreetId}`
                       : plannedRoute
                         ? `${selectedProject?.id}:route:${plannedRoute.streetOrder.join(",")}`
                         : selectedProject?.id
                 }
               />
+
+              {!creating && selectedProject && (
+                <div className="absolute top-3 left-3 z-[500] flex flex-col items-start gap-1.5 max-w-[75%]">
+                  <div className="inline-flex rounded-full bg-surface-container-lowest/95 backdrop-blur-md p-0.5 shadow-lg">
+                    {MAP_MODES.map((option) => (
+                      <button
+                        key={option.id}
+                        onClick={() => setMapMode(option.id)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold transition-colors ${
+                          option.id === mapMode
+                            ? "bg-primary text-on-primary"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="rounded-full bg-surface-container-lowest/85 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-bold text-on-surface-variant shadow">
+                    {mapMode === "left"
+                      ? "Only what you still owe. Tap a street to tick it."
+                      : "Tap a street to see it and tick it."}
+                  </p>
+                </div>
+              )}
 
               {!creating && pickingStart && (
                 <div className="absolute inset-0 z-[500] flex items-start justify-center pt-4 pointer-events-none">
@@ -632,21 +778,52 @@ export default function StreetProjectsPage() {
                 </div>
               )}
 
+              {/* The answer to "which 123 m are missing", in words as well as in
+                  colour — and sat at the bottom of the map, out of the way of
+                  the view switch and of the street it is describing. */}
               {!creating && focusedStreet && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] max-w-[90%]">
-                  <div className="flex items-center gap-2 rounded-full bg-surface-container-lowest/95 backdrop-blur-md px-3 py-1.5 shadow-lg">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "rgb(255 65 164)" }} />
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[500] max-w-[92%]">
+                  <div className="flex items-center gap-2.5 rounded-full bg-surface-container-lowest/95 backdrop-blur-md px-3 py-1.5 shadow-lg">
+                    {checkedStreetIds.includes(focusedStreet.streetId) && (
+                      <Icon name="check_circle" filled className="text-sm text-primary shrink-0" />
+                    )}
                     <span className="text-xs font-extrabold text-on-surface truncate">
                       {focusedStreet.name}
                       {focusedStreet.part > 0 && (
                         <span className="font-medium text-on-surface-variant"> · part {focusedStreet.part}</span>
                       )}
                     </span>
-                    <span className="text-[10px] text-on-surface-variant shrink-0 hidden sm:inline">
-                      coverage hidden
-                    </span>
+
+                    {focusDetail && (
+                      <span className="flex items-center gap-2 shrink-0 text-[11px] tabular-nums">
+                        <span className="flex items-center gap-1">
+                          <span
+                            className="w-2.5 h-1.5 rounded-full"
+                            style={{ backgroundColor: "rgb(34 197 94)" }}
+                          />
+                          <span className="text-on-surface-variant">{Math.round(focusDetail.coveredMeters)} m</span>
+                        </span>
+                        {focusDetail.complete ? (
+                          <span className="font-extrabold text-secondary">done</span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="w-2.5 h-1.5 rounded-full"
+                              style={{ backgroundColor: "rgb(239 68 68)" }}
+                            />
+                            <span className="font-extrabold text-on-surface">
+                              {Math.round(focusDetail.missingMeters)} m left
+                            </span>
+                          </span>
+                        )}
+                        <span className="text-on-surface-variant hidden sm:inline">
+                          of {Math.round(focusDetail.lengthMeters)} m
+                        </span>
+                      </span>
+                    )}
+
                     <button
-                      onClick={() => setFocusStreetId(null)}
+                      onClick={() => focusFromList(null)}
                       className="text-[10px] font-extrabold text-primary shrink-0"
                     >
                       Clear
@@ -667,8 +844,9 @@ export default function StreetProjectsPage() {
                   onToggleDone={() => setShowDone((current) => !current)}
                   streetSort={streetSort}
                   onSortChange={setStreetSort}
-                  onFocus={setFocusStreetId}
+                  onFocus={focusFromList}
                   focusStreetId={focusStreetId}
+                  focusDetail={focusDetail}
                   checkedStreetIds={checkedStreetIds}
                   onToggleChecked={toggleChecked}
                   onClearChecked={() => {
@@ -775,6 +953,7 @@ function ProjectDetail({
   onSortChange,
   onFocus,
   focusStreetId,
+  focusDetail,
   checkedStreetIds,
   onToggleChecked,
   onClearChecked,
@@ -802,6 +981,7 @@ function ProjectDetail({
   onSortChange: (sort: StreetSort) => void;
   onFocus: (id: string | null) => void;
   focusStreetId: string | null;
+  focusDetail: StreetCoverageSplit | null;
   checkedStreetIds: string[];
   onToggleChecked: (streetId: string) => void;
   onClearChecked: () => void;
@@ -827,6 +1007,17 @@ function ProjectDetail({
     coverage.streets.filter((street) => street.complete),
     streetSort,
   );
+
+  const listed = showDone ? done : remaining;
+  // The cap keeps six hundred rows out of the DOM, but a street picked off the
+  // map has to be on screen or the click did nothing visible. If it fell
+  // outside the cap it goes on top, where he is about to be scrolled anyway.
+  const capped = listed.slice(0, STREET_LIST_CAP);
+  const focusedOutsideCap =
+    focusStreetId && !capped.some((street) => street.streetId === focusStreetId)
+      ? listed.find((street) => street.streetId === focusStreetId)
+      : undefined;
+  const visible = focusedOutsideCap ? [focusedOutsideCap, ...capped] : capped;
 
   return (
     <div className="space-y-5">
@@ -921,11 +1112,12 @@ function ProjectDetail({
         />
 
         <ul className="divide-y divide-outline-variant/20">
-          {(showDone ? done : remaining).slice(0, 300).map((street) => (
+          {visible.map((street) => (
             <StreetRow
               key={street.streetId}
               street={street}
               focused={street.streetId === focusStreetId}
+              split={street.streetId === focusStreetId ? focusDetail : null}
               onFocus={() => onFocus(street.streetId === focusStreetId ? null : street.streetId)}
               checked={checkedStreetIds.includes(street.streetId)}
               onToggleChecked={() => onToggleChecked(street.streetId)}
@@ -936,9 +1128,9 @@ function ProjectDetail({
           ))}
         </ul>
 
-        {(showDone ? done : remaining).length > 300 && (
+        {listed.length > STREET_LIST_CAP && (
           <p className="text-[11px] text-on-surface-variant pt-2">
-            Showing the first 300 of {(showDone ? done : remaining).length}.
+            Showing the first {STREET_LIST_CAP} of {listed.length}.
           </p>
         )}
       </div>
@@ -1119,6 +1311,7 @@ function StreetRouteBar({
 function StreetRow({
   street,
   focused,
+  split,
   onFocus,
   checked,
   onToggleChecked,
@@ -1126,15 +1319,26 @@ function StreetRow({
 }: {
   street: StreetCoverage;
   focused: boolean;
+  /** Only for the focused row: the same split the map is drawing. */
+  split: StreetCoverageSplit | null;
   onFocus: () => void;
   checked: boolean;
   onToggleChecked: () => void;
   checkDisabled: boolean;
 }) {
+  const rowRef = useRef<HTMLLIElement>(null);
+
+  // Picked on the map, found in the list. Six hundred rows is a long way to
+  // scroll to confirm that the click landed where he thought it did.
+  useEffect(() => {
+    if (focused) rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focused]);
+
   return (
     <li
+      ref={rowRef}
       className={`flex items-center rounded-lg transition-colors ${
-        focused ? "bg-surface-container-high" : "hover:bg-surface-container"
+        focused ? "bg-surface-container-high ring-1 ring-primary/40" : "hover:bg-surface-container"
       }`}
     >
       {/* The ring he asked for, now a box you can tick. Its own button rather
@@ -1172,6 +1376,20 @@ function StreetRow({
               ? `${Math.round(street.lengthMeters)} m done`
               : `${Math.round(street.remainingMeters)} m left of ${Math.round(street.lengthMeters)} m`}
           </span>
+          {/* The map's legend, said once beside the street it belongs to,
+              rather than parked in a corner where it explains nothing. */}
+          {focused && split && !split.complete && (
+            <span className="mt-1 flex items-center gap-2 text-[10px] font-bold">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-1 rounded-full" style={{ backgroundColor: "rgb(34 197 94)" }} />
+                <span className="text-on-surface-variant">{Math.round(split.coveredMeters)} m run</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-1 rounded-full" style={{ backgroundColor: "rgb(239 68 68)" }} />
+                <span className="text-on-surface-variant">{Math.round(split.missingMeters)} m missing</span>
+              </span>
+            </span>
+          )}
         </span>
         {!street.complete && (
           <span className="flex items-center gap-1.5 shrink-0">
