@@ -1,5 +1,6 @@
 import { LatLng, RouteSegment } from "../types";
 import { densifyPolyline, pointToSegmentDistanceMeters, simplifyByDistance, toSegments } from "./utils/geo";
+import { addSegmentToGrid, createSegmentGrid, nearbyValues, type SegmentGrid } from "./utils/spatialGrid";
 
 /**
  * How much of a candidate route the runner has already run.
@@ -10,72 +11,21 @@ import { densifyPolyline, pointToSegmentDistanceMeters, simplifyByDistance, toSe
  */
 
 /** Grid cell size. Must stay comfortably above the widest match radius below. */
-const CELL_METERS = 40;
+export const FAMILIARITY_CELL_METERS = 40;
 const MATCH_RADIUS_METERS = 35;
 const DUPLICATE_RADIUS_METERS = 10;
 
 export type FamiliarityIndex = {
   familiarSegments: RouteSegment[];
-  grid: SegmentGrid;
+  /** Cell contents are indices into `familiarSegments`. */
+  grid: SegmentGrid<number>;
 };
-
-type SegmentGrid = {
-  cells: Map<string, number[]>;
-  latStep: number;
-  lngStep: number;
-};
-
-function createGrid(reference: LatLng | undefined): SegmentGrid {
-  const latStep = CELL_METERS / 111_320;
-  const cosLat = Math.cos(((reference?.lat ?? 0) * Math.PI) / 180);
-  const lngStep = CELL_METERS / Math.max(1, 111_320 * Math.max(0.05, Math.abs(cosLat)));
-  return { cells: new Map(), latStep, lngStep };
-}
-
-function cellKey(grid: SegmentGrid, point: LatLng): string {
-  return `${Math.floor(point.lat / grid.latStep)}:${Math.floor(point.lng / grid.lngStep)}`;
-}
-
-/** Every cell a segment passes through, sampled finely enough not to skip one. */
-function segmentCells(grid: SegmentGrid, segment: RouteSegment): string[] {
-  const steps = Math.max(1, Math.ceil(segment.distanceMeters / (CELL_METERS / 2)));
-  const keys = new Set<string>();
-
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    keys.add(
-      cellKey(grid, {
-        lat: segment.from.lat + (segment.to.lat - segment.from.lat) * t,
-        lng: segment.from.lng + (segment.to.lng - segment.from.lng) * t,
-      }),
-    );
-  }
-
-  return Array.from(keys);
-}
-
-function addSegment(grid: SegmentGrid, segment: RouteSegment, index: number): void {
-  for (const key of segmentCells(grid, segment)) {
-    const bucket = grid.cells.get(key);
-    if (bucket) bucket.push(index);
-    else grid.cells.set(key, [index]);
-  }
-}
 
 /** Segment indices in the 3x3 cell neighbourhood around a point. */
-function nearbySegmentIndices(grid: SegmentGrid, point: LatLng): number[] {
-  const latCell = Math.floor(point.lat / grid.latStep);
-  const lngCell = Math.floor(point.lng / grid.lngStep);
-  const found: number[] = [];
-
-  for (let dLat = -1; dLat <= 1; dLat += 1) {
-    for (let dLng = -1; dLng <= 1; dLng += 1) {
-      const bucket = grid.cells.get(`${latCell + dLat}:${lngCell + dLng}`);
-      if (bucket) found.push(...bucket);
-    }
-  }
-
-  return found;
+function nearbySegmentIndices(grid: SegmentGrid<number>, point: LatLng): number[] {
+  // One ring is enough here and nowhere else: every radius this file matches
+  // against is narrower than a cell.
+  return nearbyValues(grid, point);
 }
 
 export function buildFamiliarityIndex(trackCollections: LatLng[][]): FamiliarityIndex {
@@ -83,7 +33,7 @@ export function buildFamiliarityIndex(trackCollections: LatLng[][]): Familiarity
     toSegments(simplifyByDistance(track, 18)).filter((s) => s.distanceMeters >= 8),
   );
 
-  const grid = createGrid(rawSegments[0]?.from);
+  const grid = createSegmentGrid<number>(FAMILIARITY_CELL_METERS, rawSegments[0]?.from);
   const familiarSegments: RouteSegment[] = [];
 
   for (const segment of rawSegments) {
@@ -97,7 +47,7 @@ export function buildFamiliarityIndex(trackCollections: LatLng[][]): Familiarity
 
     if (duplicate) continue;
 
-    addSegment(grid, segment, familiarSegments.length);
+    addSegmentToGrid(grid, segment.from, segment.to, familiarSegments.length);
     familiarSegments.push(segment);
   }
 
