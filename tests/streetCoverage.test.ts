@@ -6,13 +6,14 @@ import {
   STREET_COMPLETE_RATIO,
   computeProjectCoverage,
   computeStreetCoverage,
+  describeStreetCoverage,
   isStreetComplete,
   splitStreetByCoverage,
 } from "../src/engine/streets/coverage";
 import { buildStreetInventory, type OsmWay } from "../src/engine/streets/inventory";
 import { computeProjectProgress } from "../src/engine/streets/project";
 import { circleScope } from "../src/engine/streets/scope";
-import { destinationPoint, polylineDistanceMeters } from "../src/engine/utils/geo";
+import { destinationPoint, haversineMeters, polylineDistanceMeters } from "../src/engine/utils/geo";
 import { FALKENBERG_HOME, falkenbergWays } from "./helpers/falkenbergStreets";
 import type { LatLng } from "../src/types";
 
@@ -171,5 +172,106 @@ describe("the map shows the same line the percentage was computed from", () => {
 
     assert.ok(Math.abs(coveredMeters - coverage.coveredMeters) < 15, "the drawn line agrees with the number");
     assert.ok(Math.abs(missingMeters - coverage.remainingMeters) < 15);
+  });
+});
+
+describe("which part of a street is missing", () => {
+  it("answers '123 m of 1234 m' with the same number the list shows", () => {
+    const street = oneStreet("Långgatan", 1234);
+    // The first 90% is not enough to finish 1234 m, so there is a real
+    // remainder to point at.
+    const index = buildFamiliarityIndex([runAlong(HOME, 0, 1234, 0.8)]);
+
+    const detail = describeStreetCoverage(street, index);
+    const listed = computeStreetCoverage(street, index);
+
+    assert.equal(detail.complete, false);
+    assert.ok(
+      Math.abs(detail.missingMeters - listed.remainingMeters) < 1,
+      `the map says ${detail.missingMeters} m and the list says ${listed.remainingMeters} m`,
+    );
+    assert.ok(Math.abs(detail.lengthMeters - listed.lengthMeters) < 1);
+  });
+
+  it("puts the red at the end he has not run, not merely somewhere", () => {
+    const street = oneStreet("Ändgatan", 1000);
+    const detail = describeStreetCoverage(street, buildFamiliarityIndex([runAlong(HOME, 0, 1000, 0.5)]));
+
+    const missingPoints = detail.missing.flat();
+    assert.ok(missingPoints.length > 0);
+
+    // Everything drawn red is in the far half; everything green is in the near
+    // half. Measured from the start of the street, which is where he started.
+    for (const point of missingPoints) {
+      assert.ok(haversineMeters(HOME, point) > 480, "red must be the part he is short of");
+    }
+    for (const point of detail.covered.flat()) {
+      assert.ok(haversineMeters(HOME, point) < 520, "green must be the part he has run");
+    }
+  });
+
+  it("covered plus missing is the whole street, with no gap between the colours", () => {
+    const street = oneStreet("Mittgatan", 800);
+    // Two separate outings leaving an untouched stretch in the middle.
+    const index = buildFamiliarityIndex([
+      runAlong(HOME, 0, 800, 0.25),
+      [destinationPoint(HOME, 0, 600), destinationPoint(HOME, 0, 800)],
+    ]);
+
+    const detail = describeStreetCoverage(street, index);
+    const drawn =
+      detail.covered.reduce((sum, piece) => sum + polylineDistanceMeters(piece), 0) +
+      detail.missing.reduce((sum, piece) => sum + polylineDistanceMeters(piece), 0);
+
+    assert.ok(Math.abs(drawn - detail.lengthMeters) < 1, "every metre of the street is one colour or the other");
+    assert.ok(detail.missing.length >= 1, "the untouched middle is drawn as one missing run");
+    assert.ok(detail.covered.length >= 2, "the two outings are drawn separately");
+  });
+
+  it("shows no red at all on a street it has already called complete", () => {
+    // 92% of 1500 m is complete under the 90% rule, and the 120 m the rule
+    // forgives would otherwise be a conspicuous red stretch arguing with the
+    // tick beside the street's name.
+    const street = oneStreet("Storgatan", 1500);
+    const detail = describeStreetCoverage(street, buildFamiliarityIndex([runAlong(HOME, 0, 1500, 0.92)]));
+
+    assert.equal(detail.complete, true);
+    assert.deepEqual(detail.missing, [], "a finished street is not still arguing with itself");
+    assert.equal(detail.missingMeters, 0);
+    assert.ok(
+      Math.abs(detail.coveredMeters - detail.lengthMeters) < 1,
+      "what the completion rule forgives, the map forgives too",
+    );
+    assert.ok(
+      detail.covered.reduce((sum, piece) => sum + polylineDistanceMeters(piece), 0) > 1400,
+      "the whole street is drawn, all of it green",
+    );
+  });
+
+  it("forgives the last few paces of a stub the same way the list does", () => {
+    const street = oneStreet("Gränden", 40);
+    const detail = describeStreetCoverage(street, buildFamiliarityIndex([runAlong(HOME, 0, 40, 0.55)]));
+
+    assert.equal(detail.complete, true);
+    assert.equal(detail.missingMeters, 0);
+  });
+
+  it("agrees with the list about which streets are done, over a whole town", () => {
+    const streets = buildStreetInventory(falkenbergWays(), circleScope(HOME, 3000)).streets.slice(0, 80);
+    const index = buildFamiliarityIndex(streets.slice(0, 30).flatMap((street) => street.geometry));
+    const coverage = computeProjectCoverage(streets, index);
+
+    for (const street of streets) {
+      const detail = describeStreetCoverage(street, index);
+      const listed = coverage.streets.find((candidate) => candidate.streetId === street.id)!;
+
+      assert.equal(detail.complete, listed.complete, `${street.name} is done on the map but not in the list`);
+      if (!listed.complete) {
+        assert.ok(
+          Math.abs(detail.missingMeters - listed.remainingMeters) < 1,
+          `${street.name}: map ${detail.missingMeters} m vs list ${listed.remainingMeters} m`,
+        );
+      }
+    }
   });
 });

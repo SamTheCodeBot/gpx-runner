@@ -1,6 +1,6 @@
 import { LatLng } from "../../types";
 import { nearestFamiliarDistanceMeters, type FamiliarityIndex } from "../familiarity";
-import { densifyPolyline, haversineMeters } from "../utils/geo";
+import { densifyPolyline, haversineMeters, midpoint } from "../utils/geo";
 import type { Street } from "./inventory";
 
 /**
@@ -102,12 +102,28 @@ export function isStreetComplete(lengthMeters: number, coveredMeters: number): b
   return lengthMeters - coveredMeters <= STREET_COMPLETE_REMAINDER_METERS;
 }
 
-export function computeStreetCoverage(street: Street, index: FamiliarityIndex): StreetCoverage {
-  let covered = 0;
-  let length = 0;
+/**
+ * One street walked end to end, cut wherever the answer to "have I been down
+ * here?" changes.
+ *
+ * Every number and every colour this file produces comes from this one walk.
+ * The percentage in the list, the metres still to run, and the green and red
+ * drawn on the map are then arithmetic on the same runs rather than three
+ * traversals that agree by luck — the failure mode being a street labelled
+ * complete with a long red stretch drawn down the middle of it.
+ */
+type CoverageRun = {
+  points: LatLng[];
+  covered: boolean;
+  meters: number;
+};
+
+function walkStreet(street: Street, index: FamiliarityIndex): CoverageRun[] {
+  const runs: CoverageRun[] = [];
 
   for (const piece of street.geometry) {
     const samples = densifyPolyline(piece, SAMPLE_STEP_METERS);
+    let current: CoverageRun | null = null;
 
     for (let i = 1; i < samples.length; i += 1) {
       const from = samples[i - 1];
@@ -115,10 +131,39 @@ export function computeStreetCoverage(street: Street, index: FamiliarityIndex): 
       const stepMeters = haversineMeters(from, to);
       if (stepMeters <= 0) continue;
 
-      length += stepMeters;
-      const midpoint = { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 };
-      if (isOnRunGround(midpoint, index)) covered += stepMeters;
+      const covered = isOnRunGround(midpoint(from, to), index);
+
+      if (!current) {
+        current = { points: [from, to], covered, meters: stepMeters };
+        continue;
+      }
+
+      if (covered === current.covered) {
+        current.points.push(to);
+        current.meters += stepMeters;
+        continue;
+      }
+
+      runs.push(current);
+      current = { points: [from, to], covered, meters: stepMeters };
     }
+
+    // Pieces are never welded together: a street split by the scope edge is two
+    // lines on the map, and joining them would draw across the gap.
+    if (current) runs.push(current);
+  }
+
+  return runs;
+}
+
+export function computeStreetCoverage(street: Street, index: FamiliarityIndex): StreetCoverage {
+  const runs = walkStreet(street, index);
+  let covered = 0;
+  let length = 0;
+
+  for (const run of runs) {
+    length += run.meters;
+    if (run.covered) covered += run.meters;
   }
 
   // Measured length rather than the stored one, so ratio and remainder are
@@ -159,49 +204,76 @@ export function computeProjectCoverage(streets: Street[], index: FamiliarityInde
 /**
  * The street drawn as what is done and what is left, for the map.
  *
- * The same sampling as the numbers above, kept in one place so the line the
- * owner sees on the map is the line the percentage was computed from.
+ * The same walk as the numbers above, kept in one place so the line the owner
+ * sees on the map is the line the percentage was computed from.
  */
 export function splitStreetByCoverage(
   street: Street,
   index: FamiliarityIndex,
 ): { covered: LatLng[][]; missing: LatLng[][] } {
-  const covered: LatLng[][] = [];
-  const missing: LatLng[][] = [];
+  const runs = walkStreet(street, index);
+  return {
+    covered: runs.filter((run) => run.covered).map((run) => run.points),
+    missing: runs.filter((run) => !run.covered).map((run) => run.points),
+  };
+}
 
-  for (const piece of street.geometry) {
-    const samples = densifyPolyline(piece, SAMPLE_STEP_METERS);
-    let current: LatLng[] = [];
-    let currentCovered: boolean | null = null;
+/**
+ * Which part of this street is missing, and how much of it.
+ *
+ * The question the owner actually asks of a street he is 123 m short on: not
+ * *how much* is left, which the list already tells him, but *which* 123 m — so
+ * he can see whether it is the far end, the middle, or a stub he has run past
+ * fifty times without turning into.
+ *
+ * A finished street reports nothing missing, deliberately. The completion rule
+ * is generous on purpose — 90% of a long street, or a remainder small enough to
+ * be turning circle rather than road — and a street the app has already
+ * congratulated him for must not then be drawn with a red stretch down it
+ * arguing the opposite. Once a street is done, the forgiven metres are done
+ * too, and this is the one place that decision is made.
+ */
+export type StreetCoverageSplit = {
+  covered: LatLng[][];
+  missing: LatLng[][];
+  coveredMeters: number;
+  missingMeters: number;
+  lengthMeters: number;
+  complete: boolean;
+};
 
-    for (let i = 1; i < samples.length; i += 1) {
-      const from = samples[i - 1];
-      const to = samples[i];
-      const midpoint = { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 };
-      const isCovered = isOnRunGround(midpoint, index);
+export function describeStreetCoverage(street: Street, index: FamiliarityIndex): StreetCoverageSplit {
+  const runs = walkStreet(street, index);
 
-      if (currentCovered === null) {
-        current = [from, to];
-        currentCovered = isCovered;
-        continue;
-      }
+  let coveredMeters = 0;
+  let lengthMeters = 0;
+  for (const run of runs) {
+    lengthMeters += run.meters;
+    if (run.covered) coveredMeters += run.meters;
+  }
+  if (lengthMeters <= 0) lengthMeters = street.lengthMeters;
 
-      if (isCovered === currentCovered) {
-        current.push(to);
-        continue;
-      }
+  const complete = isStreetComplete(lengthMeters, Math.min(coveredMeters, lengthMeters));
 
-      (currentCovered ? covered : missing).push(current);
-      current = [from, to];
-      currentCovered = isCovered;
-    }
-
-    if (currentCovered !== null && current.length >= 2) {
-      (currentCovered ? covered : missing).push(current);
-    }
+  if (complete) {
+    return {
+      covered: runs.map((run) => run.points),
+      missing: [],
+      coveredMeters: lengthMeters,
+      missingMeters: 0,
+      lengthMeters,
+      complete,
+    };
   }
 
-  return { covered, missing };
+  return {
+    covered: runs.filter((run) => run.covered).map((run) => run.points),
+    missing: runs.filter((run) => !run.covered).map((run) => run.points),
+    coveredMeters,
+    missingMeters: Math.max(0, lengthMeters - coveredMeters),
+    lengthMeters,
+    complete,
+  };
 }
 
 function isOnRunGround(point: LatLng, index: FamiliarityIndex): boolean {
