@@ -180,11 +180,13 @@ export default function StreetProjectMap({
         />
       )}
 
+      {/* Unrun streets were slate grey, which vanished into a grey basemap.
+          Red says "still to do" and survives both light and dark tiles. */}
       {lines?.missing.map((piece, index) => (
         <Polyline
           key={`missing-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(148 163 184)", weight: 3, opacity: 0.85 }}
+          pathOptions={{ color: "#ee5c5c", weight: 3, opacity: 0.9 }}
         />
       ))}
 
