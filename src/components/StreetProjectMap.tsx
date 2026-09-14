@@ -186,7 +186,7 @@ export default function StreetProjectMap({
         <Polyline
           key={`missing-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "#ee5c5c", weight: 3, opacity: 0.9 }}
+          pathOptions={{ color: "#ee5c5c", weight: 2, opacity: 0.9 }}
         />
       ))}
 
@@ -194,7 +194,7 @@ export default function StreetProjectMap({
         <Polyline
           key={`covered-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(34 197 94)", weight: 4, opacity: 0.95 }}
+          pathOptions={{ color: "rgb(34 197 94)", weight: 2.5, opacity: 0.95 }}
         />
       ))}
 
@@ -203,7 +203,7 @@ export default function StreetProjectMap({
         <Polyline
           key={`checked-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(255 65 164)", weight: 5, opacity: 0.95 }}
+          pathOptions={{ color: "rgb(255 65 164)", weight: 3.5, opacity: 0.95 }}
         />
       ))}
 
@@ -212,11 +212,11 @@ export default function StreetProjectMap({
           {/* A casing under the line so it reads over green streets too. */}
           <Polyline
             positions={toLeaflet(route)}
-            pathOptions={{ color: "#ffffff", weight: 8, opacity: 0.9 }}
+            pathOptions={{ color: "#ffffff", weight: 7, opacity: 0.9 }}
           />
           <Polyline
             positions={toLeaflet(route)}
-            pathOptions={{ color: "rgb(197 45 255)", weight: 4, opacity: 1 }}
+            pathOptions={{ color: "rgb(197 45 255)", weight: 3.5, opacity: 1 }}
           />
         </>
       )}
@@ -230,7 +230,7 @@ export default function StreetProjectMap({
           <Polyline
             key={`focus-casing-${index}`}
             positions={toLeaflet(piece)}
-            pathOptions={{ color: "#ffffff", weight: 10, opacity: 0.85 }}
+            pathOptions={{ color: "#ffffff", weight: 7, opacity: 0.85 }}
           />
         ))}
 
@@ -238,7 +238,7 @@ export default function StreetProjectMap({
         <Polyline
           key={`focus-covered-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(34 197 94)", weight: 6, opacity: 1 }}
+          pathOptions={{ color: "rgb(34 197 94)", weight: 4, opacity: 1 }}
         />
       ))}
 
@@ -246,7 +246,7 @@ export default function StreetProjectMap({
         <Polyline
           key={`focus-missing-${index}`}
           positions={toLeaflet(piece)}
-          pathOptions={{ color: "rgb(239 68 68)", weight: 6, opacity: 1 }}
+          pathOptions={{ color: "rgb(239 68 68)", weight: 4, opacity: 1 }}
         />
       ))}
 

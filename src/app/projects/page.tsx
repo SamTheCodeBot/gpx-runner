@@ -752,31 +752,6 @@ export default function StreetProjectsPage() {
                 }
               />
 
-              {!creating && selectedProject && (
-                <div className="absolute top-3 left-3 z-[500] flex flex-col items-start gap-1.5 max-w-[75%]">
-                  <div className="inline-flex rounded-full bg-surface-container-lowest/95 backdrop-blur-md p-0.5 shadow-lg">
-                    {MAP_MODES.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => setMapMode(option.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold transition-colors ${
-                          option.id === mapMode
-                            ? "bg-primary text-on-primary"
-                            : "text-on-surface-variant hover:text-on-surface"
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="rounded-full bg-surface-container-lowest/85 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-bold text-on-surface-variant shadow">
-                    {mapMode === "left"
-                      ? "Only what you still owe. Tap a street to tick it."
-                      : "Tap a street to see it and tick it."}
-                  </p>
-                </div>
-              )}
-
               {!creating && pickingStart && (
                 <div className="absolute inset-0 z-[500] flex items-start justify-center pt-4 pointer-events-none">
                   <div className="bg-primary text-on-primary px-4 py-2 rounded-xl text-xs font-bold shadow-lg pointer-events-auto flex items-center gap-2">
@@ -843,6 +818,29 @@ export default function StreetProjectsPage() {
                 </div>
               )}
             </div>
+
+            {/* The view switch sits under the map, not on it. Floated top-left
+                it landed on Leaflet's own zoom buttons, and two controls in one
+                corner means every tap is a guess. */}
+            {!creating && selectedProject && (
+              <div className="shrink-0 flex justify-center border-b border-outline-variant/30 px-4 py-2">
+                <div className="inline-flex rounded-full bg-surface-container-low p-0.5">
+                  {MAP_MODES.map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => setMapMode(option.id)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-extrabold transition-colors ${
+                        option.id === mapMode
+                          ? "bg-primary text-on-primary"
+                          : "text-on-surface-variant hover:text-on-surface"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
               {selectedProject && selectedCoverage ? (
