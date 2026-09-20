@@ -37,8 +37,11 @@ import {
   patchProject,
   planStreetRoute,
   previewScope,
+  addNearbyStreets,
+  findNearbyStreets,
   refreshProject,
   setStreetExclusions,
+  type NearbyResult,
   type PlannedStreetRoute,
   type ProjectSummary,
   type ScopePreview,
@@ -90,6 +93,19 @@ type MapMode = "all" | "left";
 const MAP_MODES: Array<{ id: MapMode; label: string }> = [
   { id: "all", label: "Everything" },
   { id: "left", label: "Left to run" },
+];
+
+/**
+ * How far outside the project to look for streets it missed.
+ *
+ * Three choices, not a slider. The question he is answering is "just over the
+ * edge" or "the next neighbourhood", and a slider would invite him to tune a
+ * number that only has to be roughly right.
+ */
+const NEARBY_MARGINS: Array<{ meters: number; label: string }> = [
+  { meters: 500, label: "0.5 km" },
+  { meters: 1000, label: "1 km" },
+  { meters: 2000, label: "2 km" },
 ];
 
 function formatKm(meters: number): string {
@@ -159,6 +175,11 @@ export default function StreetProjectsPage() {
   // see what he took out, and put it back from the same place he removed it.
   const [showExcluded, setShowExcluded] = useState(true);
   const [excluding, setExcluding] = useState(false);
+  // The other half of editing a project: streets the circle missed. Held only
+  // while he is looking at them — they are an offer, not part of the project.
+  const [nearby, setNearby] = useState<NearbyResult | null>(null);
+  const [nearbyMargin, setNearbyMargin] = useState(NEARBY_MARGINS[0].meters);
+  const [findingNearby, setFindingNearby] = useState(false);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
   // Ticked streets, the start they are run from, and the route that came back.
   const [checkedStreetIds, setCheckedStreetIds] = useState<string[]>([]);
@@ -223,6 +244,23 @@ export default function StreetProjectsPage() {
     () => (showExcluded ? excludedStreets.flatMap((street) => street.geometry) : undefined),
     [excludedStreets, showExcluded],
   );
+
+  /**
+   * Streets on offer from outside the area, and the index that lets him tap
+   * one. Drawn from raw geometry: they are not in the project, so there is no
+   * coverage to split them into yet.
+   */
+  const nearbyStreets = useMemo<Street[]>(
+    () => (nearby ? [...nearby.additions, ...nearby.extensions.map((extension) => extension.street)] : []),
+    [nearby],
+  );
+
+  const nearbyLines = useMemo(
+    () => (nearbyStreets.length > 0 ? nearbyStreets.flatMap((street) => street.geometry) : undefined),
+    [nearbyStreets],
+  );
+
+  const nearbyPickIndex = useMemo(() => buildStreetPickIndex(nearbyStreets), [nearbyStreets]);
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
   const selectedPending = selectedId ? pendingById[selectedId] ?? null : null;
 
@@ -331,6 +369,8 @@ export default function StreetProjectsPage() {
     setRouteStart(null);
     setFocusStreetId(null);
     setFitTarget({ streetId: null, nonce: 0 });
+    // An offer of streets outside Falkenberg means nothing in Varberg.
+    setNearby(null);
   }, [selectedId]);
 
   const toggleChecked = useCallback((streetId: string) => {
@@ -343,6 +383,80 @@ export default function StreetProjectsPage() {
       return [...current, streetId];
     });
   }, []);
+
+  /**
+   * Look just outside the project for streets the area missed.
+   *
+   * Costs an Overpass read and changes nothing: what comes back is an offer.
+   * The project's own area is never grown — growing it would mean the next
+   * refresh quietly inventoried a bigger town and moved the goalposts, which
+   * is the one thing the frozen snapshot exists to prevent.
+   */
+  const handleFindNearby = useCallback(
+    async (marginMeters: number) => {
+      if (!user || !selectedProject) return;
+      setFindingNearby(true);
+      setErrorMessage(null);
+      setNearbyMargin(marginMeters);
+      try {
+        const found = await findNearbyStreets(user, selectedProject.id, marginMeters);
+        setNearby(found);
+        setStatusMessage(found.message);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not read the street map.");
+      } finally {
+        setFindingNearby(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  const handleAddNearby = useCallback(
+    async (streetIds: string[]) => {
+      if (!user || !selectedProject || streetIds.length === 0) return;
+      setFindingNearby(true);
+      setErrorMessage(null);
+      try {
+        const result = await addNearbyStreets(user, selectedProject.id, streetIds, nearbyMargin);
+        const projectId = selectedProject.id;
+
+        setStreetsById((current) => ({ ...current, [projectId]: result.streets }));
+        cacheStreets(projectId, result.project.snapshotTakenAt, encodeStreets(result.streets));
+        setProjects((current) =>
+          current.map((project) =>
+            // The scope is deliberately unchanged, so it is kept from the copy
+            // already in hand rather than taken from a response that omits it.
+            project.id === projectId ? { ...result.project, scope: project.scope } : project,
+          ),
+        );
+
+        // What is left of the offer, minus what he just took.
+        setNearby((current) =>
+          current
+            ? {
+                ...current,
+                additions: current.additions.filter((street) => !streetIds.includes(street.id)),
+                extensions: current.extensions.filter(
+                  (extension) =>
+                    !streetIds.includes(extension.street.id) && !streetIds.includes(extension.replacesId),
+                ),
+              }
+            : current,
+        );
+
+        setStatusMessage(
+          `${result.addedCount} street${result.addedCount === 1 ? "" : "s"} added. The project is now ${
+            result.project.streetCount
+          } streets.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not add those streets.");
+      } finally {
+        setFindingNearby(false);
+      }
+    },
+    [user, selectedProject, nearbyMargin],
+  );
 
   /**
    * A click on the map: name that street, and tick it.
@@ -358,6 +472,18 @@ export default function StreetProjectsPage() {
    */
   const handleMapPick = useCallback(
     (lat: number, lng: number, toleranceMeters: number) => {
+      // While an offer of outside streets is on screen, a tap on one of the
+      // blue ones adds it. He spotted the gap by looking at the map, so the fix
+      // belongs on the map and not only in a list he would have to find the
+      // same street in all over again.
+      if (nearbyStreets.length > 0) {
+        const candidate = pickStreetAt({ lat, lng }, nearbyPickIndex, toleranceMeters);
+        if (candidate) {
+          handleAddNearby([candidate.streetId]);
+          return;
+        }
+      }
+
       const pick = pickStreetAt({ lat, lng }, pickIndex, toleranceMeters);
 
       // Clicking away drops the selection without moving the map. He is
@@ -383,7 +509,15 @@ export default function StreetProjectsPage() {
 
       toggleChecked(pick.streetId);
     },
-    [pickIndex, checkedStreetIds, coverageDetailById, toggleChecked],
+    [
+      pickIndex,
+      checkedStreetIds,
+      coverageDetailById,
+      toggleChecked,
+      nearbyStreets,
+      nearbyPickIndex,
+      handleAddNearby,
+    ],
   );
 
   const handleBuildRoute = useCallback(async () => {
@@ -795,6 +929,7 @@ export default function StreetProjectsPage() {
                 // by being cased in white and coloured instead.
                 lines={creating ? undefined : mapLines}
                 excluded={creating ? undefined : excludedLines}
+                candidates={creating ? undefined : nearbyLines}
                 checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
                 focusLines={creating ? undefined : focusLines}
@@ -956,6 +1091,12 @@ export default function StreetProjectsPage() {
                   excluding={excluding}
                   showExcluded={showExcluded}
                   onToggleShowExcluded={() => setShowExcluded((current) => !current)}
+                  nearby={nearby}
+                  nearbyMargin={nearbyMargin}
+                  findingNearby={findingNearby}
+                  onFindNearby={handleFindNearby}
+                  onAddNearby={handleAddNearby}
+                  onClearNearby={() => setNearby(null)}
                 />
               ) : (
                 <p className="text-xs text-on-surface-variant">
@@ -1062,6 +1203,12 @@ function ProjectDetail({
   excluding,
   showExcluded,
   onToggleShowExcluded,
+  nearby,
+  nearbyMargin,
+  findingNearby,
+  onFindNearby,
+  onAddNearby,
+  onClearNearby,
 }: {
   project: ProjectSummary;
   coverage: ReturnType<typeof computeProjectCoverage>;
@@ -1095,6 +1242,12 @@ function ProjectDetail({
   excluding: boolean;
   showExcluded: boolean;
   onToggleShowExcluded: () => void;
+  nearby: NearbyResult | null;
+  nearbyMargin: number;
+  findingNearby: boolean;
+  onFindNearby: (marginMeters: number) => void;
+  onAddNearby: (streetIds: string[]) => void;
+  onClearNearby: () => void;
 }) {
   const remaining = sortStreetCoverage(
     coverage.streets.filter((street) => !street.complete),
@@ -1238,6 +1391,112 @@ function ProjectDetail({
           <p className="text-[11px] text-on-surface-variant pt-2">
             Showing the first {STREET_LIST_CAP} of {listed.length}.
           </p>
+        )}
+      </div>
+
+      {/* The other half of editing a project: what the area missed.
+          A circle drawn round a pin never lands exactly on a town, and the
+          alternative to this is deleting the project and starting again —
+          throwing away the months of progress that made it worth keeping. */}
+      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
+            Add streets the area missed
+          </p>
+          {nearby && (
+            <button onClick={onClearNearby} className="text-xs font-extrabold text-on-surface-variant">
+              Done
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-on-surface-variant">Look outside by</span>
+          {NEARBY_MARGINS.map((option) => (
+            <button
+              key={option.meters}
+              onClick={() => onFindNearby(option.meters)}
+              disabled={findingNearby}
+              className={`rounded-full px-3 py-1 text-[11px] font-extrabold transition-colors disabled:opacity-40 ${
+                nearby && option.meters === nearbyMargin
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+          {findingNearby && <span className="text-[11px] text-on-surface-variant">Asking OSM…</span>}
+        </div>
+
+        {nearby && (nearby.additions.length > 0 || nearby.extensions.length > 0) ? (
+          <>
+            <p className="text-[11px] text-on-surface-variant">
+              Drawn in blue on the map. Adding one grows the denominator — you will see exactly which street did it.
+            </p>
+
+            {nearby.extensions.length > 0 && (
+              <ul className="space-y-1">
+                {nearby.extensions.map((extension) => (
+                  <li key={extension.replacesId} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-on-surface">
+                      {extension.street.name}
+                      <span className="text-on-surface-variant">
+                        {" "}
+                        · cut short at {extension.wasMeters} m, really {extension.nowMeters} m
+                      </span>
+                    </span>
+                    <button
+                      onClick={() => onAddNearby([extension.replacesId])}
+                      disabled={findingNearby}
+                      className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                    >
+                      Use all of it
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {nearby.additions.length > 0 && (
+              <ul className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
+                {nearby.additions.map((street) => (
+                  <li key={street.id} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-on-surface-variant">
+                      {street.name}
+                      {street.part > 0 && <span> · part {street.part}</span>}
+                      <span className="text-on-surface-variant/70"> · {Math.round(street.lengthMeters)} m</span>
+                    </span>
+                    <button
+                      onClick={() => onAddNearby([street.id])}
+                      disabled={findingNearby}
+                      className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {nearby.additions.length > 1 && (
+              <button
+                onClick={() => onAddNearby(nearby.additions.map((street) => street.id))}
+                disabled={findingNearby}
+                className="rounded-xl bg-primary text-on-primary px-3 py-2 text-xs font-extrabold disabled:opacity-50"
+              >
+                Add all {nearby.additions.length}
+              </button>
+            )}
+
+            {nearby.truncated && (
+              <p className="text-[11px] text-on-surface-variant">
+                That is a lot of streets. Try a smaller margin if this is more town than you meant.
+              </p>
+            )}
+          </>
+        ) : (
+          nearby && <p className="text-[11px] text-on-surface-variant">{nearby.message}</p>
         )}
       </div>
 

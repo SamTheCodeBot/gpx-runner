@@ -31,6 +31,8 @@ export type ProjectSummary = {
   pendingAdditionCount: number;
   /** Streets struck off by the owner. Out of every percentage, still in the map. */
   excludedStreetIds: string[];
+  /** Streets let in from outside the project area. */
+  addedStreetIds: string[];
 };
 
 export type ScopeRequest =
@@ -92,6 +94,7 @@ function toSummary(raw: any): ProjectSummary {
     lastRefreshedAt: raw.lastRefreshedAt ?? null,
     pendingAdditionCount: raw.pendingAdditionCount ?? 0,
     excludedStreetIds: raw.excludedStreetIds ?? [],
+    addedStreetIds: raw.addedStreetIds ?? [],
   };
 }
 
@@ -171,6 +174,85 @@ export async function setStreetExclusions(
     body: JSON.stringify({ streetIds, excluded }),
   });
   return toSummary(payload.project);
+}
+
+/**
+ * What is just outside the project area.
+ *
+ * The circle was a guess. This is the correction: streets wholly outside it,
+ * and streets it cut in half that carry on over the line. Nothing is changed
+ * until `addNearbyStreets` is called with the ones he picked.
+ */
+export type StreetExtensionView = {
+  street: Street;
+  replacesId: string;
+  wasMeters: number;
+  nowMeters: number;
+};
+
+export type NearbyResult = {
+  marginMeters: number;
+  message: string;
+  additions: Street[];
+  extensions: StreetExtensionView[];
+  truncated: boolean;
+};
+
+export async function findNearbyStreets(
+  user: User,
+  projectId: string,
+  marginMeters: number,
+): Promise<NearbyResult> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/nearby`, {
+    method: "POST",
+    body: JSON.stringify({ marginMeters }),
+  });
+
+  return {
+    marginMeters: payload.marginMeters ?? marginMeters,
+    message: payload.message ?? "",
+    additions: decodeStreets(payload.additions as WireStreet[]),
+    extensions: (payload.extensions ?? []).map((raw: any) => ({
+      street: decodeStreets([raw.street as WireStreet])[0],
+      replacesId: raw.replacesId,
+      wasMeters: raw.wasMeters ?? 0,
+      nowMeters: raw.nowMeters ?? 0,
+    })),
+    truncated: Boolean(payload.truncated),
+  };
+}
+
+export async function addNearbyStreets(
+  user: User,
+  projectId: string,
+  streetIds: string[],
+  marginMeters: number,
+): Promise<{ project: Omit<ProjectSummary, "scope">; streets: Street[]; addedCount: number }> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/nearby`, {
+    method: "PUT",
+    body: JSON.stringify({ streetIds, marginMeters }),
+  });
+
+  const raw = payload.project ?? {};
+  return {
+    // The scope is unchanged by design, so the server does not send it back.
+    project: {
+      id: raw.id,
+      name: raw.name,
+      createdAt: raw.createdAt,
+      archivedAt: raw.archivedAt ?? null,
+      streetCount: raw.streetCount ?? 0,
+      totalMeters: raw.totalMeters ?? 0,
+      wayCount: raw.wayCount ?? 0,
+      snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
+      lastRefreshedAt: raw.lastRefreshedAt ?? null,
+      pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+      excludedStreetIds: raw.excludedStreetIds ?? [],
+      addedStreetIds: raw.addedStreetIds ?? [],
+    },
+    streets: decodeStreets(payload.streets as WireStreet[]),
+    addedCount: payload.addedCount ?? 0,
+  };
 }
 
 export type RefreshResult = {

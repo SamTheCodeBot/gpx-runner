@@ -39,6 +39,15 @@ interface StreetProjectMapProps {
    * without competing with the red he is actually hunting.
    */
   excluded?: LatLng[][];
+  /**
+   * Streets just outside the project, offered but not in it.
+   *
+   * Drawn in a colour that belongs to neither done nor left-to-run, because
+   * they are neither: they are a question. Seeing them on the map is the whole
+   * point — "the circle isn't perfect" is something you notice by looking at
+   * it, so the fix has to live in the same place.
+   */
+  candidates?: LatLng[][];
   /** Ticked for a route, so the list's checkboxes are visible on the map. */
   checked?: LatLng[][];
   /**
@@ -153,6 +162,7 @@ export default function StreetProjectMap({
   ring,
   lines,
   excluded,
+  candidates,
   checked,
   focus,
   focusLines,
@@ -198,6 +208,16 @@ export default function StreetProjectMap({
           key={`excluded-${index}`}
           positions={toLeaflet(piece)}
           pathOptions={{ color: "#8a8a8a", weight: 1.5, opacity: 0.45, dashArray: "4 5" }}
+        />
+      ))}
+
+      {/* Candidates from outside the area: blue, so they read as an offer and
+          not as work outstanding. */}
+      {candidates?.map((piece, index) => (
+        <Polyline
+          key={`candidate-${index}`}
+          positions={toLeaflet(piece)}
+          pathOptions={{ color: "#3b9dff", weight: 2.5, opacity: 0.85, dashArray: "8 4" }}
         />
       ))}
 

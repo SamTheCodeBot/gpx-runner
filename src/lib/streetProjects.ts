@@ -1,5 +1,6 @@
 import { adminDb } from "@/lib/firebaseAdmin";
 import { applyExclusionChange, pruneExclusions } from "@/engine/streets/exclusions";
+import { mergeNearbyStreets, type StreetExtension } from "@/engine/streets/nearby";
 import type { Street } from "@/engine/streets/inventory";
 import { decodeScope, decodeStreets, encodeScope, encodeStreets, chunkStreets, type WireStreet } from "@/engine/streets/serialize";
 import type { StreetScope } from "@/engine/streets/scope";
@@ -38,6 +39,14 @@ type ProjectDoc = {
   pendingAdditionCount?: number;
   /** Street ids the owner has struck off. Absent on projects made before this. */
   excludedStreetIds?: string[];
+  /**
+   * Street ids the owner added from outside the project area.
+   *
+   * Recorded because a refresh only ever reads *inside* the scope: without
+   * this, every refresh would find these streets missing from its inventory
+   * and report the streets he deliberately added as gone from OSM.
+   */
+  addedStreetIds?: string[];
 };
 
 function toSummary(id: string, data: ProjectDoc): StoredProject {
@@ -56,6 +65,7 @@ function toSummary(id: string, data: ProjectDoc): StoredProject {
     lastRefreshedAt: data.lastRefreshedAt ?? null,
     pendingAdditionCount: data.pendingAdditionCount ?? 0,
     excludedStreetIds: data.excludedStreetIds ?? [],
+    addedStreetIds: data.addedStreetIds ?? [],
   };
 }
 
@@ -87,6 +97,7 @@ export async function createProject(input: {
     lastRefreshedAt: null,
     pendingAdditionCount: 0,
     excludedStreetIds: [],
+    addedStreetIds: [],
   };
 
   const batch = db.batch();
@@ -148,6 +159,68 @@ export async function updateProject(
 
   const fresh = await ref.get();
   return toSummary(fresh.id, fresh.data() as ProjectDoc);
+}
+
+/**
+ * Let streets in from outside the project area.
+ *
+ * The mirror of exclusion, and the answer to a circle that was never going to
+ * be perfect. An addition is a whole street the area missed; an extension
+ * replaces a stub the area cut in half, keeping the snapshot's id so an
+ * exclusion or a ticked route pointing at that street survives the change.
+ *
+ * The scope itself is deliberately left alone. Growing it would mean the next
+ * refresh silently inventoried the larger area and enlarged the denominator
+ * behind him — the exact betrayal the frozen snapshot exists to prevent. What
+ * he added, he added; nothing else came with it.
+ */
+export async function addStreetsToProject(
+  ownerUid: string,
+  projectId: string,
+  chosen: { additions: Street[]; extensions: StreetExtension[] },
+): Promise<{ project: StoredProject; streets: Street[]; addedCount: number } | null> {
+  const loaded = await loadProject(ownerUid, projectId);
+  if (!loaded) return null;
+
+  const merged = mergeNearbyStreets(loaded.streets, chosen);
+  const addedCount = chosen.additions.length + chosen.extensions.length;
+  if (addedCount === 0) return { project: loaded.project, streets: loaded.streets, addedCount: 0 };
+
+  const db = adminDb();
+  const ref = db.collection(PROJECT_COLLECTION).doc(projectId);
+  const chunks = chunkStreets(encodeStreets(merged));
+  const existing = await ref.collection(INVENTORY_SUBCOLLECTION).get();
+
+  const batch = db.batch();
+  for (const doc of existing.docs) {
+    if (doc.id !== PENDING_DOC) batch.delete(doc.ref);
+  }
+  chunks.forEach((chunk, index) => {
+    batch.set(ref.collection(INVENTORY_SUBCOLLECTION).doc(String(index)), { index, streets: chunk });
+  });
+
+  // Extensions keep their existing id, so only the wholly new ones are
+  // outside-the-scope streets a refresh would otherwise call missing.
+  const addedIds = [
+    ...new Set([...loaded.project.addedStreetIds, ...chosen.additions.map((street) => street.id)]),
+  ].sort();
+
+  batch.update(ref, {
+    streetCount: merged.length,
+    totalMeters: Math.round(merged.reduce((sum, street) => sum + street.lengthMeters, 0)),
+    chunkCount: chunks.length,
+    addedStreetIds: addedIds,
+    excludedStreetIds: pruneExclusions(loaded.project.excludedStreetIds, merged),
+  });
+
+  await batch.commit();
+
+  const fresh = await ref.get();
+  return {
+    project: toSummary(fresh.id, fresh.data() as ProjectDoc),
+    streets: merged,
+    addedCount,
+  };
 }
 
 /**
@@ -284,6 +357,7 @@ export async function adoptPendingAdditions(
     // Exclusions survive the rewrite, minus any whose street is gone.
     excludedStreetIds: pruneExclusions(loaded.project.excludedStreetIds, merged),
   });
+
 
   await batch.commit();
 
