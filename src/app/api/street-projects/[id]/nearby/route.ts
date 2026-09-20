@@ -4,7 +4,7 @@ import { describeNearby, findNearbyStreets } from "@/engine/streets/nearby";
 import { growScope } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
 import { addStreetsToProject, loadProject } from "@/lib/streetProjects";
-import { inventoryForScope, overpassErrorResponse, requireUid } from "../../shared";
+import { inventoryForScope, overpassErrorResponse, requestDeadline, requireUid } from "../../shared";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -20,9 +20,17 @@ export const maxDuration = 120;
  * decision, and that is the other endpoint.
  */
 
-/** Far enough to catch the estate over the roundabout, near enough to stay a list. */
+/**
+ * Far enough to catch the estate over the roundabout, near enough to stay a
+ * list.
+ *
+ * The cap came down from 3 km after a 2 km margin on a 3 km project earned a
+ * 504: area grows with the square of the radius, so "look 2 km further out"
+ * around a 3 km circle is not 60% more town, it is nearly three times as much.
+ * Pointing at a road is the tool for anything beyond this.
+ */
 const DEFAULT_MARGIN_METERS = 750;
-const MAX_MARGIN_METERS = 3000;
+const MAX_MARGIN_METERS = 1500;
 /** A margin around a kommun would return a county. The owner picks streets, not regions. */
 const MAX_CANDIDATES = 400;
 
@@ -43,7 +51,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const marginMeters = marginFrom(body);
 
   try {
-    const wider = await inventoryForScope(growScope(loaded.project.scope, marginMeters));
+    // Without a deadline the Overpass client will happily spend several
+    // minutes over four attempts, and the platform kills the function at 60 s
+    // — so the browser got a bare 504 with nothing in it to act on. Ours is
+    // below the platform's, so we lose the race deliberately and with a
+    // sentence attached.
+    const wider = await inventoryForScope(growScope(loaded.project.scope, marginMeters), {
+      deadlineAt: requestDeadline(),
+    });
     const nearby = findNearbyStreets(loaded.streets, wider.streets);
 
     // Streets he already let in sit outside the project scope, so a wider read
@@ -96,7 +111,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   try {
     // Cached by the call that listed them, so this is the same map the owner
     // was looking at when he picked.
-    const wider = await inventoryForScope(growScope(loaded.project.scope, marginMeters));
+    const wider = await inventoryForScope(growScope(loaded.project.scope, marginMeters), {
+      deadlineAt: requestDeadline(),
+    });
     const nearby = findNearbyStreets(loaded.streets, wider.streets);
 
     const additions = nearby.additions.filter((street) => wanted.has(street.id));

@@ -38,11 +38,14 @@ import {
   planStreetRoute,
   previewScope,
   addNearbyStreets,
+  addStreetAt,
   findNearbyStreets,
+  identifyStreetAt,
   refreshProject,
   setStreetExclusions,
   type NearbyResult,
   type PlannedStreetRoute,
+  type StreetAtPoint,
   type ProjectSummary,
   type ScopePreview,
   type ScopeRequest,
@@ -180,6 +183,15 @@ export default function StreetProjectsPage() {
   const [nearby, setNearby] = useState<NearbyResult | null>(null);
   const [nearbyMargin, setNearbyMargin] = useState(NEARBY_MARGINS[0].meters);
   const [findingNearby, setFindingNearby] = useState(false);
+  // Pointing at a road: the local answer to a local problem. A tap asks OSM
+  // what is under it, and nothing is added until he has seen the name.
+  const [pointingAtRoad, setPointingAtRoad] = useState(false);
+  const [pointedStreet, setPointedStreet] = useState<StreetAtPoint | null>(null);
+  const [pointing, setPointing] = useState(false);
+  // Kept so the confirm re-resolves the same spot server-side rather than
+  // trusting geometry the browser is holding.
+  const [pointedPoint, setPointedPoint] = useState<LatLng | null>(null);
+  const [pointedTolerance, setPointedTolerance] = useState(30);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
   // Ticked streets, the start they are run from, and the route that came back.
   const [checkedStreetIds, setCheckedStreetIds] = useState<string[]>([]);
@@ -255,10 +267,13 @@ export default function StreetProjectsPage() {
     [nearby],
   );
 
-  const nearbyLines = useMemo(
-    () => (nearbyStreets.length > 0 ? nearbyStreets.flatMap((street) => street.geometry) : undefined),
-    [nearbyStreets],
-  );
+  const nearbyLines = useMemo(() => {
+    // The road he just pointed at is drawn the same blue as the rest of the
+    // offer: it is the same kind of thing, arrived at by a different gesture.
+    const pieces = nearbyStreets.flatMap((street) => street.geometry);
+    if (pointedStreet) pieces.push(...pointedStreet.street.geometry);
+    return pieces.length > 0 ? pieces : undefined;
+  }, [nearbyStreets, pointedStreet]);
 
   const nearbyPickIndex = useMemo(() => buildStreetPickIndex(nearbyStreets), [nearbyStreets]);
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
@@ -371,6 +386,9 @@ export default function StreetProjectsPage() {
     setFitTarget({ streetId: null, nonce: 0 });
     // An offer of streets outside Falkenberg means nothing in Varberg.
     setNearby(null);
+    setPointingAtRoad(false);
+    setPointedStreet(null);
+    setPointedPoint(null);
   }, [selectedId]);
 
   const toggleChecked = useCallback((streetId: string) => {
@@ -459,6 +477,68 @@ export default function StreetProjectsPage() {
   );
 
   /**
+   * A tap while pointing at a road: ask OSM what is under it.
+   *
+   * Nothing is added here. He sees the name and the length first, because a tap
+   * on a map is a coarse instrument and "Storgatan, 900 m" is the only way to
+   * know the finger landed on the road he meant.
+   */
+  const handlePointAtRoad = useCallback(
+    async (lat: number, lng: number, toleranceMeters: number) => {
+      if (!user || !selectedProject) return;
+      setPointing(true);
+      setErrorMessage(null);
+      setPointedStreet(null);
+      try {
+        const found = await identifyStreetAt(user, selectedProject.id, { lat, lng }, toleranceMeters);
+        setPointedStreet(found);
+        if (found.kind === "already_in_project") {
+          setStatusMessage(`${found.name} is already in this project.`);
+        }
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not read that road.");
+      } finally {
+        setPointing(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  const handleAddPointedStreet = useCallback(
+    async (point: LatLng, toleranceMeters: number) => {
+      if (!user || !selectedProject) return;
+      setPointing(true);
+      setErrorMessage(null);
+      try {
+        const result = await addStreetAt(user, selectedProject.id, point, toleranceMeters);
+        const projectId = selectedProject.id;
+
+        setStreetsById((current) => ({ ...current, [projectId]: result.streets }));
+        cacheStreets(projectId, result.project.snapshotTakenAt, encodeStreets(result.streets));
+        setProjects((current) =>
+          current.map((project) =>
+            // The scope is unchanged by design, so it is kept rather than taken
+            // from a response that deliberately omits it.
+            project.id === projectId ? { ...result.project, scope: project.scope } : project,
+          ),
+        );
+
+        setPointedStreet(null);
+        setStatusMessage(
+          result.kind === "extension"
+            ? `${result.name} now counts for its whole length.`
+            : `${result.name} added. The project is now ${result.project.streetCount} streets.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not add that road.");
+      } finally {
+        setPointing(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  /**
    * A click on the map: name that street, and tick it.
    *
    * One gesture doing two things on purpose. What he asked for was to see the
@@ -472,6 +552,16 @@ export default function StreetProjectsPage() {
    */
   const handleMapPick = useCallback(
     (lat: number, lng: number, toleranceMeters: number) => {
+      // Pointing at a road takes the tap before anything else: he has said what
+      // this gesture means, and a road he wants to add is by definition one the
+      // project's own street list cannot answer for.
+      if (pointingAtRoad) {
+        setPointedPoint({ lat, lng });
+        setPointedTolerance(toleranceMeters);
+        void handlePointAtRoad(lat, lng, toleranceMeters);
+        return;
+      }
+
       // While an offer of outside streets is on screen, a tap on one of the
       // blue ones adds it. He spotted the gap by looking at the map, so the fix
       // belongs on the map and not only in a list he would have to find the
@@ -517,6 +607,8 @@ export default function StreetProjectsPage() {
       nearbyStreets,
       nearbyPickIndex,
       handleAddNearby,
+      pointingAtRoad,
+      handlePointAtRoad,
     ],
   );
 
@@ -1097,6 +1189,17 @@ export default function StreetProjectsPage() {
                   onFindNearby={handleFindNearby}
                   onAddNearby={handleAddNearby}
                   onClearNearby={() => setNearby(null)}
+                  pointingAtRoad={pointingAtRoad}
+                  onTogglePointing={() => {
+                    setPointingAtRoad((current) => !current);
+                    setPointedStreet(null);
+                  }}
+                  pointedStreet={pointedStreet}
+                  pointing={pointing}
+                  onConfirmPointed={() => {
+                    if (pointedPoint) void handleAddPointedStreet(pointedPoint, pointedTolerance);
+                  }}
+                  onDismissPointed={() => setPointedStreet(null)}
                 />
               ) : (
                 <p className="text-xs text-on-surface-variant">
@@ -1209,6 +1312,12 @@ function ProjectDetail({
   onFindNearby,
   onAddNearby,
   onClearNearby,
+  pointingAtRoad,
+  onTogglePointing,
+  pointedStreet,
+  pointing,
+  onConfirmPointed,
+  onDismissPointed,
 }: {
   project: ProjectSummary;
   coverage: ReturnType<typeof computeProjectCoverage>;
@@ -1248,6 +1357,12 @@ function ProjectDetail({
   onFindNearby: (marginMeters: number) => void;
   onAddNearby: (streetIds: string[]) => void;
   onClearNearby: () => void;
+  pointingAtRoad: boolean;
+  onTogglePointing: () => void;
+  pointedStreet: StreetAtPoint | null;
+  pointing: boolean;
+  onConfirmPointed: () => void;
+  onDismissPointed: () => void;
 }) {
   const remaining = sortStreetCoverage(
     coverage.streets.filter((street) => !street.complete),
@@ -1410,8 +1525,58 @@ function ProjectDetail({
           )}
         </div>
 
+        {/* The first tool offered, because it is the one that answers "I want
+            that road there". The margin scan below asks a whole town a question
+            to solve one road's problem, and pays for it in seconds. */}
+        <button
+          onClick={onTogglePointing}
+          disabled={pointing}
+          className={`w-full rounded-xl px-3 py-2 text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+            pointingAtRoad ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface"
+          }`}
+        >
+          <Icon name={pointingAtRoad ? "touch_app" : "add_location_alt"} className="text-sm" />
+          {pointingAtRoad ? "Tap a road on the map…" : "Point at a road on the map"}
+        </button>
+
+        {pointingAtRoad && !pointedStreet && (
+          <p className="text-[11px] text-on-surface-variant">
+            {pointing ? "Asking OSM what is there…" : "Tap the road itself, anywhere along it. Nothing is added until you say so."}
+          </p>
+        )}
+
+        {pointedStreet && (
+          <div className="rounded-xl border border-primary/40 bg-surface-container p-3 space-y-2">
+            <p className="text-sm font-extrabold text-on-surface">{pointedStreet.name}</p>
+            <p className="text-[11px] text-on-surface-variant">
+              {pointedStreet.kind === "extension"
+                ? `Already in your project as ${pointedStreet.wasMeters} m. The whole street is ${pointedStreet.nowMeters} m.`
+                : pointedStreet.kind === "already_in_project"
+                  ? "This one is already in your project, all of it."
+                  : `${pointedStreet.lengthMeters} m, not in your project.`}
+            </p>
+            <div className="flex gap-2">
+              {pointedStreet.kind !== "already_in_project" && (
+                <button
+                  onClick={onConfirmPointed}
+                  disabled={pointing}
+                  className="rounded-xl bg-primary text-on-primary px-3 py-1.5 text-xs font-extrabold disabled:opacity-50"
+                >
+                  {pointedStreet.kind === "extension" ? "Use all of it" : "Add it"}
+                </button>
+              )}
+              <button
+                onClick={onDismissPointed}
+                className="rounded-xl bg-surface-container-high px-3 py-1.5 text-xs font-extrabold text-on-surface"
+              >
+                {pointedStreet.kind === "already_in_project" ? "Close" : "Not that one"}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-on-surface-variant">Look outside by</span>
+          <span className="text-[11px] text-on-surface-variant">Or look outside by</span>
           {NEARBY_MARGINS.map((option) => (
             <button
               key={option.meters}

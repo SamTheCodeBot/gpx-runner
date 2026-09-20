@@ -48,6 +48,57 @@ export function buildStreetQuery(scope: StreetScope): string {
 }
 
 /**
+ * The named runnable ways at a point on the map.
+ *
+ * A tap, not an area. Asking "what is under my finger" is an index lookup on a
+ * few metres of ground; asking "inventory everything within 2 km of my town"
+ * is a quarter of a county, and that difference is the difference between an
+ * answer in a second and a gateway timeout.
+ *
+ * The radius is a fingertip, widened by the caller for a coarse tap.
+ */
+export function buildStreetAtPointQuery(point: LatLng, radiusMeters: number): string {
+  const highways = RUNNABLE_HIGHWAY_VALUES.join("|");
+  return [
+    "[out:json][timeout:30];",
+    `way["highway"~"^(${highways})$"]["name"](around:${Math.round(radiusMeters)},${point.lat.toFixed(6)},${point.lng.toFixed(6)});`,
+    "out body geom;",
+  ].join("");
+}
+
+/**
+ * Every way of one named street near a point.
+ *
+ * A tap lands on one OSM way, and an OSM way is a fragment: Storgatan is
+ * chopped at every junction. Adding the fragment would put 80 m of a 900 m
+ * street into the project and call it done the moment he crossed the road. So
+ * the name is read off the tapped way and the rest of the street is collected
+ * around it, then collapsed by the same inventory rules the project was built
+ * with.
+ */
+export function buildNamedStreetQuery(point: LatLng, name: string, radiusMeters: number): string {
+  const highways = RUNNABLE_HIGHWAY_VALUES.join("|");
+  return [
+    "[out:json][timeout:60];",
+    `way["highway"~"^(${highways})$"]["name"="${escapeOverpassLiteral(name)}"](around:${Math.round(
+      radiusMeters,
+    )},${point.lat.toFixed(6)},${point.lng.toFixed(6)});`,
+    "out body geom;",
+  ].join("");
+}
+
+/**
+ * A street name inside an Overpass string literal.
+ *
+ * Swedish street names carry no quotes, but a tag value is arbitrary text from
+ * a public database and this is a query language. Escaped, not sanitised: the
+ * name has to survive intact or it matches nothing.
+ */
+export function escapeOverpassLiteral(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
  * Administrative areas containing a point, smallest first.
  *
  * Only tags: a boundary's geometry is hundreds of kilobytes and is worth

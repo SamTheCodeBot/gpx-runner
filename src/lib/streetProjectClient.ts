@@ -255,6 +255,78 @@ export async function addNearbyStreets(
   };
 }
 
+/**
+ * Point at a road on the map and put it in the project.
+ *
+ * Two small queries instead of an inventory of the whole band around the town:
+ * what is under the finger, and the rest of the street it belongs to. That is
+ * why this answers where a wide margin scan times out.
+ */
+export type StreetAtPoint = {
+  kind: "addition" | "extension" | "already_in_project";
+  street: Street;
+  name: string;
+  lengthMeters: number;
+  replacesId?: string;
+  wasMeters?: number;
+  nowMeters?: number;
+};
+
+export async function identifyStreetAt(
+  user: User,
+  projectId: string,
+  point: { lat: number; lng: number },
+  toleranceMeters: number,
+): Promise<StreetAtPoint> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/street-at`, {
+    method: "POST",
+    body: JSON.stringify({ ...point, toleranceMeters }),
+  });
+
+  return {
+    kind: payload.kind,
+    street: decodeStreets([payload.street as WireStreet])[0],
+    name: payload.name,
+    lengthMeters: payload.lengthMeters ?? 0,
+    replacesId: payload.replacesId,
+    wasMeters: payload.wasMeters,
+    nowMeters: payload.nowMeters,
+  };
+}
+
+export async function addStreetAt(
+  user: User,
+  projectId: string,
+  point: { lat: number; lng: number },
+  toleranceMeters: number,
+): Promise<{ project: Omit<ProjectSummary, "scope">; streets: Street[]; name: string; kind: string }> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/street-at`, {
+    method: "PUT",
+    body: JSON.stringify({ ...point, toleranceMeters }),
+  });
+
+  const raw = payload.project ?? {};
+  return {
+    project: {
+      id: raw.id,
+      name: raw.name,
+      createdAt: raw.createdAt,
+      archivedAt: raw.archivedAt ?? null,
+      streetCount: raw.streetCount ?? 0,
+      totalMeters: raw.totalMeters ?? 0,
+      wayCount: raw.wayCount ?? 0,
+      snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
+      lastRefreshedAt: raw.lastRefreshedAt ?? null,
+      pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+      excludedStreetIds: raw.excludedStreetIds ?? [],
+      addedStreetIds: raw.addedStreetIds ?? [],
+    },
+    streets: decodeStreets(payload.streets as WireStreet[]),
+    name: payload.name ?? "That street",
+    kind: payload.kind ?? "addition",
+  };
+}
+
 export type RefreshResult = {
   message: string;
   added: Street[];
