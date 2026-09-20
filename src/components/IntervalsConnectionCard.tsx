@@ -68,12 +68,19 @@ function summarizeRun(run: IngestionRunView): string {
     .map(([label, count]) => `${count} ${label}`)
     .join(", ");
 
+  // A failure no longer stops the run, so it has to be said out loud — an
+  // import that quietly left two runs behind is worse than one that admits it.
+  const failedCount = run.failed?.length ?? 0;
+  const failedText = failedCount
+    ? ` ${failedCount} could not be imported and will be retried on the next sync.`
+    : "";
+
   if (parts.length === 0) {
     return run.scanned === 0
       ? "No activities found in that window."
-      : `Nothing new to import${skippedText ? ` — ${skippedText}.` : "."}`;
+      : `Nothing new to import${skippedText ? ` — ${skippedText}.` : "."}${failedText}`;
   }
-  return `Scanned ${run.scanned}: ${parts.join(", ")}${skippedText ? `. Skipped ${skippedText}` : ""}.`;
+  return `Scanned ${run.scanned}: ${parts.join(", ")}${skippedText ? `. Skipped ${skippedText}` : ""}.${failedText}`;
 }
 
 export function IntervalsConnectionCard() {

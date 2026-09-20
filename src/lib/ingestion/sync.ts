@@ -44,9 +44,32 @@ export type IngestionRunResult = {
   updated: number;
   duplicates: number;
   skipped: { sourceActivityId: string; reason: string }[];
+  /** Activities that threw and were stepped over, with their diagnostic code. */
+  failed: { sourceActivityId: string; code: string }[];
   windowStart: string;
   windowEnd: string;
 };
+
+/**
+ * Does this error end the whole run, or just this activity?
+ *
+ * A revoked token, a withdrawn consent or a rate limit applies to every
+ * remaining activity, so carrying on would only burn requests and produce the
+ * same failure n more times. Anything else — one unreadable file, one activity
+ * whose write the database refused — is that activity's problem alone, and
+ * stopping on it would strand every later run behind it. That is what made a
+ * single bad activity look like "the sync is broken": the loop wrote the runs
+ * before it, threw on that one, and never reached the rest.
+ */
+function endsTheRun(error: unknown): boolean {
+  if (error instanceof ConsentError) return true;
+  if (error instanceof ConnectionMissingError) return true;
+  if (error instanceof TokenCryptoError) return true;
+  if (error instanceof IntervalsApiError) {
+    return error.status === 401 || error.status === 403 || error.status === 429 || error.status >= 500;
+  }
+  return false;
+}
 
 export async function runIngestion(input: IngestionRunInput): Promise<IngestionRunResult> {
   const { uid, source } = input;
@@ -95,6 +118,7 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
     updated: 0,
     duplicates: 0,
     skipped: [],
+    failed: [],
     windowStart,
     windowEnd,
   };
@@ -127,33 +151,50 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
       continue;
     }
 
-    const file = await adapter.fetchActivityFile(credentials, summary.sourceActivityId);
-    downloads += 1;
+    try {
+      const file = await adapter.fetchActivityFile(credentials, summary.sourceActivityId);
+      downloads += 1;
 
-    if (!file) {
-      result.skipped.push({ sourceActivityId: summary.sourceActivityId, reason: "no_file" });
-      continue;
-    }
+      if (!file) {
+        result.skipped.push({ sourceActivityId: summary.sourceActivityId, reason: "no_file" });
+        continue;
+      }
 
-    const normalized = adapter.normalize({ ownerUid: uid, summary, file });
-    const outcome = await ingestActivity({ normalized, file, consentId: consent.id, candidates });
-    recordOutcome(result, outcome.outcome, summary.sourceActivityId, outcome.reason);
+      const normalized = adapter.normalize({ ownerUid: uid, summary, file });
+      const outcome = await ingestActivity({ normalized, file, consentId: consent.id, candidates });
+      recordOutcome(result, outcome.outcome, summary.sourceActivityId, outcome.reason);
 
-    // Keep the in-memory view current so two duplicates inside one run are both
-    // caught, not just the first.
-    if (outcome.outcome === "created") {
-      candidates.push({
-        id: outcome.activityId,
+      // Keep the in-memory view current so two duplicates inside one run are both
+      // caught, not just the first.
+      if (outcome.outcome === "created") {
+        candidates.push({
+          id: outcome.activityId,
+          source,
+          startedAt: normalized.startedAt,
+          distanceMeters: Math.round(normalized.distanceMeters),
+          startPoint: normalized.coordinates[0],
+        });
+      }
+    } catch (error) {
+      if (endsTheRun(error)) throw error;
+      // Named, counted and reported — not swallowed. The run continues, and the
+      // caller can see exactly which activity failed and why.
+      result.failed.push({
+        sourceActivityId: summary.sourceActivityId,
+        code: ingestionErrorCode(error),
+      });
+      console.error("[ingestion] activity failed", {
         source,
-        startedAt: normalized.startedAt,
-        distanceMeters: Math.round(normalized.distanceMeters),
-        startPoint: normalized.coordinates[0],
+        sourceActivityId: summary.sourceActivityId,
+        error,
       });
     }
   }
 
   // Only advance the cursor on a full-window run. A webhook run looks at a
   // subset, so moving the cursor there could skip activities it never examined.
+  // An activity that failed is left out of the cursor's promise by the trailing
+  // overlap: the next run re-walks the same window and tries it again.
   if (!input.onlySourceActivityIds?.length) {
     await updateCursor(uid, source, page.nextCursor);
   }
@@ -215,6 +256,17 @@ export function ingestionErrorCode(error: unknown): string {
     return "intervals_env_missing";
   }
   if (message.includes("TOKEN_ENCRYPTION_KEY")) return "encryption_key_missing";
+  // Firestore rejects an oversized document with an INVALID_ARGUMENT naming the
+  // byte limit, and an over-indexed one by naming index entries. Both mean the
+  // same thing to a user — that run's track was too big to store — and both used
+  // to arrive as a bare `sync_failed`.
+  if (
+    /longer than \d+ bytes|maximum size|exceeds the maximum|too many index entries|index entries for entity/i.test(
+      message,
+    )
+  ) {
+    return "activity_too_large";
+  }
   if (message.includes("FIREBASE") || message.includes("Firebase")) return "firebase_config_failed";
   return "sync_failed";
 }
