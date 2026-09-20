@@ -8,7 +8,30 @@ import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
-import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
+import {
+  boundTracksNearStart,
+  historyCenter,
+  historyRadiusMeters,
+  selectTracksNearStart,
+  toLatLngTrack,
+} from "@/engine/trackHistory";
+
+/**
+ * Hand the main thread back long enough for one frame to paint.
+ *
+ * A click handler that does its work synchronously never lets the button it
+ * was attached to show a spinner: React's state update and the work sit in the
+ * same task, so the browser paints once, at the end. Yielding here is what
+ * turns a five-second blocked interaction into a five-second *visible* one.
+ */
+function nextPaint(): Promise<void> {
+  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+  });
+}
 import type { FamiliarityReport, FamiliarityTarget } from "@/engine/familiarityReport";
 
 const ROUTE_CACHE_VERSION = 3;
@@ -824,15 +847,24 @@ export function useRouteSuggestions(
       setSuggestionError(null);
       setSuggestionFamiliarity(null);
       setSuggestionShape(null);
+
+      // Let the browser paint the spinner before the main thread is taken for
+      // track preparation. Without this the click handler runs the whole
+      // preparation synchronously, the button never visibly changes state, and
+      // the interaction is measured as blocked for as long as the work takes.
+      await nextPaint();
+
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
         if (startPoint) { [lon, lat] = startPoint; }
         else if (routes.length > 0) {
-          const allCoords = routes.flatMap((r) => r.coordinates);
-          if (allCoords.length > 0) {
-            lat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
-            lon = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+          // Streaming totals: taking a mean used to flatten every coordinate
+          // of every run into one throwaway array first.
+          const center = historyCenter(routes);
+          if (center) {
+            lat = center.lat;
+            lon = center.lng;
           }
         }
 
@@ -841,11 +873,15 @@ export function useRouteSuggestions(
         // overlap the loop, and it is thinned before it goes on the wire — a
         // full activity history would be megabytes.
         const start = { lat, lng: lon };
-        const tracks = boundTracksNearStart(
-          routes.map((route) => toLatLngTrack(route.coordinates)),
-          start,
-          { radiusMeters: historyRadiusMeters(suggestDistance), ...SUGGESTION_TRACK_BUDGET },
-        ).map((track) => track.map((point) => [point.lng, point.lat] as [number, number]));
+        const radiusMeters = historyRadiusMeters(suggestDistance);
+        // Nearest runs only, chosen off the raw coordinates before a single
+        // `{lat, lng}` is allocated. The old line converted the entire history
+        // and then kept the first 150 of them.
+        const nearby = selectTracksNearStart(routes, start, radiusMeters, SUGGESTION_TRACK_BUDGET.maxTracks);
+        const tracks = boundTracksNearStart(nearby, start, {
+          radiusMeters,
+          ...SUGGESTION_TRACK_BUDGET,
+        }).map((track) => track.map((point) => [point.lng, point.lat] as [number, number]));
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);
