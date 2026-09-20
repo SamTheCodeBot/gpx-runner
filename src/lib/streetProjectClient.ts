@@ -29,6 +29,10 @@ export type ProjectSummary = {
   snapshotTakenAt: string;
   lastRefreshedAt: string | null;
   pendingAdditionCount: number;
+  /** Streets struck off by the owner. Out of every percentage, still in the map. */
+  excludedStreetIds: string[];
+  /** Streets let in from outside the project area. */
+  addedStreetIds: string[];
 };
 
 export type ScopeRequest =
@@ -89,6 +93,8 @@ function toSummary(raw: any): ProjectSummary {
     snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
     lastRefreshedAt: raw.lastRefreshedAt ?? null,
     pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+    excludedStreetIds: raw.excludedStreetIds ?? [],
+    addedStreetIds: raw.addedStreetIds ?? [],
   };
 }
 
@@ -149,6 +155,176 @@ export async function patchProject(
     body: JSON.stringify(patch),
   });
   return toSummary(payload.project);
+}
+
+/**
+ * Strike streets off the project, or put them back.
+ *
+ * Takes an array because undoing a batch, or ruling out the four ways that
+ * make up one dual carriageway, should cost one request and one undo.
+ */
+export async function setStreetExclusions(
+  user: User,
+  projectId: string,
+  streetIds: string[],
+  excluded: boolean,
+): Promise<ProjectSummary> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/exclude`, {
+    method: "POST",
+    body: JSON.stringify({ streetIds, excluded }),
+  });
+  return toSummary(payload.project);
+}
+
+/**
+ * What is just outside the project area.
+ *
+ * The circle was a guess. This is the correction: streets wholly outside it,
+ * and streets it cut in half that carry on over the line. Nothing is changed
+ * until `addNearbyStreets` is called with the ones he picked.
+ */
+export type StreetExtensionView = {
+  street: Street;
+  replacesId: string;
+  wasMeters: number;
+  nowMeters: number;
+};
+
+export type NearbyResult = {
+  marginMeters: number;
+  message: string;
+  additions: Street[];
+  extensions: StreetExtensionView[];
+  truncated: boolean;
+};
+
+export async function findNearbyStreets(
+  user: User,
+  projectId: string,
+  marginMeters: number,
+): Promise<NearbyResult> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/nearby`, {
+    method: "POST",
+    body: JSON.stringify({ marginMeters }),
+  });
+
+  return {
+    marginMeters: payload.marginMeters ?? marginMeters,
+    message: payload.message ?? "",
+    additions: decodeStreets(payload.additions as WireStreet[]),
+    extensions: (payload.extensions ?? []).map((raw: any) => ({
+      street: decodeStreets([raw.street as WireStreet])[0],
+      replacesId: raw.replacesId,
+      wasMeters: raw.wasMeters ?? 0,
+      nowMeters: raw.nowMeters ?? 0,
+    })),
+    truncated: Boolean(payload.truncated),
+  };
+}
+
+export async function addNearbyStreets(
+  user: User,
+  projectId: string,
+  streetIds: string[],
+  marginMeters: number,
+): Promise<{ project: Omit<ProjectSummary, "scope">; streets: Street[]; addedCount: number }> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/nearby`, {
+    method: "PUT",
+    body: JSON.stringify({ streetIds, marginMeters }),
+  });
+
+  const raw = payload.project ?? {};
+  return {
+    // The scope is unchanged by design, so the server does not send it back.
+    project: {
+      id: raw.id,
+      name: raw.name,
+      createdAt: raw.createdAt,
+      archivedAt: raw.archivedAt ?? null,
+      streetCount: raw.streetCount ?? 0,
+      totalMeters: raw.totalMeters ?? 0,
+      wayCount: raw.wayCount ?? 0,
+      snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
+      lastRefreshedAt: raw.lastRefreshedAt ?? null,
+      pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+      excludedStreetIds: raw.excludedStreetIds ?? [],
+      addedStreetIds: raw.addedStreetIds ?? [],
+    },
+    streets: decodeStreets(payload.streets as WireStreet[]),
+    addedCount: payload.addedCount ?? 0,
+  };
+}
+
+/**
+ * Point at a road on the map and put it in the project.
+ *
+ * Two small queries instead of an inventory of the whole band around the town:
+ * what is under the finger, and the rest of the street it belongs to. That is
+ * why this answers where a wide margin scan times out.
+ */
+export type StreetAtPoint = {
+  kind: "addition" | "extension" | "already_in_project";
+  street: Street;
+  name: string;
+  lengthMeters: number;
+  replacesId?: string;
+  wasMeters?: number;
+  nowMeters?: number;
+};
+
+export async function identifyStreetAt(
+  user: User,
+  projectId: string,
+  point: { lat: number; lng: number },
+  toleranceMeters: number,
+): Promise<StreetAtPoint> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/street-at`, {
+    method: "POST",
+    body: JSON.stringify({ ...point, toleranceMeters }),
+  });
+
+  return {
+    kind: payload.kind,
+    street: decodeStreets([payload.street as WireStreet])[0],
+    name: payload.name,
+    lengthMeters: payload.lengthMeters ?? 0,
+    replacesId: payload.replacesId,
+    wasMeters: payload.wasMeters,
+    nowMeters: payload.nowMeters,
+  };
+}
+
+export async function addStreetAt(
+  user: User,
+  projectId: string,
+  point: { lat: number; lng: number },
+  toleranceMeters: number,
+): Promise<{ project: Omit<ProjectSummary, "scope">; streets: Street[]; name: string; kind: string }> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/street-at`, {
+    method: "PUT",
+    body: JSON.stringify({ ...point, toleranceMeters }),
+  });
+
+  const raw = payload.project ?? {};
+  return {
+    project: {
+      id: raw.id,
+      name: raw.name,
+      createdAt: raw.createdAt,
+      archivedAt: raw.archivedAt ?? null,
+      streetCount: raw.streetCount ?? 0,
+      totalMeters: raw.totalMeters ?? 0,
+      wayCount: raw.wayCount ?? 0,
+      snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
+      lastRefreshedAt: raw.lastRefreshedAt ?? null,
+      pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+      excludedStreetIds: raw.excludedStreetIds ?? [],
+      addedStreetIds: raw.addedStreetIds ?? [],
+    },
+    streets: decodeStreets(payload.streets as WireStreet[]),
+    name: payload.name ?? "That street",
+    kind: payload.kind ?? "addition",
+  };
 }
 
 export type RefreshResult = {

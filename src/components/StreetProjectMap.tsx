@@ -30,6 +30,24 @@ export type StreetLines = {
 interface StreetProjectMapProps {
   ring: LatLng[];
   lines?: StreetLines;
+  /**
+   * Streets the owner has struck off, drawn muted rather than removed.
+   *
+   * They have to stay on the map to be put back: an excluded street that
+   * vanishes can only be undone from a list, and the reason he excluded it was
+   * something he saw on the map. Muted and dashed reads as "not part of this"
+   * without competing with the red he is actually hunting.
+   */
+  excluded?: LatLng[][];
+  /**
+   * Streets just outside the project, offered but not in it.
+   *
+   * Drawn in a colour that belongs to neither done nor left-to-run, because
+   * they are neither: they are a question. Seeing them on the map is the whole
+   * point — "the circle isn't perfect" is something you notice by looking at
+   * it, so the fix has to live in the same place.
+   */
+  candidates?: LatLng[][];
   /** Ticked for a route, so the list's checkboxes are visible on the map. */
   checked?: LatLng[][];
   /**
@@ -143,6 +161,8 @@ function FitToTarget({
 export default function StreetProjectMap({
   ring,
   lines,
+  excluded,
+  candidates,
   checked,
   focus,
   focusLines,
@@ -179,6 +199,27 @@ export default function StreetProjectMap({
           pathOptions={{ color: "rgb(255 65 164)", weight: 2, fillOpacity: 0.04, dashArray: "6 6" }}
         />
       )}
+
+      {/* Struck off, and drawn first so everything that still counts sits on
+          top of it. Dashed, thin and half transparent: present enough to click,
+          quiet enough that it stops reading as a chore. */}
+      {excluded?.map((piece, index) => (
+        <Polyline
+          key={`excluded-${index}`}
+          positions={toLeaflet(piece)}
+          pathOptions={{ color: "#8a8a8a", weight: 1.5, opacity: 0.45, dashArray: "4 5" }}
+        />
+      ))}
+
+      {/* Candidates from outside the area: blue, so they read as an offer and
+          not as work outstanding. */}
+      {candidates?.map((piece, index) => (
+        <Polyline
+          key={`candidate-${index}`}
+          positions={toLeaflet(piece)}
+          pathOptions={{ color: "#3b9dff", weight: 2.5, opacity: 0.85, dashArray: "8 4" }}
+        />
+      ))}
 
       {/* Unrun streets were slate grey, which vanished into a grey basemap.
           Red says "still to do" and survives both light and dark tiles. */}

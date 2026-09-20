@@ -106,6 +106,7 @@ export interface IngestionRunView {
   updated: number;
   duplicates: number;
   skipped: { sourceActivityId: string; reason: string }[];
+  failed?: { sourceActivityId: string; code: string }[];
 }
 
 /** `POST /api/gdpr/erase` */
@@ -160,6 +161,8 @@ const ERROR_COPY: Record<string, string> = {
   confirmation_required: `Type ${ERASURE_CONFIRMATION} exactly to confirm.`,
   unknown_scope: "That data scope does not exist.",
   sync_failed: "The sync did not finish. Importing is repeatable, so try again.",
+  activity_too_large:
+    "One run's GPS track was too big for the database to store. The rest of the sync went through.",
   http_401: "Your session has expired. Sign in again.",
   http_403: "You are not allowed to do that.",
   network_error: "Could not reach the server. Check your connection and try again.",

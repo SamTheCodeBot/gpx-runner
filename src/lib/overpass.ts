@@ -7,6 +7,8 @@ import {
   assembleBoundaryRing,
   buildBoundaryCandidateQuery,
   buildBoundaryGeometryQuery,
+  buildNamedStreetQuery,
+  buildStreetAtPointQuery,
   buildStreetQuery,
   parseBoundaryCandidates,
   parseOverpassWays,
@@ -240,6 +242,33 @@ async function callOverpass(endpoint: string, query: string, timeoutMs = REQUEST
 
 export async function fetchStreetWays(scope: StreetScope, options: OverpassOptions = {}): Promise<OsmWay[]> {
   const payload = await runOverpassQuery(buildStreetQuery(scope), options);
+  return parseOverpassWays(payload);
+}
+
+/**
+ * The named runnable ways under a tap.
+ *
+ * Cheap on purpose: a few metres of ground instead of a town. This is the
+ * query behind pointing at a road, and the reason pointing works where
+ * inventorying a margin band times out.
+ */
+export async function fetchWaysAtPoint(
+  point: LatLng,
+  radiusMeters: number,
+  options: OverpassOptions = {},
+): Promise<OsmWay[]> {
+  const payload = await runOverpassQuery(buildStreetAtPointQuery(point, radiusMeters), options);
+  return parseOverpassWays(payload);
+}
+
+/** Every way of one named street near a point, so a tapped fragment becomes a street. */
+export async function fetchNamedWaysNear(
+  point: LatLng,
+  name: string,
+  radiusMeters: number,
+  options: OverpassOptions = {},
+): Promise<OsmWay[]> {
+  const payload = await runOverpassQuery(buildNamedStreetQuery(point, name, radiusMeters), options);
   return parseOverpassWays(payload);
 }
 

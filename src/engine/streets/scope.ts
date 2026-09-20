@@ -53,6 +53,49 @@ function closeOpenRing(ring: LatLng[]): LatLng[] {
   return ring;
 }
 
+/**
+ * The same area, with a margin around it — for looking just outside.
+ *
+ * A pin and a radius never land exactly on the town. The estate over the
+ * roundabout is 200 m past the edge, the road he runs out and back on leaves
+ * the circle halfway along. This grows the area so those streets can be
+ * *offered*, and it is used for nothing else: the project's own scope is not
+ * touched, because the denominator is frozen and a wider look must not quietly
+ * widen the goal.
+ *
+ * A circle grows by its radius, exactly. Any other ring is pushed outward from
+ * its centre, vertex by vertex, which is right for a town-shaped boundary and
+ * approximate for a deeply concave one — acceptable because the result is only
+ * ever a list of candidates the owner says yes or no to one at a time.
+ */
+export function growScope(scope: StreetScope, marginMeters: number): StreetScope {
+  if (marginMeters <= 0) return scope;
+
+  if (scope.source.kind === "circle") {
+    return circleScope(scope.source.center, scope.source.radiusMeters + marginMeters);
+  }
+
+  const center = scopeCenter(scope);
+  const ring = scope.ring.map((point) => {
+    const distance = haversineMeters(center, point);
+    if (distance < 1) return point;
+    return destinationPoint(center, bearingDegrees(center, point), distance + marginMeters);
+  });
+
+  return { ring, source: scope.source };
+}
+
+function bearingDegrees(from: LatLng, to: LatLng): number {
+  const fromLat = (from.lat * Math.PI) / 180;
+  const toLat = (to.lat * Math.PI) / 180;
+  const deltaLng = ((to.lng - from.lng) * Math.PI) / 180;
+
+  const y = Math.sin(deltaLng) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(deltaLng);
+
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
 export type ScopeBounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 
 export function scopeBounds(scope: StreetScope): ScopeBounds {

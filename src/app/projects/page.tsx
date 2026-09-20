@@ -14,6 +14,7 @@ import {
   type StreetCoverageSplit,
   type StreetSort,
 } from "@/engine/streets/coverage";
+import { describeExclusions, partitionStreets } from "@/engine/streets/exclusions";
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
@@ -36,8 +37,15 @@ import {
   patchProject,
   planStreetRoute,
   previewScope,
+  addNearbyStreets,
+  addStreetAt,
+  findNearbyStreets,
+  identifyStreetAt,
   refreshProject,
+  setStreetExclusions,
+  type NearbyResult,
   type PlannedStreetRoute,
+  type StreetAtPoint,
   type ProjectSummary,
   type ScopePreview,
   type ScopeRequest,
@@ -88,6 +96,19 @@ type MapMode = "all" | "left";
 const MAP_MODES: Array<{ id: MapMode; label: string }> = [
   { id: "all", label: "Everything" },
   { id: "left", label: "Left to run" },
+];
+
+/**
+ * How far outside the project to look for streets it missed.
+ *
+ * Three choices, not a slider. The question he is answering is "just over the
+ * edge" or "the next neighbourhood", and a slider would invite him to tune a
+ * number that only has to be roughly right.
+ */
+const NEARBY_MARGINS: Array<{ meters: number; label: string }> = [
+  { meters: 500, label: "0.5 km" },
+  { meters: 1000, label: "1 km" },
+  { meters: 2000, label: "2 km" },
 ];
 
 function formatKm(meters: number): string {
@@ -153,6 +174,24 @@ export default function StreetProjectsPage() {
   });
   const [mapMode, setMapMode] = useState<MapMode>("all");
   const [showDone, setShowDone] = useState(false);
+  // Struck-off roads stay on the map by default, muted: he has to be able to
+  // see what he took out, and put it back from the same place he removed it.
+  const [showExcluded, setShowExcluded] = useState(true);
+  const [excluding, setExcluding] = useState(false);
+  // The other half of editing a project: streets the circle missed. Held only
+  // while he is looking at them — they are an offer, not part of the project.
+  const [nearby, setNearby] = useState<NearbyResult | null>(null);
+  const [nearbyMargin, setNearbyMargin] = useState(NEARBY_MARGINS[0].meters);
+  const [findingNearby, setFindingNearby] = useState(false);
+  // Pointing at a road: the local answer to a local problem. A tap asks OSM
+  // what is under it, and nothing is added until he has seen the name.
+  const [pointingAtRoad, setPointingAtRoad] = useState(false);
+  const [pointedStreet, setPointedStreet] = useState<StreetAtPoint | null>(null);
+  const [pointing, setPointing] = useState(false);
+  // Kept so the confirm re-resolves the same spot server-side rather than
+  // trusting geometry the browser is holding.
+  const [pointedPoint, setPointedPoint] = useState<LatLng | null>(null);
+  const [pointedTolerance, setPointedTolerance] = useState(30);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
   // Ticked streets, the start they are run from, and the route that came back.
   const [checkedStreetIds, setCheckedStreetIds] = useState<string[]>([]);
@@ -177,22 +216,66 @@ export default function StreetProjectsPage() {
     [unifiedRoutes],
   );
 
+  // Struck-off streets, by project. Read off the project summaries rather than
+  // held in their own state, so the server's answer is the only version of this
+  // that exists and an excluded street cannot come back on a reload.
+  const excludedIdsByProject = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const project of projects) result[project.id] = project.excludedStreetIds;
+    return result;
+  }, [projects]);
+
   const coverageById = useMemo(() => {
     const result: Record<string, ReturnType<typeof computeProjectCoverage>> = {};
     for (const [id, streets] of Object.entries(streetsById)) {
-      if (streets.length > 0) result[id] = computeProjectCoverage(streets, familiarityIndex);
+      // Excluded streets are out of the denominator: the percentage is over
+      // what he has actually taken on, which is what he asked for.
+      const { active } = partitionStreets(streets, excludedIdsByProject[id] ?? []);
+      if (active.length > 0) result[id] = computeProjectCoverage(active, familiarityIndex);
     }
     return result;
-  }, [streetsById, familiarityIndex]);
+  }, [streetsById, familiarityIndex, excludedIdsByProject]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   // Memoised because the map split below is the one genuinely expensive thing
   // on this page: a fresh `[]` every render would redraw a whole town's streets
   // on every keystroke.
-  const selectedStreets = useMemo(
+  const allSelectedStreets = useMemo(
     () => (selectedId ? streetsById[selectedId] ?? EMPTY_STREETS : EMPTY_STREETS),
     [selectedId, streetsById],
   );
+
+  const { active: selectedStreets, excluded: excludedStreets } = useMemo(
+    () => partitionStreets(allSelectedStreets, selectedProject?.excludedStreetIds ?? []),
+    [allSelectedStreets, selectedProject],
+  );
+
+  // Drawn muted, and drawn from the raw geometry: there is no coverage to split
+  // a struck-off street into, because it is not being measured any more.
+  const excludedLines = useMemo(
+    () => (showExcluded ? excludedStreets.flatMap((street) => street.geometry) : undefined),
+    [excludedStreets, showExcluded],
+  );
+
+  /**
+   * Streets on offer from outside the area, and the index that lets him tap
+   * one. Drawn from raw geometry: they are not in the project, so there is no
+   * coverage to split them into yet.
+   */
+  const nearbyStreets = useMemo<Street[]>(
+    () => (nearby ? [...nearby.additions, ...nearby.extensions.map((extension) => extension.street)] : []),
+    [nearby],
+  );
+
+  const nearbyLines = useMemo(() => {
+    // The road he just pointed at is drawn the same blue as the rest of the
+    // offer: it is the same kind of thing, arrived at by a different gesture.
+    const pieces = nearbyStreets.flatMap((street) => street.geometry);
+    if (pointedStreet) pieces.push(...pointedStreet.street.geometry);
+    return pieces.length > 0 ? pieces : undefined;
+  }, [nearbyStreets, pointedStreet]);
+
+  const nearbyPickIndex = useMemo(() => buildStreetPickIndex(nearbyStreets), [nearbyStreets]);
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
   const selectedPending = selectedId ? pendingById[selectedId] ?? null : null;
 
@@ -301,6 +384,11 @@ export default function StreetProjectsPage() {
     setRouteStart(null);
     setFocusStreetId(null);
     setFitTarget({ streetId: null, nonce: 0 });
+    // An offer of streets outside Falkenberg means nothing in Varberg.
+    setNearby(null);
+    setPointingAtRoad(false);
+    setPointedStreet(null);
+    setPointedPoint(null);
   }, [selectedId]);
 
   const toggleChecked = useCallback((streetId: string) => {
@@ -313,6 +401,142 @@ export default function StreetProjectsPage() {
       return [...current, streetId];
     });
   }, []);
+
+  /**
+   * Look just outside the project for streets the area missed.
+   *
+   * Costs an Overpass read and changes nothing: what comes back is an offer.
+   * The project's own area is never grown — growing it would mean the next
+   * refresh quietly inventoried a bigger town and moved the goalposts, which
+   * is the one thing the frozen snapshot exists to prevent.
+   */
+  const handleFindNearby = useCallback(
+    async (marginMeters: number) => {
+      if (!user || !selectedProject) return;
+      setFindingNearby(true);
+      setErrorMessage(null);
+      setNearbyMargin(marginMeters);
+      try {
+        const found = await findNearbyStreets(user, selectedProject.id, marginMeters);
+        setNearby(found);
+        setStatusMessage(found.message);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not read the street map.");
+      } finally {
+        setFindingNearby(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  const handleAddNearby = useCallback(
+    async (streetIds: string[]) => {
+      if (!user || !selectedProject || streetIds.length === 0) return;
+      setFindingNearby(true);
+      setErrorMessage(null);
+      try {
+        const result = await addNearbyStreets(user, selectedProject.id, streetIds, nearbyMargin);
+        const projectId = selectedProject.id;
+
+        setStreetsById((current) => ({ ...current, [projectId]: result.streets }));
+        cacheStreets(projectId, result.project.snapshotTakenAt, encodeStreets(result.streets));
+        setProjects((current) =>
+          current.map((project) =>
+            // The scope is deliberately unchanged, so it is kept from the copy
+            // already in hand rather than taken from a response that omits it.
+            project.id === projectId ? { ...result.project, scope: project.scope } : project,
+          ),
+        );
+
+        // What is left of the offer, minus what he just took.
+        setNearby((current) =>
+          current
+            ? {
+                ...current,
+                additions: current.additions.filter((street) => !streetIds.includes(street.id)),
+                extensions: current.extensions.filter(
+                  (extension) =>
+                    !streetIds.includes(extension.street.id) && !streetIds.includes(extension.replacesId),
+                ),
+              }
+            : current,
+        );
+
+        setStatusMessage(
+          `${result.addedCount} street${result.addedCount === 1 ? "" : "s"} added. The project is now ${
+            result.project.streetCount
+          } streets.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not add those streets.");
+      } finally {
+        setFindingNearby(false);
+      }
+    },
+    [user, selectedProject, nearbyMargin],
+  );
+
+  /**
+   * A tap while pointing at a road: ask OSM what is under it.
+   *
+   * Nothing is added here. He sees the name and the length first, because a tap
+   * on a map is a coarse instrument and "Storgatan, 900 m" is the only way to
+   * know the finger landed on the road he meant.
+   */
+  const handlePointAtRoad = useCallback(
+    async (lat: number, lng: number, toleranceMeters: number) => {
+      if (!user || !selectedProject) return;
+      setPointing(true);
+      setErrorMessage(null);
+      setPointedStreet(null);
+      try {
+        const found = await identifyStreetAt(user, selectedProject.id, { lat, lng }, toleranceMeters);
+        setPointedStreet(found);
+        if (found.kind === "already_in_project") {
+          setStatusMessage(`${found.name} is already in this project.`);
+        }
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not read that road.");
+      } finally {
+        setPointing(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  const handleAddPointedStreet = useCallback(
+    async (point: LatLng, toleranceMeters: number) => {
+      if (!user || !selectedProject) return;
+      setPointing(true);
+      setErrorMessage(null);
+      try {
+        const result = await addStreetAt(user, selectedProject.id, point, toleranceMeters);
+        const projectId = selectedProject.id;
+
+        setStreetsById((current) => ({ ...current, [projectId]: result.streets }));
+        cacheStreets(projectId, result.project.snapshotTakenAt, encodeStreets(result.streets));
+        setProjects((current) =>
+          current.map((project) =>
+            // The scope is unchanged by design, so it is kept rather than taken
+            // from a response that deliberately omits it.
+            project.id === projectId ? { ...result.project, scope: project.scope } : project,
+          ),
+        );
+
+        setPointedStreet(null);
+        setStatusMessage(
+          result.kind === "extension"
+            ? `${result.name} now counts for its whole length.`
+            : `${result.name} added. The project is now ${result.project.streetCount} streets.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not add that road.");
+      } finally {
+        setPointing(false);
+      }
+    },
+    [user, selectedProject],
+  );
 
   /**
    * A click on the map: name that street, and tick it.
@@ -328,6 +552,28 @@ export default function StreetProjectsPage() {
    */
   const handleMapPick = useCallback(
     (lat: number, lng: number, toleranceMeters: number) => {
+      // Pointing at a road takes the tap before anything else: he has said what
+      // this gesture means, and a road he wants to add is by definition one the
+      // project's own street list cannot answer for.
+      if (pointingAtRoad) {
+        setPointedPoint({ lat, lng });
+        setPointedTolerance(toleranceMeters);
+        void handlePointAtRoad(lat, lng, toleranceMeters);
+        return;
+      }
+
+      // While an offer of outside streets is on screen, a tap on one of the
+      // blue ones adds it. He spotted the gap by looking at the map, so the fix
+      // belongs on the map and not only in a list he would have to find the
+      // same street in all over again.
+      if (nearbyStreets.length > 0) {
+        const candidate = pickStreetAt({ lat, lng }, nearbyPickIndex, toleranceMeters);
+        if (candidate) {
+          handleAddNearby([candidate.streetId]);
+          return;
+        }
+      }
+
       const pick = pickStreetAt({ lat, lng }, pickIndex, toleranceMeters);
 
       // Clicking away drops the selection without moving the map. He is
@@ -353,7 +599,17 @@ export default function StreetProjectsPage() {
 
       toggleChecked(pick.streetId);
     },
-    [pickIndex, checkedStreetIds, coverageDetailById, toggleChecked],
+    [
+      pickIndex,
+      checkedStreetIds,
+      coverageDetailById,
+      toggleChecked,
+      nearbyStreets,
+      nearbyPickIndex,
+      handleAddNearby,
+      pointingAtRoad,
+      handlePointAtRoad,
+    ],
   );
 
   const handleBuildRoute = useCallback(async () => {
@@ -546,6 +802,48 @@ export default function StreetProjectsPage() {
     }
   };
 
+  /**
+   * Strike a road off the project, or put it back.
+   *
+   * The tag rules cannot know that the 80 km/h road with no pavement is not
+   * runnable — only he can. Excluding shrinks the denominator, which was his
+   * call: he is the one keeping track of the numbers and the one deciding what
+   * comes out, so a road he has ruled out should stop counting as something he
+   * owes rather than capping his project below 100 forever.
+   *
+   * The street is never deleted. It stays in the snapshot with its geometry,
+   * which is what makes putting it back one tap and no refetch.
+   */
+  const handleToggleExclusion = useCallback(
+    async (streetIds: string[], excluded: boolean) => {
+      if (!user || !selectedProject || streetIds.length === 0) return;
+      setExcluding(true);
+      setErrorMessage(null);
+      try {
+        const updated = await setStreetExclusions(user, selectedProject.id, streetIds, excluded);
+        setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
+        // A struck-off street cannot stay ticked for a route through streets
+        // he has just said he will not run.
+        if (excluded) setCheckedStreetIds((current) => current.filter((id) => !streetIds.includes(id)));
+        setFocusStreetId(null);
+
+        const count = streetIds.length;
+        setStatusMessage(
+          excluded
+            ? `${count} street${count === 1 ? "" : "s"} taken out. Your percentage is now over ${
+                updated.streetCount - updated.excludedStreetIds.length
+              } streets.`
+            : `${count} street${count === 1 ? "" : "s"} back in the project.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not change that street.");
+      } finally {
+        setExcluding(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
   const handleArchiveToggle = async () => {
     if (!user || !selectedProject) return;
     try {
@@ -722,6 +1020,8 @@ export default function StreetProjectsPage() {
                 // out would hide the only thing worth looking at. It stands out
                 // by being cased in white and coloured instead.
                 lines={creating ? undefined : mapLines}
+                excluded={creating ? undefined : excludedLines}
+                candidates={creating ? undefined : nearbyLines}
                 checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
                 focusLines={creating ? undefined : focusLines}
@@ -878,6 +1178,28 @@ export default function StreetProjectsPage() {
                   onRefresh={handleRefresh}
                   onAdoptAll={handleAdoptAll}
                   onArchiveToggle={handleArchiveToggle}
+                  excludedStreets={excludedStreets}
+                  onToggleExclusion={handleToggleExclusion}
+                  excluding={excluding}
+                  showExcluded={showExcluded}
+                  onToggleShowExcluded={() => setShowExcluded((current) => !current)}
+                  nearby={nearby}
+                  nearbyMargin={nearbyMargin}
+                  findingNearby={findingNearby}
+                  onFindNearby={handleFindNearby}
+                  onAddNearby={handleAddNearby}
+                  onClearNearby={() => setNearby(null)}
+                  pointingAtRoad={pointingAtRoad}
+                  onTogglePointing={() => {
+                    setPointingAtRoad((current) => !current);
+                    setPointedStreet(null);
+                  }}
+                  pointedStreet={pointedStreet}
+                  pointing={pointing}
+                  onConfirmPointed={() => {
+                    if (pointedPoint) void handleAddPointedStreet(pointedPoint, pointedTolerance);
+                  }}
+                  onDismissPointed={() => setPointedStreet(null)}
                 />
               ) : (
                 <p className="text-xs text-on-surface-variant">
@@ -979,6 +1301,23 @@ function ProjectDetail({
   onRefresh,
   onAdoptAll,
   onArchiveToggle,
+  excludedStreets,
+  onToggleExclusion,
+  excluding,
+  showExcluded,
+  onToggleShowExcluded,
+  nearby,
+  nearbyMargin,
+  findingNearby,
+  onFindNearby,
+  onAddNearby,
+  onClearNearby,
+  pointingAtRoad,
+  onTogglePointing,
+  pointedStreet,
+  pointing,
+  onConfirmPointed,
+  onDismissPointed,
 }: {
   project: ProjectSummary;
   coverage: ReturnType<typeof computeProjectCoverage>;
@@ -1007,6 +1346,23 @@ function ProjectDetail({
   onRefresh: () => void;
   onAdoptAll: () => void;
   onArchiveToggle: () => void;
+  excludedStreets: Street[];
+  onToggleExclusion: (streetIds: string[], excluded: boolean) => void;
+  excluding: boolean;
+  showExcluded: boolean;
+  onToggleShowExcluded: () => void;
+  nearby: NearbyResult | null;
+  nearbyMargin: number;
+  findingNearby: boolean;
+  onFindNearby: (marginMeters: number) => void;
+  onAddNearby: (streetIds: string[]) => void;
+  onClearNearby: () => void;
+  pointingAtRoad: boolean;
+  onTogglePointing: () => void;
+  pointedStreet: StreetAtPoint | null;
+  pointing: boolean;
+  onConfirmPointed: () => void;
+  onDismissPointed: () => void;
 }) {
   const remaining = sortStreetCoverage(
     coverage.streets.filter((street) => !street.complete),
@@ -1040,6 +1396,13 @@ function ProjectDetail({
           {coverage.streetsComplete} of {coverage.streetsTotal} streets · {formatKm(coverage.coveredMeters)} of{" "}
           {formatKm(coverage.totalMeters)} run ({Math.round(coverage.distanceRatio * 100)}% by distance)
         </p>
+        {/* Said out loud under the headline, because a percentage over a
+            denominator he has edited has to show the edit. */}
+        {excludedStreets.length > 0 && (
+          <p className="text-[11px] text-on-surface-variant">
+            Not counted: {describeExclusions(excludedStreets)} you have taken out.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1133,6 +1496,8 @@ function ProjectDetail({
               checkDisabled={
                 checkedStreetIds.length >= MAX_SELECTED_STREETS && !checkedStreetIds.includes(street.streetId)
               }
+              onExclude={() => onToggleExclusion([street.streetId], true)}
+              excluding={excluding}
             />
           ))}
         </ul>
@@ -1143,6 +1508,205 @@ function ProjectDetail({
           </p>
         )}
       </div>
+
+      {/* The other half of editing a project: what the area missed.
+          A circle drawn round a pin never lands exactly on a town, and the
+          alternative to this is deleting the project and starting again —
+          throwing away the months of progress that made it worth keeping. */}
+      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
+            Add streets the area missed
+          </p>
+          {nearby && (
+            <button onClick={onClearNearby} className="text-xs font-extrabold text-on-surface-variant">
+              Done
+            </button>
+          )}
+        </div>
+
+        {/* The first tool offered, because it is the one that answers "I want
+            that road there". The margin scan below asks a whole town a question
+            to solve one road's problem, and pays for it in seconds. */}
+        <button
+          onClick={onTogglePointing}
+          disabled={pointing}
+          className={`w-full rounded-xl px-3 py-2 text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+            pointingAtRoad ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface"
+          }`}
+        >
+          <Icon name={pointingAtRoad ? "touch_app" : "add_location_alt"} className="text-sm" />
+          {pointingAtRoad ? "Tap a road on the map…" : "Point at a road on the map"}
+        </button>
+
+        {pointingAtRoad && !pointedStreet && (
+          <p className="text-[11px] text-on-surface-variant">
+            {pointing ? "Asking OSM what is there…" : "Tap the road itself, anywhere along it. Nothing is added until you say so."}
+          </p>
+        )}
+
+        {pointedStreet && (
+          <div className="rounded-xl border border-primary/40 bg-surface-container p-3 space-y-2">
+            <p className="text-sm font-extrabold text-on-surface">{pointedStreet.name}</p>
+            <p className="text-[11px] text-on-surface-variant">
+              {pointedStreet.kind === "extension"
+                ? `Already in your project as ${pointedStreet.wasMeters} m. The whole street is ${pointedStreet.nowMeters} m.`
+                : pointedStreet.kind === "already_in_project"
+                  ? "This one is already in your project, all of it."
+                  : `${pointedStreet.lengthMeters} m, not in your project.`}
+            </p>
+            <div className="flex gap-2">
+              {pointedStreet.kind !== "already_in_project" && (
+                <button
+                  onClick={onConfirmPointed}
+                  disabled={pointing}
+                  className="rounded-xl bg-primary text-on-primary px-3 py-1.5 text-xs font-extrabold disabled:opacity-50"
+                >
+                  {pointedStreet.kind === "extension" ? "Use all of it" : "Add it"}
+                </button>
+              )}
+              <button
+                onClick={onDismissPointed}
+                className="rounded-xl bg-surface-container-high px-3 py-1.5 text-xs font-extrabold text-on-surface"
+              >
+                {pointedStreet.kind === "already_in_project" ? "Close" : "Not that one"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-on-surface-variant">Or look outside by</span>
+          {NEARBY_MARGINS.map((option) => (
+            <button
+              key={option.meters}
+              onClick={() => onFindNearby(option.meters)}
+              disabled={findingNearby}
+              className={`rounded-full px-3 py-1 text-[11px] font-extrabold transition-colors disabled:opacity-40 ${
+                nearby && option.meters === nearbyMargin
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+          {findingNearby && <span className="text-[11px] text-on-surface-variant">Asking OSM…</span>}
+        </div>
+
+        {nearby && (nearby.additions.length > 0 || nearby.extensions.length > 0) ? (
+          <>
+            <p className="text-[11px] text-on-surface-variant">
+              Drawn in blue on the map. Adding one grows the denominator — you will see exactly which street did it.
+            </p>
+
+            {nearby.extensions.length > 0 && (
+              <ul className="space-y-1">
+                {nearby.extensions.map((extension) => (
+                  <li key={extension.replacesId} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-on-surface">
+                      {extension.street.name}
+                      <span className="text-on-surface-variant">
+                        {" "}
+                        · cut short at {extension.wasMeters} m, really {extension.nowMeters} m
+                      </span>
+                    </span>
+                    <button
+                      onClick={() => onAddNearby([extension.replacesId])}
+                      disabled={findingNearby}
+                      className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                    >
+                      Use all of it
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {nearby.additions.length > 0 && (
+              <ul className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
+                {nearby.additions.map((street) => (
+                  <li key={street.id} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-on-surface-variant">
+                      {street.name}
+                      {street.part > 0 && <span> · part {street.part}</span>}
+                      <span className="text-on-surface-variant/70"> · {Math.round(street.lengthMeters)} m</span>
+                    </span>
+                    <button
+                      onClick={() => onAddNearby([street.id])}
+                      disabled={findingNearby}
+                      className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {nearby.additions.length > 1 && (
+              <button
+                onClick={() => onAddNearby(nearby.additions.map((street) => street.id))}
+                disabled={findingNearby}
+                className="rounded-xl bg-primary text-on-primary px-3 py-2 text-xs font-extrabold disabled:opacity-50"
+              >
+                Add all {nearby.additions.length}
+              </button>
+            )}
+
+            {nearby.truncated && (
+              <p className="text-[11px] text-on-surface-variant">
+                That is a lot of streets. Try a smaller margin if this is more town than you meant.
+              </p>
+            )}
+          </>
+        ) : (
+          nearby && <p className="text-[11px] text-on-surface-variant">{nearby.message}</p>
+        )}
+      </div>
+
+      {/* Everything he has ruled out, in one place, each with the way back.
+          An exclusion he cannot find again is a decision he cannot revise. */}
+      {excludedStreets.length > 0 && (
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
+              Taken out ({excludedStreets.length})
+            </p>
+            <button onClick={onToggleShowExcluded} className="text-xs font-extrabold text-primary">
+              {showExcluded ? "Hide on map" : "Show on map"}
+            </button>
+          </div>
+          <p className="text-[11px] text-on-surface-variant">
+            Out of your percentage, still in the snapshot. Put one back and the denominator grows again.
+          </p>
+          <ul className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
+            {excludedStreets.map((street) => (
+              <li key={street.id} className="flex items-center justify-between gap-3 text-xs">
+                <span className="truncate text-on-surface-variant">
+                  {street.name}
+                  {street.part > 0 && <span> · part {street.part}</span>}
+                  <span className="text-on-surface-variant/70"> · {Math.round(street.lengthMeters)} m</span>
+                </span>
+                <button
+                  onClick={() => onToggleExclusion([street.id], false)}
+                  disabled={excluding}
+                  className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                >
+                  Put back
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={() => onToggleExclusion(excludedStreets.map((street) => street.id), false)}
+            disabled={excluding}
+            className="text-[11px] font-extrabold text-on-surface-variant disabled:opacity-40"
+          >
+            Put all of them back
+          </button>
+        </div>
+      )}
 
       <p className="text-[11px] text-on-surface-variant">
         Street list taken from OpenStreetMap on {new Date(project.snapshotTakenAt).toLocaleDateString()} — {project.wayCount}{" "}
@@ -1325,6 +1889,8 @@ function StreetRow({
   checked,
   onToggleChecked,
   checkDisabled,
+  onExclude,
+  excluding,
 }: {
   street: StreetCoverage;
   focused: boolean;
@@ -1334,6 +1900,8 @@ function StreetRow({
   checked: boolean;
   onToggleChecked: () => void;
   checkDisabled: boolean;
+  onExclude: () => void;
+  excluding: boolean;
 }) {
   const rowRef = useRef<HTMLLIElement>(null);
 
@@ -1413,6 +1981,22 @@ function StreetRow({
           </span>
         )}
       </button>
+
+      {/* Only on the row he is looking at. Six hundred rows each carrying a
+          delete-shaped button is a page that looks like it wants tidying;
+          revealed on focus, it is there exactly when he has just looked at a
+          road on the map and decided it is a dual carriageway. */}
+      {focused && (
+        <button
+          onClick={onExclude}
+          disabled={excluding}
+          title="Not runnable — take it out of this project"
+          aria-label={`Exclude ${street.name} from this project`}
+          className="py-2.5 pl-1 pr-2 shrink-0 text-on-surface-variant hover:text-error disabled:opacity-30"
+        >
+          <Icon name="block" className="text-base" />
+        </button>
+      )}
     </li>
   );
 }

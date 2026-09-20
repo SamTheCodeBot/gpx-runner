@@ -53,6 +53,40 @@ export type DedupeCandidate = {
   startPoint?: [number, number];
 };
 
+/**
+ * Firestore stops at 1 MiB per document, and indexes every element of an array
+ * of maps. A track is the only field here that grows without bound, and
+ * intervals.icu serves its GPX from per-second streams — so a three-hour run
+ * arrives as ~11,000 points whatever the watch originally recorded, and the
+ * write is rejected outright. Because the loop writes one activity at a time,
+ * the shorter runs earlier in the same sync were already stored: the import
+ * looked half-done, and every retry died on the same long run.
+ *
+ * So the geometry is thinned before it is written, never truncated — the run
+ * still ends where he stopped. 4,000 points across a 50 km ultra is a point
+ * every 12 m, finer than anything downstream reads: the familiarity index
+ * simplifies to 18 m, street coverage to 30 m, the map draws 500.
+ */
+export const MAX_STORED_TRACK_POINTS = 4000;
+
+/** The same cap the browser upload path has always applied to samples. */
+export const MAX_STORED_SAMPLES = 900;
+
+/**
+ * Keep at most `maxItems`, evenly spaced, always including the last one.
+ * Sampling coarser rather than cutting short is the whole point: a truncated
+ * track is a different run, a thinned one is the same run drawn with fewer
+ * pencil strokes.
+ */
+export function thinForStorage<T>(items: T[], maxItems: number): T[] {
+  if (items.length <= maxItems) return items;
+  const step = Math.ceil(items.length / maxItems);
+  const kept = items.filter((_, index) => index % step === 0);
+  const last = items[items.length - 1];
+  if (kept[kept.length - 1] !== last) kept.push(last);
+  return kept;
+}
+
 /** Two recordings of one run never start more than this far apart. */
 const DUPLICATE_START_WINDOW_MS = 10 * 60 * 1000;
 /** Providers disagree on distance by smoothing artefacts, not by much. */
@@ -294,18 +328,26 @@ export async function ingestActivity(input: {
   }
 
   const routeId = activityId.replace(/[^\w.-]/g, "_");
+  // Thinned for storage only. The fingerprint and the duplicate check above ran
+  // against the full-resolution track, so what we hold stays comparable with
+  // the same run arriving from another provider.
+  const storedCoordinates = thinForStorage(normalized.coordinates, MAX_STORED_TRACK_POINTS);
+  const storedSamples = normalized.samples?.length
+    ? thinForStorage(normalized.samples, MAX_STORED_SAMPLES)
+    : undefined;
+
   const route: GPXRoute = {
     id: routeId,
     name: normalized.name,
     date: normalized.startedAt,
-    coordinates: normalized.coordinates,
+    coordinates: storedCoordinates,
     distance: Math.round(normalized.distanceMeters),
     elevationGain: Math.round(normalized.elevationGainMeters),
     duration: Math.round((normalized.durationSeconds / 60) * 10) / 10,
     color: routeColorFor(normalized.source),
     type: normalized.sport === "trail_run" ? "trail" : "road",
     userId: normalized.ownerUid,
-    samples: normalized.samples,
+    samples: storedSamples,
     activity: {
       id: activityId,
       source: normalized.source,
@@ -342,7 +384,7 @@ export async function ingestActivity(input: {
     trackRef: {
       collection: ROUTE_COLLECTION,
       id: routeId,
-      pointCount: normalized.coordinates.length,
+      pointCount: storedCoordinates.length,
     },
     ingestedAt: existing.exists ? (existing.data() as CanonicalActivity).ingestedAt : now,
     fingerprint,
