@@ -8,21 +8,37 @@ import { Icon, LoginScreen, UploadModal } from "@/components/ui";
 import { termsAcknowledgement } from "@/lib/privacy";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { MapSection } from "@/components/MapSection";
+import type { PersonalHeatmapMode } from "@/components/Map";
+import { buildVisitGrid, frequencyStops, summariseGrid } from "@/engine/heatmap";
 import type { GPXRoute } from "../types";
 
 type RouteTypeFilter = "all" | "road" | "trail" | "mixed";
-type HeatmapMode = "frequency" | "pace" | "heart-rate" | "elevation";
+type HeatmapMode = PersonalHeatmapMode;
 
+/**
+ * Three views, each answering a question a runner actually asks.
+ *
+ * Four became three. Heart rate went because the data is deliberately not
+ * there — the ingestion spine downloads every activity with `hr=false`, since
+ * heart rate is Art. 9 special-category data we chose never to hold — so the
+ * mode could only ever have worked for a few legacy manual uploads, and an
+ * option that is permanently greyed out is a promise the app keeps breaking.
+ * Elevation went because the basemap already draws terrain, and a second,
+ * worse rendering of the same fact is noise.
+ *
+ * Recency replaced them, and earns its place: every run carries a date, so
+ * the view can always be filled, and "what have I not been down in a year"
+ * is the question that turns a heatmap into a plan.
+ */
 const HEATMAP_OPTIONS: Array<{
   id: HeatmapMode;
   label: string;
   icon: string;
   detail: string;
 }> = [
-  { id: "frequency", label: "Frequency", icon: "whatshot", detail: "Repeated paths" },
-  { id: "pace", label: "Pace", icon: "speed", detail: "Fast sections are thicker" },
-  { id: "heart-rate", label: "Heart rate", icon: "monitor_heart", detail: "Higher heart rate is thicker" },
-  { id: "elevation", label: "Elevation", icon: "terrain", detail: "Higher elevation is thicker" },
+  { id: "frequency", label: "How often", icon: "whatshot", detail: "Your ruts, and the ground you have touched once" },
+  { id: "recency", label: "How long ago", icon: "history", detail: "What you have not run in months" },
+  { id: "pace", label: "Pace", icon: "speed", detail: "Where you run fast, and where you do not" },
 ];
 
 export default function PersonalHeatmapsPage() {
@@ -88,12 +104,50 @@ export default function PersonalHeatmapsPage() {
     };
   }, [filteredRoutes]);
 
+
+  /**
+   * The ground, counted once.
+   *
+   * Every view on this page reads from this one grid, which is what lets the
+   * legend print real counts: the number beside a colour is the number the map
+   * was drawn from, not a second calculation that happens to agree.
+   */
+  const visitGrid = useMemo(
+    () => buildVisitGrid(filteredRoutes.map((route) => ({ coordinates: route.coordinates, date: route.date }))),
+    [filteredRoutes],
+  );
+
+  const heatmapStops = useMemo(() => frequencyStops(visitGrid), [visitGrid]);
+  const groundSummary = useMemo(() => summariseGrid(visitGrid), [visitGrid]);
+
+  /**
+   * The pace scale, trimmed at the 5th and 95th percentile.
+   *
+   * A single GPS glitch at a tunnel mouth produces a 90 km/h sample, and a
+   * scale stretched to reach it leaves every real pace crushed into the first
+   * few percent of the ramp — the same flattening that made the old frequency
+   * view useless, arriving by a different route.
+   */
+  const paceRange = useMemo(() => {
+    const speeds: number[] = [];
+    for (const route of filteredRoutes) {
+      for (const sample of route.samples ?? []) {
+        if (typeof sample.paceMinPerKm === "number" && sample.paceMinPerKm > 0) speeds.push(1 / sample.paceMinPerKm);
+      }
+    }
+    if (speeds.length < 2) return null;
+
+    speeds.sort((a, b) => a - b);
+    const min = speeds[Math.floor(speeds.length * 0.05)];
+    const max = speeds[Math.floor(speeds.length * 0.95)];
+    return max > min ? { min, max } : null;
+  }, [filteredRoutes]);
+
   const availableHeatmaps = useMemo(() => ({
-    frequency: true,
-    pace: filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.paceMinPerKm === "number")),
-    "heart-rate": filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.heartRate === "number")),
-    elevation: filteredRoutes.some((route) => route.samples?.some((sample) => typeof sample.elevation === "number")),
-  }), [filteredRoutes]);
+    frequency: visitGrid.cells.size > 0,
+    recency: filteredRoutes.some((route) => Boolean(route.date)),
+    pace: paceRange !== null,
+  }), [visitGrid, filteredRoutes, paceRange]);
 
   useEffect(() => {
     if (!availableHeatmaps[activeHeatmap]) setActiveHeatmap("frequency");
@@ -232,6 +286,26 @@ export default function PersonalHeatmapsPage() {
                 <p className="text-xs text-on-surface-variant">Compare route layers</p>
               </div>
             </div>
+
+            {/* The sentence a distance total can never give.
+                1,458 km of running over 180 km of distinct ground means every
+                metre was covered eight times on average — which is the fact
+                the picture below is about to show him, said in words first. */}
+            {groundSummary.uniqueGroundMeters > 0 && (
+              <div className="bg-surface-container rounded-2xl px-4 py-3 space-y-1">
+                <p className="text-sm text-on-surface">
+                  <span className="font-extrabold text-primary">
+                    {Math.round(groundSummary.uniqueGroundMeters / 100) / 10} km
+                  </span>{" "}
+                  of distinct ground
+                  {stats ? <span className="text-on-surface-variant"> from {stats.totalDistance} km run</span> : null}.
+                </p>
+                <p className="text-[11px] text-on-surface-variant">
+                  {Math.round(groundSummary.onceOnlyRatio * 100)}% of it you have been down exactly once
+                  {groundSummary.maxVisits > 1 ? ` · your most-run ground, ${groundSummary.maxVisits} times` : ""}.
+                </p>
+              </div>
+            )}
 
             {stats && (
               <div className="grid grid-cols-3 gap-2">
@@ -387,6 +461,9 @@ export default function PersonalHeatmapsPage() {
                 fitAllRoutes={Boolean(routeCountry)}
                 showPersonalHeatmap={availableHeatmaps[activeHeatmap]}
                 personalHeatmapMode={activeHeatmap}
+                heatmapGrid={visitGrid}
+                heatmapStops={heatmapStops}
+                heatmapPaceRange={paceRange}
                 onToggleHeatmap={() => {}}
                 onTogglePersonalHeatmap={() => {}}
                 isLoading={isUploading}
