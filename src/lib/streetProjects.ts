@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/firebaseAdmin";
+import { applyExclusionChange, pruneExclusions } from "@/engine/streets/exclusions";
 import type { Street } from "@/engine/streets/inventory";
 import { decodeScope, decodeStreets, encodeScope, encodeStreets, chunkStreets, type WireStreet } from "@/engine/streets/serialize";
 import type { StreetScope } from "@/engine/streets/scope";
@@ -35,6 +36,8 @@ type ProjectDoc = {
   chunkCount: number;
   lastRefreshedAt?: string | null;
   pendingAdditionCount?: number;
+  /** Street ids the owner has struck off. Absent on projects made before this. */
+  excludedStreetIds?: string[];
 };
 
 function toSummary(id: string, data: ProjectDoc): StoredProject {
@@ -52,6 +55,7 @@ function toSummary(id: string, data: ProjectDoc): StoredProject {
     chunkCount: data.chunkCount ?? 0,
     lastRefreshedAt: data.lastRefreshedAt ?? null,
     pendingAdditionCount: data.pendingAdditionCount ?? 0,
+    excludedStreetIds: data.excludedStreetIds ?? [],
   };
 }
 
@@ -82,6 +86,7 @@ export async function createProject(input: {
     chunkCount: chunks.length,
     lastRefreshedAt: null,
     pendingAdditionCount: 0,
+    excludedStreetIds: [],
   };
 
   const batch = db.batch();
@@ -143,6 +148,41 @@ export async function updateProject(
 
   const fresh = await ref.get();
   return toSummary(fresh.id, fresh.data() as ProjectDoc);
+}
+
+/**
+ * Strike streets off a project, or put them back.
+ *
+ * Written straight onto the project document rather than derived from the
+ * inventory chunks, because it is a decision *about* the snapshot and not part
+ * of it: a refresh rewrites the street list, and the owner's judgement about
+ * which roads are not runnable has to outlive that.
+ *
+ * Ids are verified against the snapshot before they are stored. An id for a
+ * street this project does not hold would be unremovable from the UI — nothing
+ * would render it, so nothing could offer to put it back.
+ */
+export async function setStreetExclusions(
+  ownerUid: string,
+  projectId: string,
+  change: { streetIds: string[]; excluded: boolean },
+): Promise<{ project: StoredProject; excludedStreetIds: string[] } | null> {
+  const loaded = await loadProject(ownerUid, projectId);
+  if (!loaded) return null;
+
+  const live = new Set(loaded.streets.map((street) => street.id));
+  const wanted = change.streetIds.filter((id) => live.has(id));
+
+  const next = pruneExclusions(
+    applyExclusionChange(loaded.project.excludedStreetIds, { ...change, streetIds: wanted }),
+    loaded.streets,
+  );
+
+  const ref = adminDb().collection(PROJECT_COLLECTION).doc(projectId);
+  await ref.update({ excludedStreetIds: next });
+
+  const fresh = await ref.get();
+  return { project: toSummary(fresh.id, fresh.data() as ProjectDoc), excludedStreetIds: next };
 }
 
 /**
@@ -241,6 +281,8 @@ export async function adoptPendingAdditions(
     chunkCount: chunks.length,
     snapshotTakenAt: new Date().toISOString(),
     pendingAdditionCount: remaining.length,
+    // Exclusions survive the rewrite, minus any whose street is gone.
+    excludedStreetIds: pruneExclusions(loaded.project.excludedStreetIds, merged),
   });
 
   await batch.commit();
@@ -288,6 +330,8 @@ export async function exportProjectsForOwner(ownerUid: string): Promise<Record<s
       streetCount: data.streetCount,
       totalMeters: data.totalMeters,
       snapshotTakenAt: data.snapshotTakenAt,
+      // His judgement about which roads are not runnable is his data, not OSM's.
+      excludedStreetIds: data.excludedStreetIds ?? [],
     };
   });
 }

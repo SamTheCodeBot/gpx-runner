@@ -14,6 +14,7 @@ import {
   type StreetCoverageSplit,
   type StreetSort,
 } from "@/engine/streets/coverage";
+import { describeExclusions, partitionStreets } from "@/engine/streets/exclusions";
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
@@ -37,6 +38,7 @@ import {
   planStreetRoute,
   previewScope,
   refreshProject,
+  setStreetExclusions,
   type PlannedStreetRoute,
   type ProjectSummary,
   type ScopePreview,
@@ -153,6 +155,10 @@ export default function StreetProjectsPage() {
   });
   const [mapMode, setMapMode] = useState<MapMode>("all");
   const [showDone, setShowDone] = useState(false);
+  // Struck-off roads stay on the map by default, muted: he has to be able to
+  // see what he took out, and put it back from the same place he removed it.
+  const [showExcluded, setShowExcluded] = useState(true);
+  const [excluding, setExcluding] = useState(false);
   const [streetSort, setStreetSort] = useState<StreetSort>("progress");
   // Ticked streets, the start they are run from, and the route that came back.
   const [checkedStreetIds, setCheckedStreetIds] = useState<string[]>([]);
@@ -177,21 +183,45 @@ export default function StreetProjectsPage() {
     [unifiedRoutes],
   );
 
+  // Struck-off streets, by project. Read off the project summaries rather than
+  // held in their own state, so the server's answer is the only version of this
+  // that exists and an excluded street cannot come back on a reload.
+  const excludedIdsByProject = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    for (const project of projects) result[project.id] = project.excludedStreetIds;
+    return result;
+  }, [projects]);
+
   const coverageById = useMemo(() => {
     const result: Record<string, ReturnType<typeof computeProjectCoverage>> = {};
     for (const [id, streets] of Object.entries(streetsById)) {
-      if (streets.length > 0) result[id] = computeProjectCoverage(streets, familiarityIndex);
+      // Excluded streets are out of the denominator: the percentage is over
+      // what he has actually taken on, which is what he asked for.
+      const { active } = partitionStreets(streets, excludedIdsByProject[id] ?? []);
+      if (active.length > 0) result[id] = computeProjectCoverage(active, familiarityIndex);
     }
     return result;
-  }, [streetsById, familiarityIndex]);
+  }, [streetsById, familiarityIndex, excludedIdsByProject]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   // Memoised because the map split below is the one genuinely expensive thing
   // on this page: a fresh `[]` every render would redraw a whole town's streets
   // on every keystroke.
-  const selectedStreets = useMemo(
+  const allSelectedStreets = useMemo(
     () => (selectedId ? streetsById[selectedId] ?? EMPTY_STREETS : EMPTY_STREETS),
     [selectedId, streetsById],
+  );
+
+  const { active: selectedStreets, excluded: excludedStreets } = useMemo(
+    () => partitionStreets(allSelectedStreets, selectedProject?.excludedStreetIds ?? []),
+    [allSelectedStreets, selectedProject],
+  );
+
+  // Drawn muted, and drawn from the raw geometry: there is no coverage to split
+  // a struck-off street into, because it is not being measured any more.
+  const excludedLines = useMemo(
+    () => (showExcluded ? excludedStreets.flatMap((street) => street.geometry) : undefined),
+    [excludedStreets, showExcluded],
   );
   const selectedCoverage = selectedId ? coverageById[selectedId] ?? null : null;
   const selectedPending = selectedId ? pendingById[selectedId] ?? null : null;
@@ -546,6 +576,48 @@ export default function StreetProjectsPage() {
     }
   };
 
+  /**
+   * Strike a road off the project, or put it back.
+   *
+   * The tag rules cannot know that the 80 km/h road with no pavement is not
+   * runnable — only he can. Excluding shrinks the denominator, which was his
+   * call: he is the one keeping track of the numbers and the one deciding what
+   * comes out, so a road he has ruled out should stop counting as something he
+   * owes rather than capping his project below 100 forever.
+   *
+   * The street is never deleted. It stays in the snapshot with its geometry,
+   * which is what makes putting it back one tap and no refetch.
+   */
+  const handleToggleExclusion = useCallback(
+    async (streetIds: string[], excluded: boolean) => {
+      if (!user || !selectedProject || streetIds.length === 0) return;
+      setExcluding(true);
+      setErrorMessage(null);
+      try {
+        const updated = await setStreetExclusions(user, selectedProject.id, streetIds, excluded);
+        setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
+        // A struck-off street cannot stay ticked for a route through streets
+        // he has just said he will not run.
+        if (excluded) setCheckedStreetIds((current) => current.filter((id) => !streetIds.includes(id)));
+        setFocusStreetId(null);
+
+        const count = streetIds.length;
+        setStatusMessage(
+          excluded
+            ? `${count} street${count === 1 ? "" : "s"} taken out. Your percentage is now over ${
+                updated.streetCount - updated.excludedStreetIds.length
+              } streets.`
+            : `${count} street${count === 1 ? "" : "s"} back in the project.`,
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not change that street.");
+      } finally {
+        setExcluding(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
   const handleArchiveToggle = async () => {
     if (!user || !selectedProject) return;
     try {
@@ -722,6 +794,7 @@ export default function StreetProjectsPage() {
                 // out would hide the only thing worth looking at. It stands out
                 // by being cased in white and coloured instead.
                 lines={creating ? undefined : mapLines}
+                excluded={creating ? undefined : excludedLines}
                 checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
                 focusLines={creating ? undefined : focusLines}
@@ -878,6 +951,11 @@ export default function StreetProjectsPage() {
                   onRefresh={handleRefresh}
                   onAdoptAll={handleAdoptAll}
                   onArchiveToggle={handleArchiveToggle}
+                  excludedStreets={excludedStreets}
+                  onToggleExclusion={handleToggleExclusion}
+                  excluding={excluding}
+                  showExcluded={showExcluded}
+                  onToggleShowExcluded={() => setShowExcluded((current) => !current)}
                 />
               ) : (
                 <p className="text-xs text-on-surface-variant">
@@ -979,6 +1057,11 @@ function ProjectDetail({
   onRefresh,
   onAdoptAll,
   onArchiveToggle,
+  excludedStreets,
+  onToggleExclusion,
+  excluding,
+  showExcluded,
+  onToggleShowExcluded,
 }: {
   project: ProjectSummary;
   coverage: ReturnType<typeof computeProjectCoverage>;
@@ -1007,6 +1090,11 @@ function ProjectDetail({
   onRefresh: () => void;
   onAdoptAll: () => void;
   onArchiveToggle: () => void;
+  excludedStreets: Street[];
+  onToggleExclusion: (streetIds: string[], excluded: boolean) => void;
+  excluding: boolean;
+  showExcluded: boolean;
+  onToggleShowExcluded: () => void;
 }) {
   const remaining = sortStreetCoverage(
     coverage.streets.filter((street) => !street.complete),
@@ -1040,6 +1128,13 @@ function ProjectDetail({
           {coverage.streetsComplete} of {coverage.streetsTotal} streets · {formatKm(coverage.coveredMeters)} of{" "}
           {formatKm(coverage.totalMeters)} run ({Math.round(coverage.distanceRatio * 100)}% by distance)
         </p>
+        {/* Said out loud under the headline, because a percentage over a
+            denominator he has edited has to show the edit. */}
+        {excludedStreets.length > 0 && (
+          <p className="text-[11px] text-on-surface-variant">
+            Not counted: {describeExclusions(excludedStreets)} you have taken out.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1133,6 +1228,8 @@ function ProjectDetail({
               checkDisabled={
                 checkedStreetIds.length >= MAX_SELECTED_STREETS && !checkedStreetIds.includes(street.streetId)
               }
+              onExclude={() => onToggleExclusion([street.streetId], true)}
+              excluding={excluding}
             />
           ))}
         </ul>
@@ -1143,6 +1240,49 @@ function ProjectDetail({
           </p>
         )}
       </div>
+
+      {/* Everything he has ruled out, in one place, each with the way back.
+          An exclusion he cannot find again is a decision he cannot revise. */}
+      {excludedStreets.length > 0 && (
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
+              Taken out ({excludedStreets.length})
+            </p>
+            <button onClick={onToggleShowExcluded} className="text-xs font-extrabold text-primary">
+              {showExcluded ? "Hide on map" : "Show on map"}
+            </button>
+          </div>
+          <p className="text-[11px] text-on-surface-variant">
+            Out of your percentage, still in the snapshot. Put one back and the denominator grows again.
+          </p>
+          <ul className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
+            {excludedStreets.map((street) => (
+              <li key={street.id} className="flex items-center justify-between gap-3 text-xs">
+                <span className="truncate text-on-surface-variant">
+                  {street.name}
+                  {street.part > 0 && <span> · part {street.part}</span>}
+                  <span className="text-on-surface-variant/70"> · {Math.round(street.lengthMeters)} m</span>
+                </span>
+                <button
+                  onClick={() => onToggleExclusion([street.id], false)}
+                  disabled={excluding}
+                  className="shrink-0 font-extrabold text-primary disabled:opacity-40"
+                >
+                  Put back
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={() => onToggleExclusion(excludedStreets.map((street) => street.id), false)}
+            disabled={excluding}
+            className="text-[11px] font-extrabold text-on-surface-variant disabled:opacity-40"
+          >
+            Put all of them back
+          </button>
+        </div>
+      )}
 
       <p className="text-[11px] text-on-surface-variant">
         Street list taken from OpenStreetMap on {new Date(project.snapshotTakenAt).toLocaleDateString()} — {project.wayCount}{" "}
@@ -1325,6 +1465,8 @@ function StreetRow({
   checked,
   onToggleChecked,
   checkDisabled,
+  onExclude,
+  excluding,
 }: {
   street: StreetCoverage;
   focused: boolean;
@@ -1334,6 +1476,8 @@ function StreetRow({
   checked: boolean;
   onToggleChecked: () => void;
   checkDisabled: boolean;
+  onExclude: () => void;
+  excluding: boolean;
 }) {
   const rowRef = useRef<HTMLLIElement>(null);
 
@@ -1413,6 +1557,22 @@ function StreetRow({
           </span>
         )}
       </button>
+
+      {/* Only on the row he is looking at. Six hundred rows each carrying a
+          delete-shaped button is a page that looks like it wants tidying;
+          revealed on focus, it is there exactly when he has just looked at a
+          road on the map and decided it is a dual carriageway. */}
+      {focused && (
+        <button
+          onClick={onExclude}
+          disabled={excluding}
+          title="Not runnable — take it out of this project"
+          aria-label={`Exclude ${street.name} from this project`}
+          className="py-2.5 pl-1 pr-2 shrink-0 text-on-surface-variant hover:text-error disabled:opacity-30"
+        >
+          <Icon name="block" className="text-base" />
+        </button>
+      )}
     </li>
   );
 }

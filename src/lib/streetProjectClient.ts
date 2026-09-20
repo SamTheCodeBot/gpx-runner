@@ -29,6 +29,8 @@ export type ProjectSummary = {
   snapshotTakenAt: string;
   lastRefreshedAt: string | null;
   pendingAdditionCount: number;
+  /** Streets struck off by the owner. Out of every percentage, still in the map. */
+  excludedStreetIds: string[];
 };
 
 export type ScopeRequest =
@@ -89,6 +91,7 @@ function toSummary(raw: any): ProjectSummary {
     snapshotTakenAt: raw.snapshotTakenAt ?? raw.createdAt,
     lastRefreshedAt: raw.lastRefreshedAt ?? null,
     pendingAdditionCount: raw.pendingAdditionCount ?? 0,
+    excludedStreetIds: raw.excludedStreetIds ?? [],
   };
 }
 
@@ -147,6 +150,25 @@ export async function patchProject(
   const payload = await authed(user, `/api/street-projects/${projectId}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
+  });
+  return toSummary(payload.project);
+}
+
+/**
+ * Strike streets off the project, or put them back.
+ *
+ * Takes an array because undoing a batch, or ruling out the four ways that
+ * make up one dual carriageway, should cost one request and one undo.
+ */
+export async function setStreetExclusions(
+  user: User,
+  projectId: string,
+  streetIds: string[],
+  excluded: boolean,
+): Promise<ProjectSummary> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/exclude`, {
+    method: "POST",
+    body: JSON.stringify({ streetIds, excluded }),
   });
   return toSummary(payload.project);
 }

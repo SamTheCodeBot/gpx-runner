@@ -29,6 +29,11 @@ export type StreetProjectSummary = {
   snapshotTakenAt: string;
   /** Named ways behind the street count, kept as evidence of the collapse. */
   wayCount: number;
+  /**
+   * Streets the owner has struck off. They stay in the snapshot — putting one
+   * back must not need a refetch — but they are out of every percentage.
+   */
+  excludedStreetIds: string[];
   /** Set by a refresh: streets OSM has gained, waiting for a yes or a no. */
   pendingAdditionCount?: number;
   lastRefreshedAt?: string | null;
