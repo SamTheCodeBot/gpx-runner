@@ -95,6 +95,17 @@ const DUPLICATE_DISTANCE_FLOOR_M = 200;
 /** GPS fixes at the same start line, from two devices or two exports. */
 const DUPLICATE_START_POINT_M = 500;
 
+function toDedupeCandidate(doc: FirebaseFirestore.QueryDocumentSnapshot): DedupeCandidate {
+  return {
+    id: doc.id,
+    source: doc.get("source") as ActivitySourceId,
+    startedAt: (doc.get("startedAt") as string) ?? "",
+    distanceMeters: (doc.get("distanceMeters") as number) ?? 0,
+    fingerprint: doc.get("fingerprint") as string | undefined,
+    startPoint: doc.get("startPoint") as [number, number] | undefined,
+  };
+}
+
 export async function loadDedupeCandidates(ownerUid: string): Promise<DedupeCandidate[]> {
   // Single equality filter: served by the automatic single-field index, so no
   // composite index has to be deployed for ingestion to work.
@@ -104,14 +115,51 @@ export async function loadDedupeCandidates(ownerUid: string): Promise<DedupeCand
     .select("source", "startedAt", "distanceMeters", "fingerprint", "startPoint")
     .get();
 
-  return snap.docs.map((doc) => ({
-    id: doc.id,
-    source: doc.get("source") as ActivitySourceId,
-    startedAt: (doc.get("startedAt") as string) ?? "",
-    distanceMeters: (doc.get("distanceMeters") as number) ?? 0,
-    fingerprint: doc.get("fingerprint") as string | undefined,
-    startPoint: doc.get("startPoint") as [number, number] | undefined,
-  }));
+  return snap.docs.map(toDedupeCandidate);
+}
+
+/** Every source except the one being imported — see `loadForeignDedupeCandidates`. */
+const ALL_SOURCES: ActivitySourceId[] = [
+  "intervals_icu",
+  "strava",
+  "garmin",
+  "apple_health",
+  "file_upload",
+];
+
+/**
+ * Dedupe candidates that could possibly match, and no others.
+ *
+ * `findDuplicate` ignores candidates from the *same* source outright, so
+ * loading them is pure waste — and during a full-history import that waste is
+ * the dominant cost in the whole system. `loadDedupeCandidates` reads every
+ * activity the user owns, once per batch, against a collection that the import
+ * itself is growing: over thirty batches of a 1,400-run history that is tens of
+ * thousands of document reads for rows that are discarded on the first line of
+ * the loop.
+ *
+ * Reading only the foreign sources makes the per-batch cost a function of how
+ * much Strava data the user has, which does not grow as the import runs. Each
+ * query is two equality filters, which Firestore serves from the automatic
+ * single-field indexes — no composite index to deploy.
+ */
+export async function loadForeignDedupeCandidates(
+  ownerUid: string,
+  excludeSource: ActivitySourceId,
+): Promise<DedupeCandidate[]> {
+  const others = ALL_SOURCES.filter((source) => source !== excludeSource);
+  const snaps = await Promise.all(
+    others.map((source) =>
+      adminDb()
+        .collection(ACTIVITY_COLLECTION)
+        .where("ownerUid", "==", ownerUid)
+        .where("source", "==", source)
+        .select("source", "startedAt", "distanceMeters", "fingerprint", "startPoint")
+        .get(),
+    ),
+  );
+
+  return snaps.flatMap((snap) => snap.docs.map(toDedupeCandidate));
 }
 
 /**
@@ -261,6 +309,17 @@ export async function ingestActivity(input: {
   consentId?: string;
   /** Preloaded once per run; fetched here if omitted. */
   candidates?: DedupeCandidate[];
+  /**
+   * Keep the original provider file. Defaults to on, as it always has been.
+   *
+   * A full-history import turns it off: the raw copy exists so a recent
+   * activity can be re-parsed without going back to the provider, and it is
+   * deleted after thirty days anyway. Measured against the real account, a
+   * 1,434-run history would write roughly a gigabyte of GPX into Firestore for
+   * files that expire before anyone could want them, on top of the geometry we
+   * actually keep. The canonical record and the track are unaffected.
+   */
+  retainRawPayload?: boolean;
 }): Promise<IngestResult> {
   const { normalized } = input;
   const db = adminDb();
@@ -361,7 +420,7 @@ export async function ingestActivity(input: {
 
   await db.collection(ROUTE_COLLECTION).doc(routeId).set(serializeRoute(route), { merge: true });
 
-  const rawFileRef = input.file
+  const rawFileRef = input.file && input.retainRawPayload !== false
     ? await storeRawPayload({
         activityId,
         ownerUid: normalized.ownerUid,
@@ -406,6 +465,42 @@ export async function ingestActivity(input: {
   await activityRef.set(activity, { merge: true });
 
   return { outcome: existing.exists ? "updated" : "created", activityId };
+}
+
+/** Firestore accepts at most 500 references in one `getAll`; stay clear of it. */
+const GET_ALL_CHUNK = 300;
+
+/**
+ * Which of exactly these provider ids do we already hold?
+ *
+ * The counterpart to `knownSourceActivityIds` for a bounded window. That
+ * function reads every activity the user owns to answer "have I seen this one",
+ * which is fine for a 30-day reconciliation pull and ruinous for a history
+ * import that asks the same question thirty times over a growing collection.
+ * Here the read cost is the size of the batch, and nothing else.
+ */
+export async function knownAmongSourceActivityIds(
+  source: ActivitySourceId,
+  sourceActivityIds: string[],
+): Promise<Set<string>> {
+  const known = new Set<string>();
+  if (!sourceActivityIds.length) return known;
+
+  const db = adminDb();
+  const unique = Array.from(new Set(sourceActivityIds));
+
+  for (let index = 0; index < unique.length; index += GET_ALL_CHUNK) {
+    const chunk = unique.slice(index, index + GET_ALL_CHUNK);
+    const refs = chunk.map((id) =>
+      db.collection(ACTIVITY_COLLECTION).doc(canonicalActivityId(source, id)),
+    );
+    const snaps = await db.getAll(...refs, { fieldMask: ["sourceActivityId"] });
+    snaps.forEach((snap, position) => {
+      if (snap.exists) known.add(chunk[position]);
+    });
+  }
+
+  return known;
 }
 
 /** Ids the spine already holds for a source, used to skip re-downloading files. */
