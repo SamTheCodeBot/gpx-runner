@@ -83,13 +83,56 @@ function summarizeRun(run: IngestionRunView): string {
   return `Scanned ${run.scanned}: ${parts.join(", ")}${skippedText ? `. Skipped ${skippedText}` : ""}.${failedText}`;
 }
 
+/**
+ * What the history endpoint reports back. Only the fields this card shows.
+ */
+type HistoryProgressView = {
+  status: "running" | "done" | "failed";
+  imported: number;
+  remaining: number;
+  plannedTotal: number;
+  batches: number;
+  downloads: number;
+  failed: number;
+  frontier: string;
+  earliestKnown: string;
+  oldestImportedAt?: string;
+  completedAt?: string;
+  lastError?: { code: string; at: string };
+};
+
+function yearOf(iso: string | undefined): string {
+  if (!iso) return "";
+  const year = new Date(iso).getFullYear();
+  return Number.isFinite(year) ? String(year) : "";
+}
+
+/** The one line under the progress bar, in plain words. */
+function describeHistory(progress: HistoryProgressView): string {
+  if (progress.status === "done") {
+    const back = yearOf(progress.oldestImportedAt);
+    return back
+      ? `Your whole history is here: ${progress.imported} runs, back to ${back}.`
+      : `Import finished. ${progress.imported} runs imported.`;
+  }
+
+  if (progress.status === "failed") {
+    return `Stopped after ${progress.imported} runs. Nothing is lost — pick up where it stopped.`;
+  }
+
+  const reached = yearOf(progress.frontier);
+  const reachedText = reached ? ` Currently in ${reached}.` : "";
+  return `${progress.imported} imported, ${progress.remaining} to go.${reachedText}`;
+}
+
 export function IntervalsConnectionCard() {
   const { user, authLoading, data, setData, loading, error, reload } = useIntervalsConnection();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [callbackStatus, setCallbackStatus] = useState("");
-  const [busy, setBusy] = useState<"recent" | "backfill" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"recent" | "history" | "disconnect" | null>(null);
   const [actionError, setActionError] = useState<ErrorView | null>(null);
   const [message, setMessage] = useState("");
+  const [history, setHistory] = useState<HistoryProgressView | null>(null);
 
   useEffect(() => {
     setCallbackStatus(new URLSearchParams(window.location.search).get("intervals") || "");
@@ -97,9 +140,30 @@ export function IntervalsConnectionCard() {
 
   const connection = data?.connection ?? null;
 
+  // An import that was left half-finished is the normal case, not the odd one:
+  // the tab gets closed, the phone sleeps. Read the stored progress on arrival
+  // so the card offers to continue rather than to start again.
+  useEffect(() => {
+    if (!user || !connection) return;
+    let cancelled = false;
+
+    privacyJson<{ progress: HistoryProgressView | null }>(user, "/api/intervals/history")
+      .then((result) => {
+        if (!cancelled) setHistory(result.progress);
+      })
+      .catch(() => {
+        // A card that cannot read progress still imports; it just cannot say
+        // where the last one stopped. Not worth an error banner.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, connection]);
+
   const runSync = async (mode: "recent" | "backfill") => {
     if (!user) return;
-    setBusy(mode);
+    setBusy("recent");
     setActionError(null);
     setMessage("");
     try {
@@ -111,6 +175,59 @@ export function IntervalsConnectionCard() {
       reload();
     } catch (caught) {
       setActionError(toErrorView(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * Import everything intervals.icu holds, however far back it goes.
+   *
+   * One request per batch, repeated here until the server says it is done. The
+   * ceiling stays on the server so no single request can exhaust the provider;
+   * the loop is what turns a bounded batch into a finished job. Every batch
+   * writes its own progress, so closing the tab mid-import costs the current
+   * batch and nothing else.
+   */
+  const runFullHistory = async () => {
+    if (!user) return;
+    setBusy("history");
+    setActionError(null);
+    setMessage("");
+
+    // A stop the user cannot see is a hang. This one is the server's own
+    // ceiling divided into the largest history anyone plausibly has.
+    const maxBatches = 400;
+
+    try {
+      for (let batch = 0; batch < maxBatches; batch += 1) {
+        const result = await privacyJson<{ progress: HistoryProgressView }>(
+          user,
+          "/api/intervals/history",
+          { method: "POST", body: JSON.stringify({}) },
+        );
+        setHistory(result.progress);
+
+        if (result.progress.status === "done") {
+          setMessage(describeHistory(result.progress));
+          reload();
+          return;
+        }
+        if (result.progress.status === "failed") {
+          setMessage(describeHistory(result.progress));
+          reload();
+          return;
+        }
+      }
+
+      setMessage("Paused after a long run of batches. Press import again to continue.");
+      reload();
+    } catch (caught) {
+      // The frontier is on the server, so a dropped batch loses that batch and
+      // not the import. Say so, rather than leaving a bare error.
+      setActionError(toErrorView(caught));
+      setMessage("That batch failed. Everything already imported is kept — press import to continue.");
+      reload();
     } finally {
       setBusy(null);
     }
@@ -255,18 +372,63 @@ export function IntervalsConnectionCard() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => runSync("backfill")}
+                  onClick={runFullHistory}
                   disabled={busyAny}
                   className="w-full py-3 bg-surface-container text-on-surface rounded-xl text-sm font-bold hover:bg-surface-container-high transition-colors disabled:opacity-40 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
                 >
-                  {busy === "backfill" ? (
+                  {busy === "history" ? (
                     <>
-                      <Icon name="progress_activity" className="text-base animate-spin" /> Importing…
+                      <Icon name="progress_activity" className="text-base animate-spin" />
+                      {history && history.plannedTotal > 0
+                        ? `Importing… ${history.imported} of ${history.plannedTotal}`
+                        : "Importing…"}
                     </>
+                  ) : history && history.status === "running" && history.imported > 0 ? (
+                    "Continue importing your history"
+                  ) : history && history.status === "done" ? (
+                    "Import history again"
                   ) : (
-                    "Import the last year"
+                    "Import my full history"
                   )}
                 </button>
+
+                {history && (history.status !== "done" || history.imported > 0) && (
+                  <div className="rounded-xl bg-surface-container/60 px-3 py-2">
+                    {history.plannedTotal > 0 && (
+                      <div
+                        className="h-1.5 w-full rounded-full bg-outline-variant/30 overflow-hidden"
+                        role="progressbar"
+                        aria-label="History import"
+                        aria-valuenow={history.plannedTotal - history.remaining}
+                        aria-valuemin={0}
+                        aria-valuemax={history.plannedTotal}
+                      >
+                        <div
+                          className="h-full bg-primary transition-[width] duration-300"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.round(
+                                ((history.plannedTotal - history.remaining) /
+                                  history.plannedTotal) *
+                                  100,
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                    <p className="text-[11px] text-on-surface-variant mt-1.5 leading-snug">
+                      {describeHistory(history)}
+                    </p>
+                    {history.failed > 0 && (
+                      <p className="text-[11px] text-on-surface-variant/80 leading-snug">
+                        {history.failed} run{history.failed === 1 ? "" : "s"} could not be fetched
+                        and will be retried by the next batch.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={disconnect}
