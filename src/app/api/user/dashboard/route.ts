@@ -1,30 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
+import { readTrackCoordinates } from "@/lib/track/polyline";
 
 export const dynamic = "force-dynamic";
 
-function compactCoordinates(rawCoordinates: unknown): [number, number][] {
-  if (!Array.isArray(rawCoordinates)) return [];
-
-  const coordinates = rawCoordinates
-    .map((coordinate) => {
-      if (Array.isArray(coordinate) && typeof coordinate[0] === "number" && typeof coordinate[1] === "number") {
-        return [coordinate[0], coordinate[1]] as [number, number];
-      }
-      if (
-        coordinate &&
-        typeof coordinate === "object" &&
-        "lat" in coordinate &&
-        "lon" in coordinate &&
-        typeof coordinate.lat === "number" &&
-        typeof coordinate.lon === "number"
-      ) {
-        return [coordinate.lon, coordinate.lat] as [number, number];
-      }
-      return null;
-    })
-    .filter((coordinate): coordinate is [number, number] => coordinate !== null);
+/**
+ * The dashboard draws a thumbnail, so it wants tens of points, not thousands.
+ * `readTrackCoordinates` handles both storage eras - an encoded polyline on
+ * `track`, or the old array of {lat, lon} maps on `coordinates`.
+ */
+function compactCoordinates(document: unknown): [number, number][] {
+  const coordinates = readTrackCoordinates(document);
 
   if (coordinates.length <= 50) return coordinates;
 
@@ -69,6 +56,7 @@ export async function GET(req: NextRequest) {
           "isRoundTrip",
           "countries",
           "coordinates",
+          "track",
           "hasTcx",
           "strava",
           // Ingestion-spine linkage. Without it the client read layer cannot
@@ -105,7 +93,7 @@ export async function GET(req: NextRequest) {
         type: d.type || "road",
         isRoundTrip: d.isRoundTrip ?? false,
         countries: d.countries || [],
-        coordinates: compactCoordinates(d.coordinates),
+        coordinates: compactCoordinates(d),
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
         activity: d.activity || null,

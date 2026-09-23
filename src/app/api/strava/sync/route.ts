@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
 import { refreshStravaToken, stravaGet } from "@/lib/strava";
+import { toStoredTrack } from "@/lib/track/polyline";
 import type { GPXRoute, RouteMetricSample, UserProfile } from "@/app/types";
 
 export const runtime = "nodejs";
@@ -106,10 +107,13 @@ function buildSamples(activity: StravaActivity, streams: StravaStreams): RouteMe
 }
 
 function serializeRoute(route: GPXRoute) {
+  // Same storage shape as the ingestion spine: geometry as one encoded
+  // polyline, not an array of maps Firestore would index point by point.
   const payload: any = {
     ...route,
-    coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+    track: toStoredTrack(route.coordinates),
   };
+  delete payload.coordinates;
 
   if (route.samples?.length) {
     payload.samples = route.samples.map((sample) => {

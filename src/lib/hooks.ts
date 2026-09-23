@@ -6,6 +6,7 @@ import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
+import { readTrackCoordinates, storedTrackLength } from "@/lib/track/polyline";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
 import {
@@ -128,11 +129,12 @@ function summarizeRoute(route: GPXRoute): RouteSummary {
 }
 
 function deserializeRouteSummary(id: string, data: any): RouteSummary {
-  const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
+  // Either era of document: an encoded polyline on `track`, or the old array
+  // of {lat, lon} maps on `coordinates`.
+  const rawCoordinates = readTrackCoordinates(data);
   const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
   const countryCoordinates = rawCoordinates
-    .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
-    .map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]);
+    .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0);
 
   return {
     id,
@@ -253,17 +255,16 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
   }, []);
 
   const deserializeRoute = useCallback((id: string, data: any): GPXRoute => {
-    const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
-    const coordinates = rawCoordinates.map((c) => [c.lon, c.lat] as [number, number]);
-    const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
-    const countryCoordinates = rawCoordinates
-      .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
-      .map((c) => [c.lon, c.lat] as [number, number]);
+    const coordinates = readTrackCoordinates(data);
+    const countryStep = coordinates.length > 25 ? Math.ceil(coordinates.length / 25) : 1;
+    const countryCoordinates = coordinates
+      .filter((_coordinate, index) => index === 0 || index === coordinates.length - 1 || index % countryStep === 0);
 
     return {
       ...data,
       id,
       coordinates,
+      track: undefined,
       countries: routeCountriesFromData(data, countryCoordinates),
       samples: Array.isArray(data.samples)
         ? data.samples.map((sample: any) => ({
@@ -352,7 +353,9 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         const firestoreRoutes: GPXRoute[] = [];
         snap.forEach((d) => {
           const data = d.data();
-          if (data.coordinates && Array.isArray(data.coordinates)) {
+          // A route carries geometry either way; one without any is a document
+          // that never finished writing and is not a route yet.
+          if (storedTrackLength(data) > 0) {
             firestoreRoutes.push(deserializeRoute(d.id, data));
           }
         });

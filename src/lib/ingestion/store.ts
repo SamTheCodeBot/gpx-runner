@@ -1,5 +1,6 @@
 import { haversineMeters } from "@/engine/utils/geo";
 import { adminDb } from "@/lib/firebaseAdmin";
+import { toStoredTrack } from "@/lib/track/polyline";
 import { fingerprintTrack } from "./fingerprint";
 import { stampRetention } from "./retention";
 import { decideActivityScope } from "./sportPolicy";
@@ -219,13 +220,27 @@ export function canonicalActivityId(source: ActivitySourceId, sourceActivityId: 
   return `${source}:${sourceActivityId}`;
 }
 
-/** Same wire shape the existing route documents use: coordinates as {lat, lon}. */
+/**
+ * Geometry goes out as an encoded polyline, not as an array of {lat, lon}.
+ *
+ * Firestore indexes every element of an array of maps, so the old shape wrote
+ * one index entry per track point - 4,000 per run, millions across a full
+ * history - and every write had to build all of them. The polyline is a single
+ * string field: ~28 kB where the array was ~120 kB, indexed once, and read
+ * back through `readTrackCoordinates`, which still understands documents
+ * written in the old shape. Nothing is migrated; old routes are read as they
+ * were written.
+ */
 function serializeRoute(route: GPXRoute): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     ...route,
-    coordinates: route.coordinates.map(([lon, lat]) => ({ lat, lon })),
+    track: toStoredTrack(route.coordinates),
   };
+  delete payload.coordinates;
 
+  // Samples stay an array of maps. There are at most 900 of them against 4,000
+  // track points, they carry per-point fields a polyline cannot hold, and the
+  // track was where the cost actually was.
   if (route.samples?.length) {
     payload.samples = route.samples.map((sample) => {
       const serialized: Record<string, unknown> = {

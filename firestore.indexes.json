@@ -1,0 +1,62 @@
+{
+  "//": [
+    "Single-field index exemptions for run geometry.",
+    "",
+    "Firestore indexes every field of every document by default, and for an",
+    "array of maps that means one index entry per element. A 4,000-point track",
+    "wrote 4,000 index entries, a fourteen-year history wrote millions, and the",
+    "index cost more storage than the documents it pointed at. Every write had",
+    "to build all of them, which is the part an import feels as slowness.",
+    "",
+    "Nothing in this app queries, orders by or filters on an individual track",
+    "point, a sample or a country inside a route. They are read whole, with the",
+    "document. So the index buys nothing and is turned off for those fields.",
+    "",
+    "New geometry is written as an encoded polyline string on `track`, which is",
+    "indexed once however long it is; `track.points` is exempted anyway because",
+    "a 28 kB string in an index is pure waste.",
+    "",
+    "`coordinates` and `samples` remain here because documents written before",
+    "the polyline change still carry them and are never migrated.",
+    "",
+    "Deploy with:  firebase deploy --only firestore:indexes"
+  ],
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "routes",
+      "fieldPath": "coordinates",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "routes",
+      "fieldPath": "samples",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "routes",
+      "fieldPath": "track",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "activities",
+      "fieldPath": "coordinates",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "activities",
+      "fieldPath": "samples",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "activities",
+      "fieldPath": "track",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "rawActivityPayloads",
+      "fieldPath": "content",
+      "indexes": []
+    }
+  ]
+}
