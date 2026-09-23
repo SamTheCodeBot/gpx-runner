@@ -1,0 +1,13 @@
+{
+  "//": [
+    "Which Firebase project this repo deploys to.",
+    "",
+    "Without this file the CLI has no active project and refuses to deploy at",
+    "all - the failure looks like a login problem and is not one. Naming the",
+    "project here means `firebase deploy --only firestore:indexes` works from a",
+    "fresh clone, on any machine, with no `firebase use --add` ritual first."
+  ],
+  "projects": {
+    "default": "gps-runner-d2b79"
+  }
+}
