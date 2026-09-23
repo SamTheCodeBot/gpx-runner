@@ -6,9 +6,33 @@ import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
+import { readTrackCoordinates, storedTrackLength } from "@/lib/track/polyline";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
-import { boundTracksNearStart, historyRadiusMeters, toLatLngTrack } from "@/engine/trackHistory";
+import {
+  boundTracksNearStart,
+  historyCenter,
+  historyRadiusMeters,
+  selectTracksNearStart,
+  toLatLngTrack,
+} from "@/engine/trackHistory";
+
+/**
+ * Hand the main thread back long enough for one frame to paint.
+ *
+ * A click handler that does its work synchronously never lets the button it
+ * was attached to show a spinner: React's state update and the work sit in the
+ * same task, so the browser paints once, at the end. Yielding here is what
+ * turns a five-second blocked interaction into a five-second *visible* one.
+ */
+function nextPaint(): Promise<void> {
+  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+  });
+}
 import type { FamiliarityReport, FamiliarityTarget } from "@/engine/familiarityReport";
 
 const ROUTE_CACHE_VERSION = 3;
@@ -55,6 +79,21 @@ interface RouteCachePayload {
   userId: string;
   cachedAt: number;
   routes: GPXRoute[];
+  /**
+   * False when the cache holds fewer routes than the account actually has.
+   *
+   * localStorage stops at a few megabytes, so a large history is written in a
+   * reduced form and, past a point, as the newest 75 routes only. That part was
+   * always intended. What was not: a truncated cache was stamped with the same
+   * freshness as a complete one, and freshness is what suppresses the network
+   * load for fifteen minutes. An owner with 1,400 runs therefore saw the 60-odd
+   * that happened to fit, with every total on the page computed from just those
+   * - a wrong number, presented exactly like a right one.
+   *
+   * A truncated cache is still worth rendering immediately. It just must never
+   * be allowed to stand in for the whole account.
+   */
+  complete?: boolean;
 }
 
 interface RouteSummaryCachePayload {
@@ -105,11 +144,12 @@ function summarizeRoute(route: GPXRoute): RouteSummary {
 }
 
 function deserializeRouteSummary(id: string, data: any): RouteSummary {
-  const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
+  // Either era of document: an encoded polyline on `track`, or the old array
+  // of {lat, lon} maps on `coordinates`.
+  const rawCoordinates = readTrackCoordinates(data);
   const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
   const countryCoordinates = rawCoordinates
-    .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
-    .map((c: { lat: number; lon: number }) => [c.lon, c.lat] as [number, number]);
+    .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0);
 
   return {
     id,
@@ -176,19 +216,23 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       };
       localStorage.setItem(routeSummaryCacheKey(cacheUserId), JSON.stringify(summaries));
 
-      const fullPayload = (routes: GPXRoute[]): RouteCachePayload => ({
+      const fullPayload = (routes: GPXRoute[], complete: boolean): RouteCachePayload => ({
         version: ROUTE_CACHE_VERSION,
         userId: cacheUserId,
         cachedAt: Date.now(),
         routes,
+        complete,
       });
 
-      let payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache)));
+      let payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache), true));
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
-        payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache)));
+        payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache), true));
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
-        payload = JSON.stringify(fullPayload(routesToCache.slice(0, 75).map(compactRouteCache)));
+        // Newest 75 only - and said so, so the next load revalidates.
+        payload = JSON.stringify(
+          fullPayload(routesToCache.slice(0, 75).map(compactRouteCache), false),
+        );
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
         localStorage.removeItem(routeCacheKey(cacheUserId));
@@ -230,17 +274,16 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
   }, []);
 
   const deserializeRoute = useCallback((id: string, data: any): GPXRoute => {
-    const rawCoordinates: Array<{ lat: number; lon: number }> = Array.isArray(data.coordinates) ? data.coordinates : [];
-    const coordinates = rawCoordinates.map((c) => [c.lon, c.lat] as [number, number]);
-    const countryStep = rawCoordinates.length > 25 ? Math.ceil(rawCoordinates.length / 25) : 1;
-    const countryCoordinates = rawCoordinates
-      .filter((_coordinate, index) => index === 0 || index === rawCoordinates.length - 1 || index % countryStep === 0)
-      .map((c) => [c.lon, c.lat] as [number, number]);
+    const coordinates = readTrackCoordinates(data);
+    const countryStep = coordinates.length > 25 ? Math.ceil(coordinates.length / 25) : 1;
+    const countryCoordinates = coordinates
+      .filter((_coordinate, index) => index === 0 || index === coordinates.length - 1 || index % countryStep === 0);
 
     return {
       ...data,
       id,
       coordinates,
+      track: undefined,
       countries: routeCountriesFromData(data, countryCoordinates),
       samples: Array.isArray(data.samples)
         ? data.samples.map((sample: any) => ({
@@ -315,10 +358,50 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         const parsed = JSON.parse(stored) as RouteCachePayload;
         if (parsed.version === ROUTE_CACHE_VERSION && parsed.userId === userId && Array.isArray(parsed.routes)) {
           setRoutes(parsed.routes);
-          hasFreshCache = isFreshCache(parsed.cachedAt);
+          // Render it either way; only a COMPLETE cache may stand in for the
+          // account and skip the load. A truncated one is a head start, not an
+          // answer - see `RouteCachePayload.complete`.
+          hasFreshCache = isFreshCache(parsed.cachedAt) && parsed.complete !== false;
         }
       }
     } catch {}
+
+    /**
+     * Summaries first, geometry behind them.
+     *
+     * Every number above the list - runs, kilometres, ascent - comes from
+     * fields weighing a couple of hundred bytes per route. The GPS tracks are
+     * three orders of magnitude larger and only the map needs them. Fetching
+     * those before showing anything meant an account with 1,463 runs waited on
+     * megabytes of geometry to be told how far it had run.
+     *
+     * A summary carries `coordinates: []`, and the map already treats that as
+     * nothing to draw. So a half-hydrated page is a map with fewer lines on it
+     * for a moment - never a wrong total, never a crash.
+     */
+    const loadSummariesFirst = async () => {
+      const currentUser = firebaseAuth?.currentUser;
+      if (!currentUser) return;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch("/api/routes/summaries", {
+          headers: { Authorization: `Bearer ***}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.routes)) return;
+
+        const summaries = (data.routes as RouteSummary[])
+          .map((route) => ({ ...route, coordinates: [] as [number, number][] }))
+          .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
+
+        // Never overwrite geometry that already arrived: on a warm cache the
+        // full documents can beat the summaries home.
+        setRoutes((current) => (current.length >= summaries.length ? current : summaries));
+      } catch {
+        // The Firestore load below is the real one; this is only a head start.
+      }
+    };
 
     const load = async () => {
       if (!db) return;
@@ -329,7 +412,9 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         const firestoreRoutes: GPXRoute[] = [];
         snap.forEach((d) => {
           const data = d.data();
-          if (data.coordinates && Array.isArray(data.coordinates)) {
+          // A route carries geometry either way; one without any is a document
+          // that never finished writing and is not a route yet.
+          if (storedTrackLength(data) > 0) {
             firestoreRoutes.push(deserializeRoute(d.id, data));
           }
         });
@@ -344,7 +429,13 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       }
     };
 
-    if (!hasFreshCache) load();
+    if (!hasFreshCache) {
+      // Cheap, and it settles every total on the page. Geometry follows.
+      void loadSummariesFirst().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      load();
+    }
     return () => {
       cancelled = true;
     };
@@ -824,15 +915,24 @@ export function useRouteSuggestions(
       setSuggestionError(null);
       setSuggestionFamiliarity(null);
       setSuggestionShape(null);
+
+      // Let the browser paint the spinner before the main thread is taken for
+      // track preparation. Without this the click handler runs the whole
+      // preparation synchronously, the button never visibly changes state, and
+      // the interaction is measured as blocked for as long as the work takes.
+      await nextPaint();
+
       try {
         let lat = 56.9; // Falkenberg
         let lon = 12.5;
         if (startPoint) { [lon, lat] = startPoint; }
         else if (routes.length > 0) {
-          const allCoords = routes.flatMap((r) => r.coordinates);
-          if (allCoords.length > 0) {
-            lat = allCoords.reduce((s, c) => s + c[1], 0) / allCoords.length;
-            lon = allCoords.reduce((s, c) => s + c[0], 0) / allCoords.length;
+          // Streaming totals: taking a mean used to flatten every coordinate
+          // of every run into one throwaway array first.
+          const center = historyCenter(routes);
+          if (center) {
+            lat = center.lat;
+            lon = center.lng;
           }
         }
 
@@ -841,11 +941,15 @@ export function useRouteSuggestions(
         // overlap the loop, and it is thinned before it goes on the wire — a
         // full activity history would be megabytes.
         const start = { lat, lng: lon };
-        const tracks = boundTracksNearStart(
-          routes.map((route) => toLatLngTrack(route.coordinates)),
-          start,
-          { radiusMeters: historyRadiusMeters(suggestDistance), ...SUGGESTION_TRACK_BUDGET },
-        ).map((track) => track.map((point) => [point.lng, point.lat] as [number, number]));
+        const radiusMeters = historyRadiusMeters(suggestDistance);
+        // Nearest runs only, chosen off the raw coordinates before a single
+        // `{lat, lng}` is allocated. The old line converted the entire history
+        // and then kept the first 150 of them.
+        const nearby = selectTracksNearStart(routes, start, radiusMeters, SUGGESTION_TRACK_BUDGET.maxTracks);
+        const tracks = boundTracksNearStart(nearby, start, {
+          radiusMeters,
+          ...SUGGESTION_TRACK_BUDGET,
+        }).map((track) => track.map((point) => [point.lng, point.lat] as [number, number]));
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new Error("Route generation timed out")), 90000);

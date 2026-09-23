@@ -31,6 +31,91 @@ export function historyRadiusMeters(targetDistanceKm: number, minKm = 2, maxKm =
   return km * 1000;
 }
 
+/**
+ * Pick the runs near a start point, cheaply, before anything is allocated.
+ *
+ * The caller used to do `routes.map(toLatLngTrack)` and hand the lot to
+ * `boundTracksNearStart`, which keeps the first 150 and throws the rest away.
+ * So an entire history — one `{lat, lng}` object per GPS point, hundreds of
+ * thousands of them — was built in order to discard most of it, synchronously,
+ * inside a click handler. That is what a 5.6 s blocked interaction is made of.
+ *
+ * This walks the raw `[lng, lat]` arrays instead: no objects, no trigonometry,
+ * just a planar distance in a local projection, which over a few tens of
+ * kilometres is far more accuracy than "is this run anywhere near here" needs.
+ * Only the runs that survive are converted.
+ *
+ * It also fixes a quieter bug. Taking the *first* 150 tracks meant an
+ * arbitrary slice of the history in array order; a runner with 500 logged runs
+ * got his familiarity measured against whichever ones happened to load first.
+ * Nearest-first is both cheaper and correct.
+ */
+export function selectTracksNearStart(
+  routes: Array<{ coordinates: unknown }>,
+  start: LatLng,
+  radiusMeters: number,
+  maxTracks: number,
+): LatLng[][] {
+  const metersPerDegreeLng = 111_320 * Math.cos((start.lat * Math.PI) / 180);
+  const radiusSquared = radiusMeters * radiusMeters;
+
+  const near: Array<{ coordinates: [number, number][]; distanceSquared: number }> = [];
+
+  for (const route of routes) {
+    const coordinates = route?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) continue;
+
+    let best = Number.POSITIVE_INFINITY;
+    for (const point of coordinates) {
+      if (!Array.isArray(point) || point.length !== 2) continue;
+      const dx = ((point[0] as number) - start.lng) * metersPerDegreeLng;
+      const dy = ((point[1] as number) - start.lat) * 111_320;
+      const squared = dx * dx + dy * dy;
+      if (squared < best) {
+        best = squared;
+        // Already inside the radius: no closer answer would change the verdict.
+        if (best <= radiusSquared) break;
+      }
+    }
+
+    if (best <= radiusSquared) {
+      near.push({ coordinates: coordinates as [number, number][], distanceSquared: best });
+    }
+  }
+
+  near.sort((a, b) => a.distanceSquared - b.distanceSquared);
+
+  return near.slice(0, maxTracks).map((entry) => toLatLngTrack(entry.coordinates));
+}
+
+/**
+ * The centre of a history, without building an array of every point in it.
+ *
+ * `routes.flatMap(r => r.coordinates)` to take a mean allocates a copy of the
+ * whole history for two running totals. On the click path that is pure cost.
+ */
+export function historyCenter(routes: Array<{ coordinates: unknown }>): LatLng | null {
+  let latTotal = 0;
+  let lngTotal = 0;
+  let count = 0;
+
+  for (const route of routes) {
+    const coordinates = route?.coordinates;
+    if (!Array.isArray(coordinates)) continue;
+    for (const point of coordinates) {
+      if (!Array.isArray(point) || point.length !== 2) continue;
+      const lng = point[0] as number;
+      const lat = point[1] as number;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      latTotal += lat;
+      lngTotal += lng;
+      count += 1;
+    }
+  }
+
+  return count === 0 ? null : { lat: latTotal / count, lng: lngTotal / count };
+}
+
 export function toLatLngTrack(coordinates: unknown): LatLng[] {
   if (!Array.isArray(coordinates)) return [];
   return coordinates

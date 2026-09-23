@@ -7,7 +7,27 @@ import L from "leaflet";
 // Use canvas renderer for much faster rendering of many polylines
 const canvasRenderer = L.canvas({ padding: 0.5 });
 import { GPXRoute, RouteSuggestion } from "@/app/types";
+import {
+  cellAt,
+  daysSince,
+  frequencyPosition,
+  recencyBandIndex,
+  type VisitGrid,
+} from "@/engine/heatmap";
 import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
+
+/**
+ * What the heatmap is coloured by.
+ *
+ * Heart rate is gone, and not by oversight: the ingestion spine deliberately
+ * never stores it (`power=false&hr=false` on every download — Art. 9
+ * special-category data we chose never to hold), so the mode could only ever
+ * have worked for a handful of legacy manual uploads. Offering a view the data
+ * cannot fill is worse than not offering it. Recency took its place, and
+ * answers a question the history can always answer: what have I not been down
+ * in a year?
+ */
+export type PersonalHeatmapMode = "frequency" | "recency" | "pace";
 
 interface MapProps {
   routes: GPXRoute[];
@@ -15,7 +35,11 @@ interface MapProps {
   showHeatmap: boolean;
   fitAllRoutes?: boolean;
   showPersonalHeatmap?: boolean;
-  personalHeatmapMode?: "frequency" | "pace" | "heart-rate" | "elevation";
+  personalHeatmapMode?: PersonalHeatmapMode;
+  /** Counted once, on the ground, by the page that owns the history. */
+  heatmapGrid?: VisitGrid | null;
+  heatmapStops?: number[];
+  heatmapPaceRange?: { min: number; max: number } | null;
   suggestedRoute?: RouteSuggestion | null;
   selectedStartPoint?: [number, number] | null;
   onMapClick?: (lat: number, lon: number) => void;
@@ -256,96 +280,94 @@ function RouteClusterMarkers({
   );
 }
 
-const HEATMAP_RAMPS: Record<string, [[number, number, number], [number, number, number], [number, number, number]]> = {
-  road: [
-    [255, 185, 215],
-    [255, 65, 164],
-    [242, 4, 132],
-  ],
-  trail: [
-    [188, 248, 255],
-    [18, 221, 251],
-    [0, 150, 204],
-  ],
-  mixed: [
-    [231, 190, 255],
-    [197, 45, 255],
-    [132, 0, 208],
-  ],
-};
+/**
+ * The heatmap ramps.
+ *
+ * One variable per channel. Colour carries the number and nothing else; width
+ * stays constant. The version this replaces put the metric into line width
+ * (up to 10 px) and the route *type* into hue, so two unrelated variables
+ * shared one channel and neighbouring streets merged into blobs with no value
+ * you could read off them.
+ *
+ * Ordered cold to hot, and chosen to stay distinguishable on the dark
+ * basemap: ground run once has to be visible, not merely not-absent, because
+ * "where have I been exactly once" is half the question this map answers.
+ */
+export const FREQUENCY_RAMP: Array<[number, number, number]> = [
+  [56, 132, 255],
+  [18, 221, 251],
+  [163, 230, 53],
+  [251, 191, 36],
+  [244, 63, 94],
+];
+
+/** Five bands, matching RECENCY_BANDS one for one: fresh and bright to old and dim. */
+export const RECENCY_COLORS: Array<[number, number, number]> = [
+  [34, 211, 160],
+  [163, 230, 53],
+  [251, 191, 36],
+  [249, 115, 22],
+  [120, 113, 140],
+];
 
 function mixChannel(a: number, b: number, amount: number): number {
   return Math.round(a + (b - a) * amount);
 }
 
-function rampColor(type: string | undefined, intensity: number): [number, number, number] {
-  const [low, base, high] = HEATMAP_RAMPS[type || "road"] || HEATMAP_RAMPS.road;
-  const from = intensity <= 0.55 ? low : base;
-  const to = intensity <= 0.55 ? base : high;
-  const amount = intensity <= 0.55 ? intensity / 0.55 : (intensity - 0.55) / 0.45;
+/** A position 0..1 along a ramp, interpolated between its stops. */
+export function rampAt(ramp: Array<[number, number, number]>, position: number): [number, number, number] {
+  if (ramp.length === 0) return [255, 255, 255];
+  const clamped = Math.max(0, Math.min(1, position));
+  const scaled = clamped * (ramp.length - 1);
+  const index = Math.min(ramp.length - 2, Math.floor(scaled));
+  const within = scaled - index;
+  const from = ramp[index];
+  const to = ramp[Math.min(ramp.length - 1, index + 1)];
 
   return [
-    mixChannel(from[0], to[0], amount),
-    mixChannel(from[1], to[1], amount),
-    mixChannel(from[2], to[2], amount),
+    mixChannel(from[0], to[0], within),
+    mixChannel(from[1], to[1], within),
+    mixChannel(from[2], to[2], within),
   ];
 }
 
-function routeTypeIndex(type?: string): number {
-  if (type === "trail") return 1;
-  if (type === "mixed") return 2;
-  return 0;
+function paceMetersPerSecond(sample: NonNullable<GPXRoute["samples"]>[number]): number | null {
+  if (typeof sample.paceMinPerKm !== "number" || sample.paceMinPerKm <= 0) return null;
+  return 1 / sample.paceMinPerKm;
 }
 
-function typeFromIndex(index: number): "road" | "trail" | "mixed" {
-  if (index === 1) return "trail";
-  if (index === 2) return "mixed";
-  return "road";
-}
-
-function sampleMetric(sample: NonNullable<GPXRoute["samples"]>[number], mode: "pace" | "heart-rate" | "elevation"): number | null {
-  if (mode === "heart-rate") return typeof sample.heartRate === "number" ? sample.heartRate : null;
-  if (mode === "elevation") return typeof sample.elevation === "number" ? sample.elevation : null;
-  if (typeof sample.paceMinPerKm !== "number") return null;
-  return sample.paceMinPerKm > 0 ? 1 / sample.paceMinPerKm : null;
-}
-
-function metricRange(routes: GPXRoute[], mode: "pace" | "heart-rate" | "elevation"): { min: number; max: number } | null {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  let count = 0;
-
-  for (const route of routes) {
-    for (const sample of route.samples || []) {
-      const value = sampleMetric(sample, mode);
-      if (value === null) continue;
-      if (value < min) min = value;
-      if (value > max) max = value;
-      count += 1;
-    }
-  }
-
-  return count > 0 ? { min, max } : null;
-}
-
-function PersonalMetricHeatmapCanvas({
+/**
+ * The personal heatmap, drawn from counted ground.
+ *
+ * One canvas for every mode, because the modes differ only in which number a
+ * segment is coloured by. Width is constant at every zoom and in every mode:
+ * the moment thickness carries data, two neighbouring streets merge into a
+ * blob and the reader loses both.
+ *
+ * The counting is not done here. It happens once, on a geographic grid, in
+ * `@/engine/heatmap` — so "twelve runs down this road" stays twelve however
+ * far you zoom, which a canvas accumulating pixels can never promise.
+ */
+function PersonalHeatmapCanvas({
   routes,
   enabled,
   mode,
+  grid,
+  stops,
+  paceRange,
 }: {
   routes: GPXRoute[];
   enabled: boolean;
-  mode: "pace" | "heart-rate" | "elevation";
+  mode: PersonalHeatmapMode;
+  grid: VisitGrid | null;
+  stops: number[];
+  paceRange: { min: number; max: number } | null;
 }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!enabled || routes.length === 0) return;
+    if (!enabled || routes.length === 0 || !grid) return;
 
-    const range = metricRange(routes, mode);
-    if (!range) return;
-
-    const { min, max } = range;
     const canvas = L.DomUtil.create("canvas", "leaflet-heatmap-canvas") as HTMLCanvasElement;
     canvas.style.position = "absolute";
     canvas.style.pointerEvents = "none";
@@ -353,6 +375,7 @@ function PersonalMetricHeatmapCanvas({
     map.getPanes().overlayPane.appendChild(canvas);
 
     let frame = 0;
+    const now = Date.now();
 
     const draw = () => {
       const size = map.getSize();
@@ -370,27 +393,42 @@ function PersonalMetricHeatmapCanvas({
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.lineCap = "round";
       context.lineJoin = "round";
+      // Constant, thin, and the same at every zoom. The data is in the colour.
+      context.lineWidth = 2.4 * scale;
+
+      // Off-screen work is the bulk of a long history, so segments outside the
+      // viewport are dropped before any colour is computed for them.
+      const margin = 60;
+      const onScreen = (point: L.Point) =>
+        point.x >= -margin && point.y >= -margin && point.x <= size.x + margin && point.y <= size.y + margin;
 
       for (const route of routes) {
-        const samples = route.samples;
-        if (!samples || samples.length < 2) continue;
+        const coordinates = route.coordinates;
+        if (!coordinates || coordinates.length < 2) continue;
 
-        for (let i = 1; i < samples.length; i += 1) {
-          const previousValue = sampleMetric(samples[i - 1], mode);
-          const currentValue = sampleMetric(samples[i], mode);
-          if (previousValue === null && currentValue === null) continue;
+        // Pace is the one metric that lives on the samples rather than on the
+        // ground, and samples are stored downsampled — so it is read by
+        // proportion along the track, never by index.
+        const samples = mode === "pace" ? route.samples ?? [] : [];
+        const sampleRatio = samples.length > 1 ? (samples.length - 1) / (coordinates.length - 1) : 0;
 
-          const value = currentValue ?? previousValue ?? min;
-          const intensity = max === min ? 0.65 : Math.max(0, Math.min(1, (value - min) / (max - min)));
-          const [r, g, b] = rampColor(route.type, intensity);
-          const previous = map.latLngToContainerPoint([samples[i - 1].coordinate[1], samples[i - 1].coordinate[0]]);
-          const current = map.latLngToContainerPoint([samples[i].coordinate[1], samples[i].coordinate[0]]);
+        for (let i = 1; i < coordinates.length; i += 1) {
+          const from = map.latLngToContainerPoint([coordinates[i - 1][1], coordinates[i - 1][0]]);
+          const to = map.latLngToContainerPoint([coordinates[i][1], coordinates[i][0]]);
+          if (!onScreen(from) && !onScreen(to)) continue;
+
+          const midpoint = {
+            lat: (coordinates[i - 1][1] + coordinates[i][1]) / 2,
+            lng: (coordinates[i - 1][0] + coordinates[i][0]) / 2,
+          };
+
+          const colour = segmentColour({ mode, grid, stops, paceRange, midpoint, samples, sampleRatio, index: i, now });
+          if (!colour) continue;
 
           context.beginPath();
-          context.moveTo(previous.x * scale, previous.y * scale);
-          context.lineTo(current.x * scale, current.y * scale);
-          context.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.45 + intensity * 0.5})`;
-          context.lineWidth = (2.5 + intensity * 8) * scale;
+          context.moveTo(from.x * scale, from.y * scale);
+          context.lineTo(to.x * scale, to.y * scale);
+          context.strokeStyle = colour;
           context.stroke();
         }
       }
@@ -409,127 +447,57 @@ function PersonalMetricHeatmapCanvas({
       map.off("moveend zoomend resize", scheduleDraw);
       canvas.remove();
     };
-  }, [enabled, map, mode, routes]);
+  }, [enabled, map, mode, routes, grid, stops, paceRange]);
 
   return null;
 }
 
-function PersonalHeatmapCanvas({ routes, enabled }: { routes: GPXRoute[]; enabled: boolean }) {
-  const map = useMap();
+/**
+ * The colour of one segment.
+ *
+ * Pulled out of the draw loop so the three modes sit side by side and can be
+ * compared: each one turns a number into a position on a ramp, and nothing
+ * else. Ground with no number to show is skipped rather than drawn in a
+ * default colour that would read as data.
+ */
+function segmentColour(input: {
+  mode: PersonalHeatmapMode;
+  grid: VisitGrid;
+  stops: number[];
+  paceRange: { min: number; max: number } | null;
+  midpoint: { lat: number; lng: number };
+  samples: NonNullable<GPXRoute["samples"]>;
+  sampleRatio: number;
+  index: number;
+  now: number;
+}): string | null {
+  const { mode, grid, stops, paceRange, midpoint, samples, sampleRatio, index, now } = input;
 
-  useEffect(() => {
-    if (!enabled || routes.length === 0) return;
+  if (mode === "pace") {
+    if (!paceRange || samples.length < 2) return null;
+    const sample = samples[Math.min(samples.length - 1, Math.round(index * sampleRatio))];
+    const speed = sample ? paceMetersPerSecond(sample) : null;
+    if (speed === null) return null;
 
-    const canvas = L.DomUtil.create("canvas", "leaflet-heatmap-canvas") as HTMLCanvasElement;
-    canvas.style.position = "absolute";
-    canvas.style.pointerEvents = "none";
-    canvas.style.zIndex = "450";
-    map.getPanes().overlayPane.appendChild(canvas);
+    const span = paceRange.max - paceRange.min;
+    const position = span <= 0 ? 0.5 : (speed - paceRange.min) / span;
+    const [r, g, b] = rampAt(FREQUENCY_RAMP, position);
+    return `rgba(${r}, ${g}, ${b}, 0.85)`;
+  }
 
-    let frame = 0;
+  const cell = cellAt(grid, midpoint);
+  if (!cell) return null;
 
-    const draw = () => {
-      const size = map.getSize();
-      const scale = Math.min(window.devicePixelRatio || 1, 1.5);
-      const width = Math.max(1, Math.round(size.x * scale));
-      const height = Math.max(1, Math.round(size.y * scale));
-      const topLeft = map.containerPointToLayerPoint([0, 0]);
+  if (mode === "recency") {
+    const [r, g, b] = RECENCY_COLORS[recencyBandIndex(daysSince(cell, now))];
+    return `rgba(${r}, ${g}, ${b}, 0.85)`;
+  }
 
-      L.DomUtil.setPosition(canvas, topLeft);
-      canvas.style.width = `${size.x}px`;
-      canvas.style.height = `${size.y}px`;
-      canvas.width = width;
-      canvas.height = height;
-
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      context.clearRect(0, 0, width, height);
-
-      const densities = [
-        new Float32Array(width * height),
-        new Float32Array(width * height),
-        new Float32Array(width * height),
-      ];
-      const mask = document.createElement("canvas");
-      mask.width = width;
-      mask.height = height;
-      const maskContext = mask.getContext("2d", { willReadFrequently: true });
-      if (!maskContext) return;
-
-      for (const route of routes) {
-        if (!route.coordinates || route.coordinates.length < 2) continue;
-
-        maskContext.clearRect(0, 0, width, height);
-        maskContext.beginPath();
-        route.coordinates.forEach(([lon, lat], index) => {
-          const point = map.latLngToContainerPoint([lat, lon]);
-          const x = point.x * scale;
-          const y = point.y * scale;
-          if (index === 0) maskContext.moveTo(x, y);
-          else maskContext.lineTo(x, y);
-        });
-        maskContext.strokeStyle = "rgb(255 255 255)";
-        maskContext.lineWidth = 7 * scale;
-        maskContext.lineCap = "round";
-        maskContext.lineJoin = "round";
-        maskContext.stroke();
-
-        const alpha = maskContext.getImageData(0, 0, width, height).data;
-        const density = densities[routeTypeIndex(route.type)];
-        for (let i = 3, px = 0; i < alpha.length; i += 4, px += 1) {
-          if (alpha[i] > 0) density[px] += alpha[i] / 255;
-        }
-      }
-
-      let maxDensity = 0;
-      for (const density of densities) {
-        for (let i = 0; i < density.length; i += 1) {
-          if (density[i] > maxDensity) maxDensity = density[i];
-        }
-      }
-      if (maxDensity <= 0) return;
-
-      const output = context.createImageData(width, height);
-      for (let px = 0, out = 0; px < width * height; px += 1, out += 4) {
-        let typeIndex = 0;
-        let value = densities[0][px];
-        if (densities[1][px] > value) {
-          typeIndex = 1;
-          value = densities[1][px];
-        }
-        if (densities[2][px] > value) {
-          typeIndex = 2;
-          value = densities[2][px];
-        }
-        if (value <= 0) continue;
-
-        const intensity = maxDensity <= 1 ? 0 : Math.max(0, Math.min(1, (value - 1) / (maxDensity - 1)));
-        const [r, g, b] = rampColor(typeFromIndex(typeIndex), intensity);
-        output.data[out] = r;
-        output.data[out + 1] = g;
-        output.data[out + 2] = b;
-        output.data[out + 3] = Math.round((0.58 + intensity * 0.37) * Math.min(1, value) * 255);
-      }
-
-      context.putImageData(output, 0, 0);
-    };
-
-    const scheduleDraw = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(draw);
-    };
-
-    scheduleDraw();
-    map.on("moveend zoomend resize", scheduleDraw);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      map.off("moveend zoomend resize", scheduleDraw);
-      canvas.remove();
-    };
-  }, [enabled, map, routes]);
-
-  return null;
+  const position = frequencyPosition(cell.visits, stops);
+  const [r, g, b] = rampAt(FREQUENCY_RAMP, position);
+  // Ground run once stays clearly visible: it is half the question this map
+  // answers, and fading it out was what made the old view unreadable.
+  return `rgba(${r}, ${g}, ${b}, ${0.6 + position * 0.35})`;
 }
 
 function simplifyPositions(coords: [number, number][], maxPoints = 200): [number, number][] {
@@ -545,6 +513,9 @@ export default function Map({
   fitAllRoutes = false,
   showPersonalHeatmap = false,
   personalHeatmapMode = "frequency",
+  heatmapGrid = null,
+  heatmapStops = [],
+  heatmapPaceRange = null,
   suggestedRoute,
   selectedStartPoint,
   onMapClick,
@@ -647,15 +618,14 @@ export default function Map({
       <MapResizeHandler />
       <MapEvents onMapClick={onMapClick} />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
-      {personalHeatmapMode === "frequency" ? (
-        <PersonalHeatmapCanvas routes={routes} enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute} />
-      ) : (
-        <PersonalMetricHeatmapCanvas
-          routes={routes}
-          enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute}
-          mode={personalHeatmapMode}
-        />
-      )}
+      <PersonalHeatmapCanvas
+        routes={routes}
+        enabled={showPersonalHeatmap && !selectedRoute && !suggestedRoute}
+        mode={personalHeatmapMode}
+        grid={heatmapGrid}
+        stops={heatmapStops}
+        paceRange={heatmapPaceRange}
+      />
 
       {selectedStartPoint && (
         <Marker position={[selectedStartPoint[1], selectedStartPoint[0]]} icon={startPointIcon}>

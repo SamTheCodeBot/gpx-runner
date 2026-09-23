@@ -1,10 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon, RouteRow } from "./ui";
 import { UploadRoutePrompt } from "./Sidebar";
 import type { GPXRoute } from "@/app/types";
 import type { UnifiedRun } from "@/lib/ingestion/activityMerge";
+
+/**
+ * How many rows are rendered at a time.
+ *
+ * The account this was sized against holds 1,463 runs. Rendering all of them
+ * costs a visibly janky scroll on a phone for a list nobody reads past the
+ * first screen. The counts and totals above the list are NOT paginated - they
+ * are computed over every matching route - so what is bounded here is drawing,
+ * not knowing.
+ */
+const ROUTE_PAGE_SIZE = 50;
 
 interface RouteListProps {
   /** Unified runs: route documents plus the provenance the read layer attached. */
@@ -39,6 +50,17 @@ export function RouteList({
 }: RouteListProps) {
   const hasActiveFilters = !!(filter.year || filter.month || filter.type || filter.country || filter.list);
   const [showUploadPrompt, setShowUploadPrompt] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(ROUTE_PAGE_SIZE);
+
+  // A new filter or search is a new list, so it starts at the top rather than
+  // keeping however far the previous one had been paged.
+  const filterKey = useMemo(
+    () => [filter.year, filter.month, filter.type, filter.country, filter.list, searchQuery].join("|"),
+    [filter.year, filter.month, filter.type, filter.country, filter.list, searchQuery],
+  );
+  useEffect(() => {
+    setVisibleCount(ROUTE_PAGE_SIZE);
+  }, [filterKey]);
 
   return (
     <div>
@@ -46,7 +68,11 @@ export function RouteList({
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-extrabold text-primary font-headline">
           All Routes
-          <span className="ml-2 text-xs font-medium text-on-surface-variant">({filteredRoutes.length})</span>
+          <span className="ml-2 text-xs font-medium text-on-surface-variant">
+            ({filteredRoutes.length > visibleCount
+              ? `${visibleCount} of ${filteredRoutes.length}`
+              : filteredRoutes.length})
+          </span>
         </h3>
         <button
           onClick={() => setShowFilters(!showFilters)}
@@ -173,7 +199,7 @@ export function RouteList({
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredRoutes.map((route) => (
+          {filteredRoutes.slice(0, visibleCount).map((route) => (
             <RouteRow
               key={route.id}
               route={route}
@@ -186,6 +212,19 @@ export function RouteList({
               onToggleFavorite={() => onToggleFavorite(route.id)}
             />
           ))}
+
+          {filteredRoutes.length > visibleCount && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((shown) => shown + ROUTE_PAGE_SIZE)}
+              className="w-full py-3 rounded-xl bg-surface-container text-on-surface text-sm font-bold hover:bg-surface-container-high transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              Show {Math.min(ROUTE_PAGE_SIZE, filteredRoutes.length - visibleCount)} more
+              <span className="font-medium text-on-surface-variant">
+                {" "}— {filteredRoutes.length - visibleCount} left
+              </span>
+            </button>
+          )}
         </div>
       )}
       {showUploadPrompt && onRouteUpload && (

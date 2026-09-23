@@ -35,7 +35,25 @@ import { looksIndoor, MIN_INGESTED_DISTANCE_METERS } from "../sportPolicy";
  * canonical model, dedupe, retention, consent, export or erasure.
  */
 
-const MAX_LIST_LIMIT = 200;
+/**
+ * Rows asked for in one listing request.
+ *
+ * intervals.icu applies `limit` by keeping the NEWEST rows in the window and
+ * discarding the rest silently — there is no truncation flag in the response.
+ * Measured against the live account on 2026-09-23: a 1990-to-now window with
+ * `limit=200` came back with exactly 200 activities reaching no further than
+ * 2026-04-15, out of 2,627 that exist. So a single request is a page, never an
+ * answer, and `listActivitiesSince` pages backwards until the window is
+ * genuinely exhausted.
+ */
+const LIST_PAGE_SIZE = 200;
+
+/**
+ * Hard stop on paging, so a provider that ignored `newest` could not spin here
+ * for ever. 200 pages is 40,000 activities — an order of magnitude more than
+ * the largest real history we have seen.
+ */
+const MAX_LIST_PAGES = 200;
 
 function toAuth(credentials: SourceCredentials): IntervalsAuth {
   return { accessToken: credentials.accessToken, apiKey: credentials.apiKey };
@@ -208,16 +226,58 @@ export const intervalsIcuSource: ActivitySource = {
   ): Promise<ActivityListPage> {
     const athleteId = credentials.externalId ?? "0";
     const until = cursor.until ?? new Date().toISOString();
+    const auth = toAuth(credentials);
+    const oldest = toLocalIso(cursor.since);
 
-    const activities = await listIntervalsActivities(toAuth(credentials), {
-      athleteId,
-      oldest: toLocalIso(cursor.since),
-      newest: toLocalIso(until),
-      limit: Math.min(cursor.limit ?? MAX_LIST_LIMIT, MAX_LIST_LIMIT),
-    });
+    // An explicit `limit` from the caller means "at most this many", and is
+    // honoured as such. With no limit the window is paged to exhaustion, which
+    // is what the full-history planning pass needs: capping there made the
+    // import believe a fifteen-year history began in April 2026.
+    const wanted = cursor.limit && cursor.limit > 0 ? cursor.limit : Infinity;
+
+    const collected: IntervalsActivity[] = [];
+    const seen = new Set<string>();
+    let newest = toLocalIso(until);
+
+    for (let page = 0; page < MAX_LIST_PAGES && collected.length < wanted; page += 1) {
+      const pageSize = Math.min(LIST_PAGE_SIZE, wanted - collected.length);
+      const batch = await listIntervalsActivities(auth, {
+        athleteId,
+        oldest,
+        newest,
+        limit: pageSize,
+      });
+      if (!batch.length) break;
+
+      let oldestSeen: number | null = null;
+      for (const activity of batch) {
+        // Windows are inclusive at both ends, so the boundary activity comes
+        // back on the next page too. Keyed by id rather than trusted to be
+        // absent.
+        const id = String(activity.id);
+        if (!seen.has(id)) {
+          seen.add(id);
+          collected.push(activity);
+        }
+        const at = new Date(`${activity.start_date_local}Z`).valueOf();
+        if (Number.isFinite(at) && (oldestSeen === null || at < oldestSeen)) oldestSeen = at;
+      }
+
+      // A short page means the window is exhausted: there is nothing older left
+      // inside it to ask for.
+      if (batch.length < pageSize) break;
+      if (oldestSeen === null) break;
+
+      const nextNewest = toLocalIso(new Date(oldestSeen - 1000).toISOString());
+      // Refuse to stand still: without this a window whose activities all share
+      // one second would page for ever.
+      if (nextNewest >= newest) break;
+      newest = nextNewest;
+      if (new Date(`${newest}Z`).valueOf() < new Date(`${oldest}Z`).valueOf()) break;
+    }
 
     return {
-      activities: activities.map(toSummary),
+      activities: collected.map(toSummary),
       // Resume from the end of the window just covered, not from the newest
       // activity seen: an activity uploaded late would otherwise be skipped.
       nextCursor: { since: until },

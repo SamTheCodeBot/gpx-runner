@@ -1,0 +1,16 @@
+{
+  "//": [
+    "Minimal Firebase project config. It exists so the security rules and the",
+    "index exemptions in firestore.indexes.json are deployable from the repo",
+    "instead of being clicked into the console and forgotten.",
+    "",
+    "  firebase deploy --only firestore:indexes   field exemptions",
+    "  firebase deploy --only firestore:rules     security rules",
+    "",
+    "Hosting is Vercel, not Firebase, so no hosting block belongs here."
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
