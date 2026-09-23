@@ -79,6 +79,21 @@ interface RouteCachePayload {
   userId: string;
   cachedAt: number;
   routes: GPXRoute[];
+  /**
+   * False when the cache holds fewer routes than the account actually has.
+   *
+   * localStorage stops at a few megabytes, so a large history is written in a
+   * reduced form and, past a point, as the newest 75 routes only. That part was
+   * always intended. What was not: a truncated cache was stamped with the same
+   * freshness as a complete one, and freshness is what suppresses the network
+   * load for fifteen minutes. An owner with 1,400 runs therefore saw the 60-odd
+   * that happened to fit, with every total on the page computed from just those
+   * - a wrong number, presented exactly like a right one.
+   *
+   * A truncated cache is still worth rendering immediately. It just must never
+   * be allowed to stand in for the whole account.
+   */
+  complete?: boolean;
 }
 
 interface RouteSummaryCachePayload {
@@ -201,19 +216,23 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       };
       localStorage.setItem(routeSummaryCacheKey(cacheUserId), JSON.stringify(summaries));
 
-      const fullPayload = (routes: GPXRoute[]): RouteCachePayload => ({
+      const fullPayload = (routes: GPXRoute[], complete: boolean): RouteCachePayload => ({
         version: ROUTE_CACHE_VERSION,
         userId: cacheUserId,
         cachedAt: Date.now(),
         routes,
+        complete,
       });
 
-      let payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache)));
+      let payload = JSON.stringify(fullPayload(routesToCache.map(compactRouteCache), true));
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
-        payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache)));
+        payload = JSON.stringify(fullPayload(routesToCache.map(stripRouteCache), true));
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
-        payload = JSON.stringify(fullPayload(routesToCache.slice(0, 75).map(compactRouteCache)));
+        // Newest 75 only - and said so, so the next load revalidates.
+        payload = JSON.stringify(
+          fullPayload(routesToCache.slice(0, 75).map(compactRouteCache), false),
+        );
       }
       if (payload.length > ROUTE_CACHE_MAX_BYTES) {
         localStorage.removeItem(routeCacheKey(cacheUserId));
@@ -339,7 +358,10 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         const parsed = JSON.parse(stored) as RouteCachePayload;
         if (parsed.version === ROUTE_CACHE_VERSION && parsed.userId === userId && Array.isArray(parsed.routes)) {
           setRoutes(parsed.routes);
-          hasFreshCache = isFreshCache(parsed.cachedAt);
+          // Render it either way; only a COMPLETE cache may stand in for the
+          // account and skip the load. A truncated one is a head start, not an
+          // answer - see `RouteCachePayload.complete`.
+          hasFreshCache = isFreshCache(parsed.cachedAt) && parsed.complete !== false;
         }
       }
     } catch {}
