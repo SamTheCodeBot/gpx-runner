@@ -8,6 +8,8 @@ import {
   ingestActivity,
   knownAmongSourceActivityIds,
   loadForeignDedupeCandidates,
+  packDedupeCandidates,
+  unpackDedupeCandidates,
   type DedupeCandidate,
 } from "./store";
 import type { ActivitySource, ActivitySourceId, SourceCredentials } from "@/app/types";
@@ -43,6 +45,24 @@ import type { ActivitySource, ActivitySourceId, SourceCredentials } from "@/app/
  */
 
 export const HISTORY_COLLECTION = "historyImports";
+
+/**
+ * Above this many foreign activities the packed cache is not worth writing:
+ * it approaches Firestore's 1 MiB document limit, and an athlete with that
+ * much data in *other* sources is not the case this optimisation was for.
+ * The live query still runs, exactly as before.
+ */
+const DEDUPE_CACHE_MAX_CANDIDATES = 8000;
+
+/**
+ * How long a packed candidate set may be reused within one import.
+ *
+ * The set only changes if another source writes while this import runs — a
+ * Strava sync in another tab. Fifteen minutes bounds how long such a run could
+ * go unnoticed, and the cost of missing it is one duplicate the user can see
+ * and delete, not a corrupted import.
+ */
+const DEDUPE_CACHE_TTL_MS = 15 * 60 * 1000;
 
 /**
  * Window span for a batch when there is no plan to size it from.
@@ -374,6 +394,9 @@ export async function runHistoryBatch(input: HistoryBatchInput): Promise<History
     maxDownloads,
   });
 
+  // Read once, reused by every batch of this import. See `dedupeCandidatesFor`.
+  const candidates = await dedupeCandidatesFor(uid, source);
+
   try {
     const batch = await importWindow({
       uid,
@@ -385,6 +408,7 @@ export async function runHistoryBatch(input: HistoryBatchInput): Promise<History
       windowEnd: frontier,
       maxDownloads,
       retainRawPayload: input.retainRawPayload === true,
+      candidates,
     });
 
     // Where the next batch starts. When the ceiling stopped us part-way the
@@ -482,6 +506,57 @@ type WindowResult = {
   oldestStoredAt?: string;
 };
 
+/**
+ * The foreign dedupe candidates for this import, read once and reused.
+ *
+ * Stored packed beside the progress document. A batch that finds a fresh cache
+ * spends one document read where it used to spend one query per other source,
+ * every batch, for a hundred batches.
+ *
+ * Falls back to the live query whenever the cache is missing, stale, or the
+ * candidate set is too large to pack — the import must never depend on the
+ * cache being there.
+ */
+async function dedupeCandidatesFor(
+  uid: string,
+  source: ActivitySourceId,
+): Promise<DedupeCandidate[]> {
+  const ref = adminDb().collection(HISTORY_COLLECTION).doc(`${docId(uid, source)}__dedupe`);
+
+  try {
+    const snap = await ref.get();
+    const refreshedAt = snap.get("refreshedAt") as string | undefined;
+    const packed = snap.get("packed") as string | undefined;
+
+    if (
+      snap.exists &&
+      typeof packed === "string" &&
+      refreshedAt &&
+      Date.now() - new Date(refreshedAt).valueOf() < DEDUPE_CACHE_TTL_MS
+    ) {
+      return unpackDedupeCandidates(packed);
+    }
+  } catch {
+    // A cache that cannot be read is not a reason to fail an import.
+  }
+
+  const candidates = await loadForeignDedupeCandidates(uid, source);
+
+  if (candidates.length <= DEDUPE_CACHE_MAX_CANDIDATES) {
+    await ref
+      .set({
+        uid,
+        source,
+        packed: packDedupeCandidates(candidates),
+        count: candidates.length,
+        refreshedAt: new Date().toISOString(),
+      })
+      .catch(() => undefined);
+  }
+
+  return candidates;
+}
+
 async function importWindow(input: {
   uid: string;
   source: ActivitySourceId;
@@ -492,6 +567,8 @@ async function importWindow(input: {
   windowEnd: string;
   maxDownloads: number;
   retainRawPayload: boolean;
+  /** Read once per batch by the caller, so a long import does not re-read them. */
+  candidates: DedupeCandidate[];
 }): Promise<WindowResult> {
   const { uid, source, adapter, credentials } = input;
 
@@ -535,7 +612,7 @@ async function importWindow(input: {
     source,
     eligible.map((activity) => activity.sourceActivityId),
   );
-  const candidates: DedupeCandidate[] = await loadForeignDedupeCandidates(uid, source);
+  const candidates: DedupeCandidate[] = input.candidates;
 
   for (const summary of eligible) {
     if (known.has(summary.sourceActivityId)) {

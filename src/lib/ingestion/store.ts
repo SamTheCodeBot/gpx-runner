@@ -164,6 +164,66 @@ export async function loadForeignDedupeCandidates(
 }
 
 /**
+ * Dedupe candidates, packed into one string for reuse across batches.
+ *
+ * `loadForeignDedupeCandidates` is already the cheap version - it skips the
+ * source being imported, so its cost does not grow as the import runs. What it
+ * does still do is re-read every Strava, Garmin and uploaded activity ONCE PER
+ * BATCH, and a full history is a hundred batches. For an athlete with a large
+ * Strava history that is the dominant read cost of the whole import, spent
+ * re-reading rows that did not change.
+ *
+ * So the candidate set is read once, packed, and stored beside the import's
+ * progress. One document read per batch replaces hundreds.
+ *
+ * Format is one candidate per line, pipe separated:
+ *   id|source|startedAt|distanceMeters|fingerprint|lon,lat
+ * Empty fields stay empty rather than being omitted, so the column count is
+ * fixed and a fingerprint containing no pipe cannot shift the parse.
+ */
+export function packDedupeCandidates(candidates: DedupeCandidate[]): string {
+  return candidates
+    .map((candidate) => {
+      const point = candidate.startPoint
+        ? `${candidate.startPoint[0]},${candidate.startPoint[1]}`
+        : "";
+      return [
+        candidate.id,
+        candidate.source,
+        candidate.startedAt,
+        String(candidate.distanceMeters ?? 0),
+        candidate.fingerprint ?? "",
+        point,
+      ].join("|");
+    })
+    .join("\n");
+}
+
+export function unpackDedupeCandidates(packed: string): DedupeCandidate[] {
+  if (!packed) return [];
+
+  return packed
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [id, source, startedAt, distance, fingerprint, point] = line.split("|");
+      const [lon, lat] = point ? point.split(",").map(Number) : [NaN, NaN];
+
+      return {
+        id,
+        source: source as ActivitySourceId,
+        startedAt: startedAt ?? "",
+        distanceMeters: Number(distance) || 0,
+        fingerprint: fingerprint || undefined,
+        startPoint:
+          Number.isFinite(lon) && Number.isFinite(lat)
+            ? ([lon, lat] as [number, number])
+            : undefined,
+      };
+    });
+}
+
+/**
  * Is this the same run we already hold from another source?
  *
  * Two stages. The fingerprint is an exact-match fast path. Because any rounding
