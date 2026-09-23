@@ -366,6 +366,43 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       }
     } catch {}
 
+    /**
+     * Summaries first, geometry behind them.
+     *
+     * Every number above the list - runs, kilometres, ascent - comes from
+     * fields weighing a couple of hundred bytes per route. The GPS tracks are
+     * three orders of magnitude larger and only the map needs them. Fetching
+     * those before showing anything meant an account with 1,463 runs waited on
+     * megabytes of geometry to be told how far it had run.
+     *
+     * A summary carries `coordinates: []`, and the map already treats that as
+     * nothing to draw. So a half-hydrated page is a map with fewer lines on it
+     * for a moment - never a wrong total, never a crash.
+     */
+    const loadSummariesFirst = async () => {
+      const currentUser = firebaseAuth?.currentUser;
+      if (!currentUser) return;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch("/api/routes/summaries", {
+          headers: { Authorization: `Bearer ***}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.routes)) return;
+
+        const summaries = (data.routes as RouteSummary[])
+          .map((route) => ({ ...route, coordinates: [] as [number, number][] }))
+          .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
+
+        // Never overwrite geometry that already arrived: on a warm cache the
+        // full documents can beat the summaries home.
+        setRoutes((current) => (current.length >= summaries.length ? current : summaries));
+      } catch {
+        // The Firestore load below is the real one; this is only a head start.
+      }
+    };
+
     const load = async () => {
       if (!db) return;
       try {
@@ -392,7 +429,13 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       }
     };
 
-    if (!hasFreshCache) load();
+    if (!hasFreshCache) {
+      // Cheap, and it settles every total on the page. Geometry follows.
+      void loadSummariesFirst().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      load();
+    }
     return () => {
       cancelled = true;
     };
