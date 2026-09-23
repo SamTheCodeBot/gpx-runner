@@ -549,6 +549,7 @@ async function importWindow(input: {
       break;
     }
 
+
     try {
       const file = await adapter.fetchActivityFile(credentials, summary.sourceActivityId);
       result.downloads += 1;
@@ -612,6 +613,15 @@ async function importWindow(input: {
     }
   }
 
+  // Reaching the ceiling exactly is still reaching the ceiling. The window is
+  // sized to hold about one batch, so a batch that spends its whole allowance
+  // has no way to know whether the next activity was the last one; treating it
+  // as truncated makes the next window start at the oldest activity actually
+  // completed. The cost of being wrong is re-listing a handful of summaries,
+  // which is one cheap line each and never a re-download. The cost of being
+  // wrong the other way is an activity silently skipped for ever.
+  if (result.downloads >= input.maxDownloads) result.hitDownloadLimit = true;
+
   return result;
 }
 
@@ -632,7 +642,15 @@ function endsTheBatch(error: unknown): boolean {
     code === "intervals_rate_limited" ||
     code === "intervals_unavailable" ||
     code === "encryption_key_missing" ||
-    code === "intervals_env_missing"
+    code === "intervals_env_missing" ||
+    // An unclassified failure is the transport dropping under us: `fetch
+    // failed`, a reset connection, DNS. It is not a property of one activity,
+    // so stepping over it would burn the rest of the window one doomed
+    // download at a time and then report a successful batch. A provider error
+    // that genuinely belongs to a single activity arrives classified — a 400 is
+    // `intervals_api_failed`, an unservable track is skipped, an oversized
+    // track is `activity_too_large` — and all of those are still stepped over.
+    code === "sync_failed"
   );
 }
 
