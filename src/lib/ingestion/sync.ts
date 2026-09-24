@@ -5,6 +5,7 @@ import { ConsentError, requireConsent } from "./consent";
 import { getConnection, openCredentials, updateCursor } from "./connections";
 import { getActivitySource } from "./registry";
 import { decideSummaryScope } from "./sportPolicy";
+import { BudgetExhaustedError, claimBudget, recordSpend } from "./spendGuard";
 import {
   ingestActivity,
   knownAmongSourceActivityIds,
@@ -66,6 +67,7 @@ function endsTheRun(error: unknown): boolean {
   if (error instanceof ConsentError) return true;
   if (error instanceof ConnectionMissingError) return true;
   if (error instanceof TokenCryptoError) return true;
+  if (error instanceof BudgetExhaustedError) return true;
   // A spent database quota is the whole database's problem, not this activity's.
   // Carrying on would spend the remaining window discovering the same thing
   // once per activity and report a successful run at the end of it.
@@ -78,6 +80,10 @@ function endsTheRun(error: unknown): boolean {
 
 export async function runIngestion(input: IngestionRunInput): Promise<IngestionRunResult> {
   const { uid, source } = input;
+
+  // Claimed before any work: the ceiling has to refuse the run, not report on
+  // it afterwards. This is the brake that the Firestore free tier used to be.
+  await claimBudget({ uid, kind: "syncs" });
 
   // Nothing is pulled from a third party without a current, granted consent.
   const consent = await requireConsent(uid, "provider_ingest", source);
@@ -230,6 +236,10 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
     await updateCursor(uid, source, page.nextCursor);
   }
 
+  // Counted after the fact: a run cannot know in advance how many files it will
+  // pull, and the next claim is what stops the day.
+  await recordSpend({ uid, kind: "downloads", amount: downloads }).catch(() => undefined);
+
   return result;
 }
 
@@ -273,6 +283,7 @@ export function ingestionErrorCode(error: unknown): string {
   if (error instanceof ConsentError) return error.code;
   if (error instanceof ConnectionMissingError) return "provider_not_connected";
   if (error instanceof TokenCryptoError) return "token_decrypt_failed";
+  if (error instanceof BudgetExhaustedError) return error.code;
   // Checked before the provider classification below: a spent Firestore quota
   // is a 429 too, and must not be read as intervals.icu rate-limiting us.
   if (isQuotaExhausted(error)) return FIRESTORE_QUOTA_CODE;
@@ -317,6 +328,10 @@ export function ingestionErrorStatus(code: string): number {
       return 401;
     case "intervals_rate_limited":
       return 429;
+    case "daily_budget_exhausted":
+      // Same reasoning as a spent quota: retrying sooner cannot help, and the
+      // client must not read it as backpressure to ride out.
+      return 503;
     case FIRESTORE_QUOTA_CODE:
       // 503 rather than 429: the client must not read this as "slow down and
       // retry", because retrying sooner cannot help. It is over until the

@@ -158,6 +158,8 @@ const ERROR_COPY: Record<string, string> = {
     "intervals.icu returned an unexpected error. Try again; if it keeps happening, disconnect and reconnect.",
   firebase_config_failed:
     "The server could not reach its database, so nothing was changed. The operator needs to check the Firebase configuration.",
+  daily_budget_exhausted:
+    "This account has reached its daily import limit — a safety ceiling, not a provider one. Nothing is lost: the limit lifts at midnight UTC and an import picks up exactly where it stopped. If you hit this without running a big import, something is looping and it should be looked at.",
   firestore_quota_exhausted:
     "The database has used up today's free quota, so nothing could be read or written. Nothing is lost — the allowance resets at midnight US Pacific time (09:00 in Sweden) and an import picks up exactly where it stopped.",
   confirmation_required: `Type ${ERASURE_CONFIRMATION} exactly to confirm.`,

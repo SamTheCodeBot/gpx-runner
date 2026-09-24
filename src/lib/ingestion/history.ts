@@ -4,6 +4,7 @@ import { getConnection, openCredentials } from "./connections";
 import { getActivitySource } from "./registry";
 import { decideSummaryScope } from "./sportPolicy";
 import { FIRESTORE_QUOTA_CODE } from "@/lib/firestoreQuota";
+import { claimBudget, recordSpend } from "./spendGuard";
 import { ConnectionMissingError, ingestionErrorCode } from "./sync";
 import {
   ingestActivity,
@@ -344,6 +345,13 @@ export type HistoryBatchInput = {
 export async function runHistoryBatch(input: HistoryBatchInput): Promise<HistoryBatchResult> {
   const { uid, source } = input;
 
+  // Claimed first, before consent, before the provider, before anything that
+  // costs. The client loops this endpoint until the server says "done", so the
+  // server is the only place a stop can actually be enforced: a reloaded tab
+  // resets the client's own 400-batch limit, and a bug in the done-check would
+  // drive it in a circle for as long as the browser stays open.
+  await claimBudget({ uid, kind: "batches" });
+
   const consent = await requireConsent(uid, "provider_ingest", source);
 
   const connection = await getConnection(uid, source);
@@ -457,6 +465,7 @@ export async function runHistoryBatch(input: HistoryBatchInput): Promise<History
     delete next.lastError;
 
     await saveHistoryProgress(next);
+    await recordSpend({ uid, kind: "downloads", amount: batch.downloads }).catch(() => undefined);
 
     return {
       windowStart,
@@ -725,6 +734,8 @@ function endsTheBatch(error: unknown): boolean {
     // would fail the same way, and the frontier is already safe: the next batch
     // re-walks this window once the quota resets.
     code === FIRESTORE_QUOTA_CODE ||
+    // The day's self-imposed ceiling. Nothing about the next activity changes it.
+    code === "daily_budget_exhausted" ||
     // An unclassified failure is the transport dropping under us: `fetch
     // failed`, a reset connection, DNS. It is not a property of one activity,
     // so stepping over it would burn the rest of the window one doomed

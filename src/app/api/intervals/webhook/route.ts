@@ -2,6 +2,7 @@ import { createHash, createHmac } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { secretsMatch } from "@/lib/tokenCrypto";
+import { FIRESTORE_QUOTA_CODE } from "@/lib/firestoreQuota";
 import { findConnectionByExternalId } from "@/lib/ingestion/connections";
 import { stampRetention } from "@/lib/ingestion/retention";
 import { ingestionErrorCode, runIngestion } from "@/lib/ingestion/sync";
@@ -179,6 +180,17 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const code = ingestionErrorCode(error);
     console.error("[intervals/webhook]", { code, error });
+
+    // Asking the provider to retry is only useful when a retry could succeed.
+    // A spent daily budget or a spent database quota will still be spent in
+    // five minutes, and every retry costs another delivery, another lookup and
+    // another sync attempt — a retry storm on top of whatever caused the ceiling
+    // to be reached. Acknowledge instead: the reconciliation pull is the source
+    // of truth here, and it will collect these activities on its next run.
+    if (code === "daily_budget_exhausted" || code === FIRESTORE_QUOTA_CODE) {
+      return NextResponse.json({ ok: true, deferred: code });
+    }
+
     // 500 so the provider retries; the delivery record makes that safe.
     return NextResponse.json({ error: "Failed to handle webhook", code }, { status: 500 });
   }
