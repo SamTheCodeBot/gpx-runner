@@ -115,6 +115,25 @@ function formatKm(meters: number): string {
   return `${Math.round(meters / 100) / 10} km`;
 }
 
+/**
+ * A project squeezed into one line of a dropdown.
+ *
+ * The card this replaced carried a progress bar, a percentage and the OSM
+ * badge. Two of those three still have a home directly under the map, in the
+ * detail header, so the only thing the option has to earn its width with is
+ * the number that tells him which project he is looking for — and the one
+ * thing the detail panel cannot say about a project he has *not* selected,
+ * which is that it has streets waiting.
+ */
+function projectOptionLabel(
+  project: ProjectSummary,
+  coverage: ReturnType<typeof computeProjectCoverage> | null,
+): string {
+  const percent = coverage ? `${Math.round(coverage.ratio * 100)}%` : "…";
+  const pending = project.pendingAdditionCount > 0 ? ` · ${project.pendingAdditionCount} new in OSM` : "";
+  return `${project.name} · ${percent}${pending}`;
+}
+
 function ProgressBar({ ratio, tone = "primary" }: { ratio: number; tone?: "primary" | "secondary" }) {
   const percent = Math.max(0, Math.min(100, ratio * 100));
   return (
@@ -914,103 +933,113 @@ export default function StreetProjectsPage() {
           onRouteUpload={handleRouteUpload}
         />
 
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          <div className="w-full lg:w-[420px] shrink-0 overflow-y-auto px-4 pt-5 pb-6 md:p-6 space-y-4 custom-scrollbar">
-            <div className="flex items-center gap-3">
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Title, project picker and "new" on one line.
+
+              These three used to be the top of a 420px column that ran the
+              full height of the page, which meant a permanent third of the
+              window was spent on a heading and a list he reads once — and the
+              map, the only thing on this page that actually needs room, got
+              what was left. Picking a project is a single decision made rarely,
+              so it collapses to a dropdown, and the column goes away entirely
+              unless he is creating a project, where the panel and the map have
+              to be on screen together. */}
+          <div className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 md:px-6 border-b border-outline-variant/30">
+            <div className="flex items-center gap-3 min-w-0 mr-auto">
               <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
                 <Icon name="flag" filled className="text-on-primary-container text-xl" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-xl font-extrabold text-on-surface">Street projects</h2>
-                <p className="text-xs text-on-surface-variant">Run every street in a place, one street at a time</p>
+                <h2 className="text-xl font-extrabold text-on-surface truncate">Street projects</h2>
+                <p className="hidden sm:block text-xs text-on-surface-variant truncate">
+                  Run every street in a place, one street at a time
+                </p>
               </div>
             </div>
 
-            {statusMessage && (
-              <div className="rounded-2xl bg-secondary-container/60 border border-secondary/30 px-4 py-3 text-xs text-on-surface flex gap-2">
-                <Icon name="info" className="text-base text-secondary shrink-0" />
-                <span>{statusMessage}</span>
-              </div>
-            )}
-            {errorMessage && (
-              <div className="rounded-2xl bg-error-container/60 border border-error/30 px-4 py-3 text-xs text-on-surface flex gap-2">
-                <Icon name="error" className="text-base text-error shrink-0" />
-                <span>{errorMessage}</span>
-              </div>
-            )}
-
-            {mode === "create" ? (
-              <CreateProjectPanel
-                user={user}
-                defaultPin={defaultPin}
-                pin={createPin ?? defaultPin}
-                onPinChange={setCreatePin}
-                onRingChange={setCreateRing}
-                onCancel={() => setMode("list")}
-                onCreated={handleCreated}
-                busy={busy === "creating"}
-                setBusy={(value) => setBusy(value ? "creating" : null)}
-                onError={setErrorMessage}
-              />
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    setMode("create");
-                    setErrorMessage(null);
-                  }}
-                  className="w-full rounded-2xl bg-primary text-on-primary px-4 py-3 font-extrabold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
-                >
-                  <Icon name="add_location_alt" className="text-lg" />
-                  New project
-                </button>
-
-                {projectsLoading && projects.length === 0 && (
-                  <p className="text-xs text-on-surface-variant px-1">Loading your projects&hellip;</p>
-                )}
-
-                {!projectsLoading && projects.length === 0 && (
-                  <div className="rounded-2xl bg-surface-container px-4 py-5 text-xs text-on-surface-variant space-y-2">
-                    <p className="font-extrabold text-on-surface text-sm">Nothing started yet.</p>
-                    <p>
-                      Drop a pin on the town you run in and pick a radius. Every named street inside it becomes part of
-                      the project — and the {historyKm} km you have already logged counts from the first second.
-                    </p>
-                  </div>
-                )}
-
+            {!creating && projects.length > 0 && (
+              <select
+                aria-label="Project"
+                value={selectedId ?? ""}
+                onChange={(event) => {
+                  setSelectedId(event.target.value || null);
+                  focusFromList(null);
+                }}
+                className="min-w-0 sm:min-w-[15rem] max-w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-2xl text-sm font-extrabold text-on-surface focus:outline-none focus:border-primary/60"
+              >
                 {activeProjects.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    coverage={coverageById[project.id] ?? null}
-                    selected={project.id === selectedId}
-                    onSelect={() => {
-                      setSelectedId(project.id);
-                      focusFromList(null);
-                    }}
-                  />
+                  <option key={project.id} value={project.id}>
+                    {projectOptionLabel(project, coverageById[project.id] ?? null)}
+                  </option>
                 ))}
-
                 {archivedProjects.length > 0 && (
-                  <div className="pt-2 space-y-2">
-                    <p className="text-[10px] uppercase tracking-wider text-on-surface-variant px-1">Archived</p>
+                  <optgroup label="Archived">
                     {archivedProjects.map((project) => (
-                      <ProjectCard
-                        key={project.id}
-                        project={project}
-                        coverage={coverageById[project.id] ?? null}
-                        selected={project.id === selectedId}
-                        onSelect={() => setSelectedId(project.id)}
-                      />
+                      <option key={project.id} value={project.id}>
+                        {projectOptionLabel(project, coverageById[project.id] ?? null)}
+                      </option>
                     ))}
-                  </div>
+                  </optgroup>
                 )}
-              </>
+              </select>
             )}
+
+            {!creating && projectsLoading && projects.length === 0 && (
+              <span className="text-xs text-on-surface-variant">Loading your projects&hellip;</span>
+            )}
+
+            <button
+              onClick={() => {
+                setMode(creating ? "list" : "create");
+                setErrorMessage(null);
+              }}
+              className="shrink-0 rounded-2xl bg-primary text-on-primary px-4 py-2.5 font-extrabold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+            >
+              <Icon name={creating ? "close" : "add_location_alt"} className="text-lg" />
+              {creating ? "Cancel" : "New project"}
+            </button>
           </div>
 
-          <div className="flex-1 flex flex-col overflow-hidden border-t lg:border-t-0 lg:border-l border-outline-variant/30">
+          {(statusMessage || errorMessage) && (
+            <div className="shrink-0 px-4 md:px-6 pt-3 space-y-2">
+              {statusMessage && (
+                <div className="rounded-2xl bg-secondary-container/60 border border-secondary/30 px-4 py-3 text-xs text-on-surface flex gap-2">
+                  <Icon name="info" className="text-base text-secondary shrink-0" />
+                  <span>{statusMessage}</span>
+                </div>
+              )}
+              {errorMessage && (
+                <div className="rounded-2xl bg-error-container/60 border border-error/30 px-4 py-3 text-xs text-on-surface flex gap-2">
+                  <Icon name="error" className="text-base text-error shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            {creating && (
+              <div className="w-full lg:w-[420px] shrink-0 overflow-y-auto px-4 pt-5 pb-6 md:p-6 custom-scrollbar">
+                <CreateProjectPanel
+                  user={user}
+                  defaultPin={defaultPin}
+                  pin={createPin ?? defaultPin}
+                  onPinChange={setCreatePin}
+                  onRingChange={setCreateRing}
+                  onCancel={() => setMode("list")}
+                  onCreated={handleCreated}
+                  busy={busy === "creating"}
+                  setBusy={(value) => setBusy(value ? "creating" : null)}
+                  onError={setErrorMessage}
+                />
+              </div>
+            )}
+
+          <div
+            className={`flex-1 flex flex-col overflow-hidden ${
+              creating ? "border-t lg:border-t-0 lg:border-l border-outline-variant/30" : ""
+            }`}
+          >
             <div className="h-[45vh] lg:h-[55%] shrink-0 relative">
               <StreetProjectMap
                 ring={creating ? createRing : selectedProject ? selectedProject.scope.ring : []}
@@ -1201,12 +1230,21 @@ export default function StreetProjectsPage() {
                   }}
                   onDismissPointed={() => setPointedStreet(null)}
                 />
+              ) : !creating && !projectsLoading && projects.length === 0 ? (
+                <div className="max-w-xl rounded-2xl bg-surface-container px-4 py-5 text-xs text-on-surface-variant space-y-2">
+                  <p className="font-extrabold text-on-surface text-sm">Nothing started yet.</p>
+                  <p>
+                    Drop a pin on the town you run in and pick a radius. Every named street inside it becomes part of
+                    the project — and the {historyKm} km you have already logged counts from the first second.
+                  </p>
+                </div>
               ) : (
                 <p className="text-xs text-on-surface-variant">
                   {selectedProject ? "Reading the street list…" : "Pick a project, or start a new one."}
                 </p>
               )}
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -1222,54 +1260,6 @@ export default function StreetProjectsPage() {
         onRouteUpload={handleRouteUpload}
       />
     </div>
-  );
-}
-
-function ProjectCard({
-  project,
-  coverage,
-  selected,
-  onSelect,
-}: {
-  project: ProjectSummary;
-  coverage: ReturnType<typeof computeProjectCoverage> | null;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`w-full text-left rounded-2xl px-4 py-4 space-y-2 border transition-colors ${
-        selected
-          ? "bg-surface-container-high border-primary/40"
-          : "bg-surface-container border-outline-variant/20 hover:bg-surface-container-high"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-extrabold text-sm text-on-surface truncate">{project.name}</p>
-          <p className="text-[11px] text-on-surface-variant">
-            {project.streetCount} streets · {formatKm(project.totalMeters)}
-          </p>
-        </div>
-        {coverage && (
-          <span className="text-lg font-extrabold text-primary shrink-0">
-            {Math.round(coverage.ratio * 100)}%
-          </span>
-        )}
-      </div>
-
-      <ProgressBar ratio={coverage?.ratio ?? 0} />
-
-      <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
-        <span>
-          {coverage ? `${coverage.streetsComplete} of ${coverage.streetsTotal} done` : "Measuring…"}
-        </span>
-        {project.pendingAdditionCount > 0 && (
-          <span className="text-tertiary font-extrabold">{project.pendingAdditionCount} new in OSM</span>
-        )}
-      </div>
-    </button>
   );
 }
 
