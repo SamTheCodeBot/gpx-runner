@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
+import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 import { readTrackCoordinates } from "@/lib/track/polyline";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +133,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ profile, routes, favorites });
   } catch (err) {
     console.error("[user/dashboard]", err);
+    // The dashboard is usually the first page to break when the day's free
+    // quota is gone. It should name the reason rather than show an empty shell.
+    if (isQuotaExhausted(err)) {
+      return NextResponse.json(
+        { error: "Failed to load dashboard", code: FIRESTORE_QUOTA_CODE },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Failed to load dashboard" }, { status: 500 });
   }
 }

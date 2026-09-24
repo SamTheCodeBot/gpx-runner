@@ -3,6 +3,7 @@ import { requireConsent } from "./consent";
 import { getConnection, openCredentials } from "./connections";
 import { getActivitySource } from "./registry";
 import { decideSummaryScope } from "./sportPolicy";
+import { FIRESTORE_QUOTA_CODE } from "@/lib/firestoreQuota";
 import { ConnectionMissingError, ingestionErrorCode } from "./sync";
 import {
   ingestActivity,
@@ -720,6 +721,10 @@ function endsTheBatch(error: unknown): boolean {
     code === "intervals_unavailable" ||
     code === "encryption_key_missing" ||
     code === "intervals_env_missing" ||
+    // The day's database allowance is gone. Every remaining write in this batch
+    // would fail the same way, and the frontier is already safe: the next batch
+    // re-walks this window once the quota resets.
+    code === FIRESTORE_QUOTA_CODE ||
     // An unclassified failure is the transport dropping under us: `fetch
     // failed`, a reset connection, DNS. It is not a property of one activity,
     // so stepping over it would burn the rest of the window one doomed

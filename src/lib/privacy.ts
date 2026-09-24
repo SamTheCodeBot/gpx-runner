@@ -158,6 +158,8 @@ const ERROR_COPY: Record<string, string> = {
     "intervals.icu returned an unexpected error. Try again; if it keeps happening, disconnect and reconnect.",
   firebase_config_failed:
     "The server could not reach its database, so nothing was changed. The operator needs to check the Firebase configuration.",
+  firestore_quota_exhausted:
+    "The database has used up today's free quota, so nothing could be read or written. Nothing is lost — the allowance resets at midnight US Pacific time (09:00 in Sweden) and an import picks up exactly where it stopped.",
   confirmation_required: `Type ${ERASURE_CONFIRMATION} exactly to confirm.`,
   unknown_scope: "That data scope does not exist.",
   sync_failed: "The sync did not finish. Importing is repeatable, so try again.",

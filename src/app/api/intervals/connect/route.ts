@@ -42,8 +42,16 @@ export async function GET(req: NextRequest) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
-    console.error("[intervals/connect] GET", error);
-    return NextResponse.json({ error: "Failed to load connection state" }, { status: 500 });
+    // This used to be a bare 500 with no code on it, which is how a spent
+    // Firestore quota came to look like a broken deployment for half an hour.
+    // The read either worked or it did not, and when it did not the reason is
+    // in the error object — so it travels to the client.
+    const code = ingestionErrorCode(error);
+    console.error("[intervals/connect] GET", { code, error });
+    return NextResponse.json(
+      { error: "Failed to load connection state", code },
+      { status: ingestionErrorStatus(code) },
+    );
   }
 }
 

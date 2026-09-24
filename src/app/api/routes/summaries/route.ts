@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
+import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ routes: summaries });
   } catch (err) {
     console.error("[routes/summaries]", err);
+    // A spent daily quota takes out every read in the app at once. Saying so
+    // beats a list that silently renders empty.
+    if (isQuotaExhausted(err)) {
+      return NextResponse.json(
+        { error: "Failed to fetch routes", code: FIRESTORE_QUOTA_CODE },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Failed to fetch routes" }, { status: 500 });
   }
 }

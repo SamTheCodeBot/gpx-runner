@@ -1,13 +1,14 @@
 import { IntervalsApiError } from "@/lib/intervals";
 import { TokenCryptoError } from "@/lib/tokenCrypto";
+import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 import { ConsentError, requireConsent } from "./consent";
 import { getConnection, openCredentials, updateCursor } from "./connections";
 import { getActivitySource } from "./registry";
 import { decideSummaryScope } from "./sportPolicy";
 import {
   ingestActivity,
-  knownSourceActivityIds,
-  loadDedupeCandidates,
+  knownAmongSourceActivityIds,
+  loadForeignDedupeCandidates,
   type IngestOutcome,
 } from "./store";
 import type { ActivitySourceId } from "@/app/types";
@@ -65,6 +66,10 @@ function endsTheRun(error: unknown): boolean {
   if (error instanceof ConsentError) return true;
   if (error instanceof ConnectionMissingError) return true;
   if (error instanceof TokenCryptoError) return true;
+  // A spent database quota is the whole database's problem, not this activity's.
+  // Carrying on would spend the remaining window discovering the same thing
+  // once per activity and report a successful run at the end of it.
+  if (isQuotaExhausted(error)) return true;
   if (error instanceof IntervalsApiError) {
     return error.status === 401 || error.status === 403 || error.status === 429 || error.status >= 500;
   }
@@ -106,9 +111,35 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
       )
     : page.activities;
 
-  const known = input.force ? new Set<string>() : await knownSourceActivityIds(uid, source);
+  // Sport policy first, so both reads below are sized by what this run could
+  // actually store rather than by everything the provider listed.
+  const scoped = wanted.map((summary) => ({ summary, scope: decideSummaryScope(summary) }));
+  const eligible = scoped.filter((entry) => entry.scope.ingest).map((entry) => entry.summary);
+
+  // Two bounded reads per run, not two full-collection scans.
+  //
+  // This used to be `knownSourceActivityIds` plus `loadDedupeCandidates`, and
+  // both read every activity the user owns. On an account with a full history
+  // that is two scans of ~1,400 documents on every sync and on every webhook
+  // delivery — thousands of reads to answer a question about the handful of
+  // activities in a 30-day window. It is what emptied the Firestore free-tier
+  // daily read quota on 2026-09-23 and took the whole app down with it, the
+  // `/api/intervals/connect` 500 included.
+  //
+  // `knownAmongSourceActivityIds` costs the size of the window. Reading only
+  // the *foreign* sources for dedupe costs what other providers hold, which
+  // does not grow as this source imports — and `findDuplicate` discards
+  // same-source candidates on its first line anyway, so they were never worth
+  // the read. The history import already works this way; this brings the
+  // reconciliation pull and the webhook path in line with it.
+  const known = input.force
+    ? new Set<string>()
+    : await knownAmongSourceActivityIds(
+        source,
+        eligible.map((activity) => activity.sourceActivityId),
+      );
   // Loaded once per run, then reused for every duplicate check below.
-  const candidates = await loadDedupeCandidates(uid);
+  const candidates = await loadForeignDedupeCandidates(uid, source);
 
   const result: IngestionRunResult = {
     source,
@@ -126,11 +157,11 @@ export async function runIngestion(input: IngestionRunInput): Promise<IngestionR
   const maxDownloads = input.maxDownloads ?? 50;
   let downloads = 0;
 
-  for (const summary of wanted) {
-    // The sport policy runs BEFORE anything is downloaded: an out-of-scope
-    // activity costs us one line in a list response and nothing else. A
-    // treadmill run is never fetched, never parsed and never stored.
-    const scope = decideSummaryScope(summary);
+  for (const { summary, scope } of scoped) {
+    // The sport policy ran BEFORE anything was downloaded, and before the reads
+    // above: an out-of-scope activity costs us one line in a list response and
+    // nothing else. A treadmill run is never fetched, never parsed, never
+    // stored, and never looked up in the database.
     if (!scope.ingest) {
       result.skipped.push({
         sourceActivityId: summary.sourceActivityId,
@@ -242,6 +273,9 @@ export function ingestionErrorCode(error: unknown): string {
   if (error instanceof ConsentError) return error.code;
   if (error instanceof ConnectionMissingError) return "provider_not_connected";
   if (error instanceof TokenCryptoError) return "token_decrypt_failed";
+  // Checked before the provider classification below: a spent Firestore quota
+  // is a 429 too, and must not be read as intervals.icu rate-limiting us.
+  if (isQuotaExhausted(error)) return FIRESTORE_QUOTA_CODE;
 
   if (error instanceof IntervalsApiError) {
     if (error.message.includes("token exchange")) return "intervals_token_exchange_failed";
@@ -283,6 +317,11 @@ export function ingestionErrorStatus(code: string): number {
       return 401;
     case "intervals_rate_limited":
       return 429;
+    case FIRESTORE_QUOTA_CODE:
+      // 503 rather than 429: the client must not read this as "slow down and
+      // retry", because retrying sooner cannot help. It is over until the
+      // allowance resets.
+      return 503;
     case "intervals_unavailable":
       return 502;
     default:
