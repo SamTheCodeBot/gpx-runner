@@ -111,6 +111,24 @@ const NEARBY_MARGINS: Array<{ meters: number; label: string }> = [
   { meters: 2000, label: "2 km" },
 ];
 
+/**
+ * Which of the three things under the map is on screen.
+ *
+ * They used to be stacked: the street list, then the tools for adding streets
+ * the circle missed, then everything taken out. That reads fine for a village
+ * and not at all for a town, where the list in the middle is eight hundred rows
+ * and the two panels under it may as well not exist. Tabs cost him a click to
+ * reach a thing he could previously scroll to, and in exchange the thing is
+ * always one click away instead of a thousand pixels.
+ */
+type DetailTab = "streets" | "add" | "excluded";
+
+const DETAIL_TABS: Array<{ id: DetailTab; label: string }> = [
+  { id: "streets", label: "Left to run" },
+  { id: "add", label: "Add streets" },
+  { id: "excluded", label: "Taken out" },
+];
+
 function formatKm(meters: number): string {
   return `${Math.round(meters / 100) / 10} km`;
 }
@@ -132,6 +150,94 @@ function projectOptionLabel(
   const percent = coverage ? `${Math.round(coverage.ratio * 100)}%` : "…";
   const pending = project.pendingAdditionCount > 0 ? ` · ${project.pendingAdditionCount} new in OSM` : "";
   return `${project.name} · ${percent}${pending}`;
+}
+
+/**
+ * The twice-a-year actions, folded away.
+ *
+ * Asking OSM for new streets and archiving a finished project were the first
+ * two buttons under the map, which is the most valuable space on the page and
+ * was being spent on the two things he will do least. They are not hidden
+ * because they are dangerous — they are hidden because they are rare.
+ */
+function ProjectMenu({
+  archived,
+  refreshing,
+  onRefresh,
+  onArchiveToggle,
+}: {
+  archived: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onArchiveToggle: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((current) => !current)}
+        aria-label="Project actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`w-11 h-11 rounded-2xl border flex items-center justify-center transition-colors ${
+          open
+            ? "bg-surface-container-high border-primary/40 text-on-surface"
+            : "bg-surface-container border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-outline"
+        }`}
+      >
+        <Icon name={refreshing ? "sync" : "more_vert"} className={`text-lg ${refreshing ? "animate-spin" : ""}`} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 shadow-xl"
+        >
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onRefresh();
+            }}
+            disabled={refreshing}
+            className="w-full text-left rounded-xl px-3 py-2.5 text-xs font-extrabold text-on-surface flex items-center gap-2 hover:bg-surface-container disabled:opacity-50"
+          >
+            <Icon name="sync" className="text-sm text-on-surface-variant" />
+            {refreshing ? "Asking OSM…" : "Check OSM for new streets"}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onArchiveToggle();
+            }}
+            className="w-full text-left rounded-xl px-3 py-2.5 text-xs font-extrabold text-on-surface flex items-center gap-2 hover:bg-surface-container"
+          >
+            <Icon name={archived ? "unarchive" : "archive"} className="text-sm text-on-surface-variant" />
+            {archived ? "Unarchive project" : "Archive project"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ProgressBar({ ratio, tone = "primary" }: { ratio: number; tone?: "primary" | "secondary" }) {
@@ -192,6 +298,7 @@ export default function StreetProjectsPage() {
     nonce: 0,
   });
   const [mapMode, setMapMode] = useState<MapMode>("all");
+  const [detailTab, setDetailTab] = useState<DetailTab>("streets");
   const [showDone, setShowDone] = useState(false);
   // Struck-off roads stay on the map by default, muted: he has to be able to
   // see what he took out, and put it back from the same place he removed it.
@@ -782,6 +889,10 @@ export default function StreetProjectsPage() {
         [selectedProject.id]: { streets: result.added, removedNames: result.removedNames },
       }));
       setStatusMessage(result.message);
+      // The answer to a question asked from a menu has to land somewhere he is
+      // looking. New streets are an "add streets" matter, so the tab comes to
+      // him rather than the result waiting behind a tab he never opened.
+      if (result.added.length > 0) setDetailTab("add");
       setProjects((current) =>
         current.map((project) =>
           project.id === selectedProject.id
@@ -965,7 +1076,7 @@ export default function StreetProjectsPage() {
                   setSelectedId(event.target.value || null);
                   focusFromList(null);
                 }}
-                className="min-w-0 sm:min-w-[15rem] max-w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-2xl text-sm font-extrabold text-on-surface focus:outline-none focus:border-primary/60"
+                className="min-w-0 sm:min-w-[18rem] max-w-full pl-4 pr-3 py-3 bg-surface-container border border-outline-variant rounded-2xl text-sm text-on-surface cursor-pointer focus:outline-none focus:border-primary/60 hover:border-outline"
               >
                 {activeProjects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -986,6 +1097,20 @@ export default function StreetProjectsPage() {
 
             {!creating && projectsLoading && projects.length === 0 && (
               <span className="text-xs text-on-surface-variant">Loading your projects&hellip;</span>
+            )}
+
+            {/* The two things a project needs done to it perhaps twice a year.
+                They used to be the first buttons under the map, above the
+                street list, which put the rarest actions on the page in the
+                spot the eye lands on first. Behind a menu they cost one extra
+                click a year and give the tabs that row. */}
+            {!creating && selectedProject && (
+              <ProjectMenu
+                archived={Boolean(selectedProject.archivedAt)}
+                refreshing={busy === "refreshing"}
+                onRefresh={handleRefresh}
+                onArchiveToggle={handleArchiveToggle}
+              />
             )}
 
             <button
@@ -1178,6 +1303,8 @@ export default function StreetProjectsPage() {
                   coverage={selectedCoverage}
                   pending={selectedPending}
                   busy={busy}
+                  tab={detailTab}
+                  onTabChange={setDetailTab}
                   showDone={showDone}
                   onToggleDone={() => setShowDone((current) => !current)}
                   streetSort={streetSort}
@@ -1204,9 +1331,7 @@ export default function StreetProjectsPage() {
                     setPlannedRoute(null);
                     setRouteError(null);
                   }}
-                  onRefresh={handleRefresh}
                   onAdoptAll={handleAdoptAll}
-                  onArchiveToggle={handleArchiveToggle}
                   excludedStreets={excludedStreets}
                   onToggleExclusion={handleToggleExclusion}
                   excluding={excluding}
@@ -1268,6 +1393,8 @@ function ProjectDetail({
   coverage,
   pending,
   busy,
+  tab,
+  onTabChange,
   showDone,
   onToggleDone,
   streetSort,
@@ -1288,9 +1415,7 @@ function ProjectDetail({
   routeError,
   onDownloadRoute,
   onClearRoute,
-  onRefresh,
   onAdoptAll,
-  onArchiveToggle,
   excludedStreets,
   onToggleExclusion,
   excluding,
@@ -1313,6 +1438,8 @@ function ProjectDetail({
   coverage: ReturnType<typeof computeProjectCoverage>;
   pending: { streets: Street[]; removedNames: string[] } | null;
   busy: null | "creating" | "refreshing" | "adopting";
+  tab: DetailTab;
+  onTabChange: (tab: DetailTab) => void;
   showDone: boolean;
   onToggleDone: () => void;
   streetSort: StreetSort;
@@ -1333,9 +1460,7 @@ function ProjectDetail({
   routeError: string | null;
   onDownloadRoute: () => void;
   onClearRoute: () => void;
-  onRefresh: () => void;
   onAdoptAll: () => void;
-  onArchiveToggle: () => void;
   excludedStreets: Street[];
   onToggleExclusion: (streetIds: string[], excluded: boolean) => void;
   excluding: boolean;
@@ -1395,25 +1520,39 @@ function ProjectDetail({
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={onRefresh}
-          disabled={busy === "refreshing"}
-          className="rounded-xl bg-surface-container-high px-3 py-2 text-xs font-extrabold text-on-surface flex items-center gap-1.5 disabled:opacity-50"
-        >
-          <Icon name="sync" className="text-sm" />
-          {busy === "refreshing" ? "Asking OSM…" : "Check OSM for new streets"}
-        </button>
-        <button
-          onClick={onArchiveToggle}
-          className="rounded-xl bg-surface-container-high px-3 py-2 text-xs font-extrabold text-on-surface flex items-center gap-1.5"
-        >
-          <Icon name={project.archivedAt ? "unarchive" : "archive"} className="text-sm" />
-          {project.archivedAt ? "Unarchive" : "Archive"}
-        </button>
+      {/* Three destinations, always the same distance away. */}
+      <div className="flex flex-wrap items-center gap-1 rounded-full bg-surface-container-low p-1 self-start w-fit">
+        {DETAIL_TABS.map((option) => {
+          const count =
+            option.id === "streets"
+              ? remaining.length
+              : option.id === "excluded"
+                ? excludedStreets.length
+                : null;
+          const active = option.id === tab;
+          return (
+            <button
+              key={option.id}
+              onClick={() => onTabChange(option.id)}
+              className={`relative px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-colors ${
+                active ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-on-surface"
+              }`}
+            >
+              {option.label}
+              {count !== null && count > 0 && (
+                <span className={active ? "opacity-70" : "opacity-60"}> {count}</span>
+              )}
+              {/* The only way he learns a menu action found something without
+                  opening the tab it landed in. */}
+              {option.id === "add" && pending && pending.streets.length > 0 && !active && (
+                <span className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-tertiary" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {pending && pending.streets.length > 0 && (
+      {tab === "add" && pending && pending.streets.length > 0 && (
         <div className="rounded-2xl border border-tertiary/40 bg-tertiary-container/40 p-4 space-y-3">
           <p className="text-sm font-extrabold text-on-surface">
             {pending.streets.length} new street{pending.streets.length === 1 ? "" : "s"} in OpenStreetMap
@@ -1440,12 +1579,13 @@ function ProjectDetail({
         </div>
       )}
 
-      {pending && pending.removedNames.length > 0 && (
+      {tab === "add" && pending && pending.removedNames.length > 0 && (
         <p className="text-[11px] text-on-surface-variant">
           No longer in OSM, kept in your project: {pending.removedNames.join(", ")}
         </p>
       )}
 
+      {tab === "streets" && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
@@ -1498,11 +1638,13 @@ function ProjectDetail({
           </p>
         )}
       </div>
+      )}
 
       {/* The other half of editing a project: what the area missed.
           A circle drawn round a pin never lands exactly on a town, and the
           alternative to this is deleting the project and starting again —
           throwing away the months of progress that made it worth keeping. */}
+      {tab === "add" && (
       <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
@@ -1654,10 +1796,18 @@ function ProjectDetail({
           nearby && <p className="text-[11px] text-on-surface-variant">{nearby.message}</p>
         )}
       </div>
+      )}
 
       {/* Everything he has ruled out, in one place, each with the way back.
           An exclusion he cannot find again is a decision he cannot revise. */}
-      {excludedStreets.length > 0 && (
+      {tab === "excluded" && excludedStreets.length === 0 && (
+        <p className="text-xs text-on-surface-variant">
+          Nothing taken out. Streets you rule out from the list — a motorway slip road, a private
+          drive — land here, with the way back.
+        </p>
+      )}
+
+      {tab === "excluded" && excludedStreets.length > 0 && (
         <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant">
