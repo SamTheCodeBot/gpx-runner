@@ -15,6 +15,7 @@
   },
   "include": [
     "src/engine/**/*.ts",
+    "src/lib/overpass.ts",
     "src/types/**/*.ts",
     "src/api/**/*.ts",
     "src/app/api/routes/suggest/route.ts",
