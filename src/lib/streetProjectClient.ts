@@ -419,20 +419,72 @@ export function scopeToRequest(scope: StreetScope): ScopeRequest {
  */
 const CACHE_PREFIX = "gpx-street-project:2";
 
-export function cachedStreets(projectId: string, snapshotTakenAt: string): Street[] | null {
+/**
+ * A street list is only worth as much as the count the server agrees with.
+ *
+ * Adding a street by tapping it does not move `snapshotTakenAt` — the snapshot
+ * is still the one OSM handed over, he has only added to it — so the cache key
+ * does not change either. That is fine when the rewrite lands and fatal when
+ * it does not: the previous list stays under the same key and is then trusted
+ * forever, which is exactly what happened. Streets he had added were in
+ * Firestore, the project said so when he tried to add them again, and the list
+ * on screen was the one from before.
+ *
+ * The project summary already carries `streetCount`. Comparing it costs
+ * nothing and turns a silent wrong answer into one extra fetch.
+ */
+export function cachedStreets(
+  projectId: string,
+  snapshotTakenAt: string,
+  expectedCount?: number,
+): Street[] | null {
   try {
     const raw = localStorage.getItem(`${CACHE_PREFIX}:${projectId}:${snapshotTakenAt}`);
     if (!raw) return null;
-    return decodeStreets(JSON.parse(raw) as WireStreet[]);
+
+    const wire = JSON.parse(raw) as WireStreet[];
+    if (expectedCount !== undefined && wire.length !== expectedCount) {
+      localStorage.removeItem(`${CACHE_PREFIX}:${projectId}:${snapshotTakenAt}`);
+      return null;
+    }
+
+    return decodeStreets(wire);
   } catch {
     return null;
   }
 }
 
+/**
+ * Roughly what a browser will take before it starts throwing.
+ *
+ * `useRoutes` has had a cap and a degradation ladder for a while; this write,
+ * which is the largest single thing this app stores, had neither. A town of
+ * eight hundred streets with geometry runs to megabytes, and `setItem` then
+ * throws `QuotaExceededError` — leaving the *previous* value in place, which
+ * is worse than leaving nothing.
+ */
+const STREET_CACHE_MAX_BYTES = 4_000_000;
+
 export function cacheStreets(projectId: string, snapshotTakenAt: string, wire: WireStreet[]): void {
+  const key = `${CACHE_PREFIX}:${projectId}:${snapshotTakenAt}`;
   try {
-    localStorage.setItem(`${CACHE_PREFIX}:${projectId}:${snapshotTakenAt}`, JSON.stringify(wire));
+    const payload = JSON.stringify(wire);
+
+    // Too big to store is a reason to hold nothing, never a reason to keep
+    // what was there. A stale list that outlives the street he just added is
+    // the one failure this cache must not have.
+    if (payload.length > STREET_CACHE_MAX_BYTES) {
+      localStorage.removeItem(key);
+      return;
+    }
+
+    localStorage.setItem(key, payload);
   } catch {
-    // A full quota costs one extra download, nothing more.
+    // Same rule on a quota error: drop it and pay for one download.
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Nothing left to try; the count check on read is the backstop.
+    }
   }
 }

@@ -806,7 +806,11 @@ export default function StreetProjectsPage() {
     const project = projects.find((candidate) => candidate.id === selectedId);
     if (!project || streetsById[selectedId]) return;
 
-    const cached = cachedStreets(project.id, project.snapshotTakenAt);
+    // The count is the server's, and it moves the moment a street is added.
+    // Without it a cache that failed to be rewritten is trusted forever, and
+    // streets he had already added were missing from the list while the
+    // project itself insisted it had them.
+    const cached = cachedStreets(project.id, project.snapshotTakenAt, project.streetCount);
     if (cached && cached.length > 0) {
       setStreetsById((current) => ({ ...current, [project.id]: cached }));
       return;
@@ -1678,21 +1682,39 @@ function ProjectDetail({
 
         {/* The first tool offered, because it is the one that answers "I want
             that road there". The margin scan below asks a whole town a question
-            to solve one road's problem, and pays for it in seconds. */}
-        <button
-          onClick={onTogglePointing}
-          disabled={pointing}
-          className={`w-full rounded-xl px-3 py-2 text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
-            pointingAtRoad ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface"
-          }`}
-        >
-          <Icon name={pointingAtRoad ? "touch_app" : "add_location_alt"} className="text-sm" />
-          {pointingAtRoad ? "Tap a road on the map…" : "Point at a road on the map"}
-        </button>
+            to solve one road's problem, and pays for it in seconds.
+
+            One tool, one name. It used to relabel itself from "Point at a road
+            on the map" to "Tap a road on the map…" when armed, which reads as
+            two different features and leaves no way to say "never mind" — the
+            only button had turned into an instruction. The name now stays put,
+            the state is the fill, and switching it off is its own control. */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onTogglePointing}
+            disabled={pointing}
+            aria-pressed={pointingAtRoad}
+            className={`flex-1 rounded-xl px-3 py-2 text-xs font-extrabold flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+              pointingAtRoad ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface"
+            }`}
+          >
+            <Icon name={pointingAtRoad ? "touch_app" : "add_location_alt"} className="text-sm" />
+            Point at a road on the map
+          </button>
+          {pointingAtRoad && (
+            <button
+              onClick={onTogglePointing}
+              disabled={pointing}
+              className="shrink-0 rounded-xl bg-surface-container-high px-3 py-2 text-xs font-extrabold text-on-surface-variant disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
 
         {pointingAtRoad && !pointedStreet && (
           <p className="text-[11px] text-on-surface-variant">
-            {pointing ? "Asking OSM what is there…" : "Tap the road itself, anywhere along it. Nothing is added until you say so."}
+            {pointing ? "Asking OSM what is there…" : "Now tap the road itself on the map, anywhere along it. Nothing is added until you say so."}
           </p>
         )}
 
