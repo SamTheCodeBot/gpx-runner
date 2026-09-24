@@ -47,10 +47,18 @@ describe("the query a tap becomes", () => {
     assert.doesNotMatch(query, /\(\d+\.\d+,\d+\.\d+,\d+\.\d+,\d+\.\d+\)/);
   });
 
-  it("collects the rest of the street by name", () => {
+  it("collects the rest of the street by name, from a box rather than a radius", () => {
     const query = buildNamedStreetQuery(HOME, "Storgatan", 2500);
     assert.match(query, /\["name"="Storgatan"\]/);
-    assert.match(query, /around:2500/);
+
+    // `around:` makes Overpass measure a distance to every candidate it has
+    // selected. Measured on 2026-09-24 the two forms returned an identical
+    // answer for Storgatan, the radius in 69 s and 53 s and the box in 1.2 s
+    // and 5.7 s — the difference between a tap that lands and a tap that dies
+    // inside the request budget. The circle is still applied, in code, by
+    // `streetAtPoint`.
+    assert.doesNotMatch(query, /around:/);
+    assert.match(query, /\(56\.\d+,12\.\d+,56\.\d+,12\.\d+\);/);
   });
 
   it("escapes a name that would otherwise break the query", () => {

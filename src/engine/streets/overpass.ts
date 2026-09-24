@@ -1,7 +1,7 @@
 import { LatLng } from "../../types";
 import { haversineMeters } from "../utils/geo";
 import { RUNNABLE_HIGHWAY_VALUES, type OsmWay } from "./inventory";
-import { scopeBounds, type StreetScope } from "./scope";
+import { circleScope, scopeBounds, type StreetScope } from "./scope";
 
 /**
  * Talking to Overpass: what to ask, and how to read the answer.
@@ -75,14 +75,29 @@ export function buildStreetAtPointQuery(point: LatLng, radiusMeters: number): st
  * the name is read off the tapped way and the rest of the street is collected
  * around it, then collapsed by the same inventory rules the project was built
  * with.
+ *
+ * Asked as a bounding box and clipped to the circle in code — the same bargain
+ * `buildStreetQuery` makes above, for the same reason, which this query spent
+ * a while not honouring. `around:` is not an index lookup: it makes Overpass
+ * measure a distance to every candidate it has selected. Measured against
+ * overpass-api.de on 2026-09-24, alternating between the two forms, both
+ * returned an identical 5449-byte answer for Storgatan — `around:2500` in 69 s
+ * and 53 s, the bounding box in 1.2 s and 5.7 s. That was a tap that could not
+ * finish inside the request budget, surfacing as OpenStreetMap being busy.
+ *
+ * The box comes from the very circle `streetAtPoint` clips with, so the extra
+ * ways in the corners are dropped by code that was already dropping them.
  */
 export function buildNamedStreetQuery(point: LatLng, name: string, radiusMeters: number): string {
   const highways = RUNNABLE_HIGHWAY_VALUES.join("|");
+  const bounds = scopeBounds(circleScope(point, radiusMeters));
+  const box = [bounds.minLat, bounds.minLng, bounds.maxLat, bounds.maxLng]
+    .map((value) => value.toFixed(6))
+    .join(",");
+
   return [
     "[out:json][timeout:60];",
-    `way["highway"~"^(${highways})$"]["name"="${escapeOverpassLiteral(name)}"](around:${Math.round(
-      radiusMeters,
-    )},${point.lat.toFixed(6)},${point.lng.toFixed(6)});`,
+    `way["highway"~"^(${highways})$"]["name"="${escapeOverpassLiteral(name)}"](${box});`,
     "out body geom;",
   ].join("");
 }
