@@ -134,6 +134,19 @@ function formatKm(meters: number): string {
 }
 
 /**
+ * One shape for everything in the header row.
+ *
+ * The picker, the menu and New project were written one at a time and it
+ * showed: three heights, two radii, one of them with a border and two without,
+ * so the row read as three things that happened to be near each other rather
+ * than one control strip. Height and radius live here now, and only the fill
+ * changes — quiet for the two that wait, primary for the one that acts.
+ */
+const HEADER_CONTROL = "h-11 rounded-2xl border text-sm transition-colors";
+const HEADER_CONTROL_IDLE = "bg-surface-container border-outline-variant text-on-surface hover:border-outline";
+const HEADER_CONTROL_ACTIVE = "bg-surface-container-high border-primary/50 text-on-surface";
+
+/**
  * A project squeezed into one line of a dropdown.
  *
  * The card this replaced carried a progress bar, a percentage and the OSM
@@ -197,19 +210,21 @@ function ProjectMenu({
         aria-label="Project actions"
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`w-11 h-11 rounded-2xl border flex items-center justify-center transition-colors ${
-          open
-            ? "bg-surface-container-high border-primary/40 text-on-surface"
-            : "bg-surface-container border-outline-variant text-on-surface-variant hover:text-on-surface hover:border-outline"
+        className={`${HEADER_CONTROL} w-11 flex items-center justify-center ${
+          open ? HEADER_CONTROL_ACTIVE : HEADER_CONTROL_IDLE
         }`}
       >
         <Icon name={refreshing ? "sync" : "more_vert"} className={`text-lg ${refreshing ? "animate-spin" : ""}`} />
       </button>
 
       {open && (
+        // Leaflet's container is pinned to z-index 1 in globals.css, which is
+        // low but still beats a popover that never asked for a layer at all.
+        // The header row carries the stacking context; this only has to win
+        // inside it.
         <div
           role="menu"
-          className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 shadow-xl"
+          className="absolute right-0 top-full mt-2 z-50 w-64 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 shadow-xl"
         >
           <button
             role="menuitem"
@@ -1055,9 +1070,9 @@ export default function StreetProjectsPage() {
               so it collapses to a dropdown, and the column goes away entirely
               unless he is creating a project, where the panel and the map have
               to be on screen together. */}
-          <div className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 md:px-6 border-b border-outline-variant/30">
+          <div className="relative z-[60] shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 md:px-6 border-b border-outline-variant/30 bg-background">
             <div className="flex items-center gap-3 min-w-0 mr-auto">
-              <div className="w-10 h-10 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
+              <div className="w-11 h-11 rounded-2xl bg-primary-container flex items-center justify-center shrink-0">
                 <Icon name="flag" filled className="text-on-primary-container text-xl" />
               </div>
               <div className="min-w-0">
@@ -1068,6 +1083,9 @@ export default function StreetProjectsPage() {
               </div>
             </div>
 
+            {/* One strip, tighter to each other than to the title, so the eye
+                reads them as the row's controls and not as three strays. */}
+            <div className="flex items-center gap-2 min-w-0">
             {!creating && projects.length > 0 && (
               <select
                 aria-label="Project"
@@ -1076,7 +1094,7 @@ export default function StreetProjectsPage() {
                   setSelectedId(event.target.value || null);
                   focusFromList(null);
                 }}
-                className="min-w-0 sm:min-w-[18rem] max-w-full pl-4 pr-3 py-3 bg-surface-container border border-outline-variant rounded-2xl text-sm text-on-surface cursor-pointer focus:outline-none focus:border-primary/60 hover:border-outline"
+                className={`${HEADER_CONTROL} ${HEADER_CONTROL_IDLE} min-w-0 sm:min-w-[18rem] max-w-full pl-4 pr-3 cursor-pointer focus:outline-none focus:border-primary/60`}
               >
                 {activeProjects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -1118,11 +1136,12 @@ export default function StreetProjectsPage() {
                 setMode(creating ? "list" : "create");
                 setErrorMessage(null);
               }}
-              className="shrink-0 rounded-2xl bg-primary text-on-primary px-4 py-2.5 font-extrabold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+              className={`${HEADER_CONTROL} shrink-0 bg-primary border-primary text-on-primary px-4 font-extrabold flex items-center justify-center gap-2 hover:opacity-90`}
             >
               <Icon name={creating ? "close" : "add_location_alt"} className="text-lg" />
               {creating ? "Cancel" : "New project"}
             </button>
+            </div>
           </div>
 
           {(statusMessage || errorMessage) && (
