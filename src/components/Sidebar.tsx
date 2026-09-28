@@ -293,17 +293,7 @@ export function Sidebar({
         {/* Heatmap & badges — fun extras */}
         {!collapsed && <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>}
 
-        <Link
-          href="/heatmaps"
-          className={`flex items-center ${collapsed ? "justify-center px-0" : "gap-3 px-4"} py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}
-          title="Personal Heatmaps"
-        >
-          <Icon name="whatshot" filled={isActive("/heatmaps")} className="text-base" />
-          {!collapsed && <div>
-            <span className="font-semibold text-sm">Personal Heatmaps</span>
-            <span className="block text-[10px] text-on-primary/50">Route layers</span>
-          </div>}
-        </Link>
+        {/* Personal Heatmaps hidden 2026-09-28 per Magnus — feature not good enough yet. Route/page kept, just unlinked from nav. */}
 
         <Link
           href="/suggest"
@@ -460,14 +450,6 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
           {/* Divider */}
           <div className="my-3 border-t border-white/10" />
           <span className="px-4 py-1 text-[10px] font-extrabold uppercase tracking-widest text-on-primary/50">Extras</span>
-
-          <Link href="/heatmaps" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/heatmaps") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
-            <Icon name="whatshot" filled={isActive("/heatmaps")} className="text-base" />
-            <div>
-              <span className="font-semibold text-sm">Personal Heatmaps</span>
-              <span className="block text-[10px] text-on-primary/50">Route layers</span>
-            </div>
-          </Link>
 
           <Link href="/suggest" onClick={onClose} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive("/suggest") ? "bg-primary-container text-on-primary" : "text-on-primary/80 hover:bg-primary-container/60"}`}>
             <Icon name="explore" filled={isActive("/suggest")} className="text-base" />

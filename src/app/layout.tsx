@@ -1,4 +1,3 @@
-import "leaflet/dist/leaflet.css";
 import type { Metadata } from "next";
 import { Inter, Manrope } from "next/font/google";
 import "./globals.css";
