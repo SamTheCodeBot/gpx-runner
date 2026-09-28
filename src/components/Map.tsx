@@ -343,11 +343,22 @@ export default function Map({
       fellBack = true;
       console.warn(`[basemap] falling back to raster tiles: ${reason}`, detail ?? "");
       if (fallbackTimer) clearTimeout(fallbackTimer);
+      // setStyle() throws away every custom source/layer the app added
+      // (routes/suggested/familiarity lines) unless called with {diff:true}.
+      // Drop `ready` to false across the swap and only flip it back once the
+      // new style has actually finished loading, so every `[ready, ...]`
+      // effect below re-creates its sources/layers and re-pushes current
+      // data instead of leaving the map with markers but no lines.
+      setReady(false);
       map.setStyle(buildRasterStyle(darkMode));
-      map.once("styledata", () => {
+      const onFallbackStyleData = () => {
+        if (!map.isStyleLoaded()) return;
+        map.off("styledata", onFallbackStyleData);
         applyRasterFilter();
         setAttribution(getRasterAttribution());
-      });
+        setReady(true);
+      };
+      map.on("styledata", onFallbackStyleData);
     };
 
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -356,7 +367,7 @@ export default function Map({
       map.once("load", () => {
         if (fallbackTimer) clearTimeout(fallbackTimer);
       });
-      map.on("error", (event: maplibregl.ErrorEvent) => fallbackToRaster("vector style error", event?.error ?? event));
+      map.on("error", (event: { error?: unknown }) => fallbackToRaster("vector style error", event?.error ?? event));
     }
 
     map.on("click", (e: maplibregl.MapMouseEvent) => onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng));
