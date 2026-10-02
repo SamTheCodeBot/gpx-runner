@@ -1,0 +1,39 @@
+name: CI
+
+# Runs on every push and PR to main/preview -- exactly the checkpoint that
+# would have caught commit 3545422's deployment failure (a TypeScript error
+# that `npm test`'s looser tsconfig missed but `next build`'s real type-check
+# did not). Vercel builds the SAME commit in parallel and reports its own
+# status separately; this is the fast, free check that fails before -- or
+# alongside -- that, and shows up as a red X on the commit either way.
+
+on:
+  push:
+    branches: [main, preview]
+  pull_request:
+    branches: [main, preview]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The real production build: the full Next.js type-check and compile,
+      # not just the test suite's narrower tsconfig. This is the step that
+      # would have caught 3545422 before it ever reached Vercel.
+      - name: Build (full type-check + compile)
+        run: npm run build
+
+      # 319 tests: engine logic, API route behaviour, and the budget/accuracy
+      # regression tests that came out of the 2026-10-02 incident.
+      - name: Test
+        run: npm test
