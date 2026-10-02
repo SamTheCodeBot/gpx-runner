@@ -462,7 +462,11 @@ export default function Map({
     const source = map.getSource("routes") as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
 
-    if (!showHeatmap || routes.length === 0) {
+    // A route picked from the list is its own thing to draw, independent of
+    // whatever the overview collection currently holds — an empty or
+    // still-loading `routes` array must never erase the one line the owner
+    // just asked to see by clicking it.
+    if (!showHeatmap || (routes.length === 0 && !selectedRoute)) {
       source.setData(EMPTY_FC);
       return;
     }
