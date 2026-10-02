@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon, LoginScreen } from "@/components/ui";
 import { MobileDrawer, Sidebar } from "@/components/Sidebar";
-import { buildFamiliarityIndex } from "@/engine/familiarity";
+import { buildFamiliarityIndex, type FamiliarityIndex } from "@/engine/familiarity";
 import {
   computeProjectCoverage,
   describeStreetCoverage,
@@ -18,10 +18,10 @@ import { describeExclusions, partitionStreets } from "@/engine/streets/exclusion
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
-import { circleScope, scopeCenter } from "@/engine/streets/scope";
+import { circleScope, scopeCenter, scopeRadiusMeters, type StreetScope } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
 import { MAX_SELECTED_STREETS } from "@/engine/streets/streetRoute";
-import { toLatLngTrack } from "@/engine/trackHistory";
+import { boundTracksNearStart, historyCenter, selectTracksNearStart } from "@/engine/trackHistory";
 import { logout, useAuth } from "@/lib/auth";
 import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
 import { termsAcknowledgement } from "@/lib/privacy";
@@ -61,6 +61,56 @@ const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), 
     </div>
   ),
 });
+
+/**
+ * How far outside a project's own circle a run can still matter.
+ *
+ * A street right on the boundary can be covered by a run whose recorded point
+ * sits just outside the ring (GPS drift, or the project radius was drawn a
+ * little tight). 3 km is generous for that without pulling in a neighbouring
+ * town's running.
+ */
+const PROJECT_HISTORY_MARGIN_METERS = 3_000;
+
+/**
+ * The same budget shape `boundTracksNearStart` already enforces for route
+ * suggestions, sized for a street-coverage walk rather than a single loop:
+ * more tracks (a town's worth of history, not one run's neighbourhood), same
+ * per-track and total point ceilings so one project can never again cost a
+ * full decade of unthinned GPS.
+ */
+const PROJECT_HISTORY_TRACK_BUDGET = {
+  maxTracks: 400,
+  maxPointsPerTrack: 600,
+  maxTotalPoints: 150_000,
+};
+
+/**
+ * One project's familiarity index, built only from runs that could possibly
+ * reach it — never from the owner's entire history.
+ *
+ * `selectTracksNearStart` is the cheap pass (planar distance, no allocation)
+ * that throws away everything outside the project before anything expensive
+ * happens to it; `boundTracksNearStart` then thins what is left to a bounded
+ * total point count. Both already exist for route suggestions, which had the
+ * same "do not scan a lifetime of GPS synchronously" problem this page did.
+ */
+function buildProjectFamiliarityIndex(
+  scope: StreetScope,
+  routes: Array<{ coordinates: [number, number][] }>,
+): FamiliarityIndex {
+  const center = scopeCenter(scope);
+  const radiusMeters = scopeRadiusMeters(scope) + PROJECT_HISTORY_MARGIN_METERS;
+
+  const nearby = selectTracksNearStart(routes, center, radiusMeters, PROJECT_HISTORY_TRACK_BUDGET.maxTracks);
+  const bounded = boundTracksNearStart(nearby, center, {
+    radiusMeters,
+    maxPointsPerTrack: PROJECT_HISTORY_TRACK_BUDGET.maxPointsPerTrack,
+    maxTotalPoints: PROJECT_HISTORY_TRACK_BUDGET.maxTotalPoints,
+  });
+
+  return buildFamiliarityIndex(bounded);
+}
 
 /**
  * Street completion projects.
@@ -346,16 +396,29 @@ export default function StreetProjectsPage() {
   // One history, many scopes: a Varberg run counts towards Varberg and nothing
   // else, and two overlapping projects may both count the same run without
   // either knowing about the other.
-  const tracks = useMemo<LatLng[][]>(
-    () => unifiedRoutes.map((route) => toLatLngTrack(route.coordinates)).filter((track) => track.length >= 2),
-    [unifiedRoutes],
-  );
-
-  const familiarityIndex = useMemo(() => buildFamiliarityIndex(tracks), [tracks]);
+  //
+  // That used to mean one familiarity index built from EVERY run he has ever
+  // logged, however far from any project it happened. Fine for a few dozen
+  // routes; on a full-history import (Magnus: 1,438 runs) it meant decoding,
+  // simplifying and grid-deduplicating a decade of full-resolution GPS traces,
+  // synchronously, on every visit to this page — the exact shape of blocking
+  // work `trackHistory.ts` already exists to prevent for route suggestions.
+  // So: one bounded index PER PROJECT, built only from runs that could
+  // possibly overlap that project's own area.
   const historyKm = useMemo(
     () => Math.round(unifiedRoutes.reduce((sum, route) => sum + (route.distance || 0), 0) / 100) / 10,
     [unifiedRoutes],
   );
+
+  const familiarityIndexByProject = useMemo(() => {
+    const result: Record<string, FamiliarityIndex> = {};
+    for (const project of projects) {
+      result[project.id] = buildProjectFamiliarityIndex(project.scope, unifiedRoutes);
+    }
+    return result;
+  }, [projects, unifiedRoutes]);
+
+  const emptyFamiliarityIndex = useMemo(() => buildFamiliarityIndex([]), []);
 
   // Struck-off streets, by project. Read off the project summaries rather than
   // held in their own state, so the server's answer is the only version of this
@@ -372,10 +435,12 @@ export default function StreetProjectsPage() {
       // Excluded streets are out of the denominator: the percentage is over
       // what he has actually taken on, which is what he asked for.
       const { active } = partitionStreets(streets, excludedIdsByProject[id] ?? []);
-      if (active.length > 0) result[id] = computeProjectCoverage(active, familiarityIndex);
+      if (active.length > 0) {
+        result[id] = computeProjectCoverage(active, familiarityIndexByProject[id] ?? emptyFamiliarityIndex);
+      }
     }
     return result;
-  }, [streetsById, familiarityIndex, excludedIdsByProject]);
+  }, [streetsById, familiarityIndexByProject, emptyFamiliarityIndex, excludedIdsByProject]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   // Memoised because the map split below is the one genuinely expensive thing
@@ -426,9 +491,10 @@ export default function StreetProjectsPage() {
   // rather than recomputed every time a checkbox moves.
   const coverageDetailById = useMemo(() => {
     const result = new Map<string, StreetCoverageSplit>();
-    for (const street of selectedStreets) result.set(street.id, describeStreetCoverage(street, familiarityIndex));
+    const index = (selectedId ? familiarityIndexByProject[selectedId] : undefined) ?? emptyFamiliarityIndex;
+    for (const street of selectedStreets) result.set(street.id, describeStreetCoverage(street, index));
     return result;
-  }, [selectedStreets, familiarityIndex]);
+  }, [selectedStreets, selectedId, familiarityIndexByProject, emptyFamiliarityIndex]);
 
   const mapStreets = useMemo(
     () =>
@@ -889,7 +955,7 @@ export default function StreetProjectsPage() {
     setSelectedId(project.id);
     setMode("list");
 
-    const coverage = computeProjectCoverage(streets, familiarityIndex);
+    const coverage = computeProjectCoverage(streets, buildProjectFamiliarityIndex(project.scope, unifiedRoutes));
     setStatusMessage(
       coverage.streetsComplete > 0
         ? `${project.name}: your ${historyKm} km already covers ${coverage.streetsComplete} of ${coverage.streetsTotal} streets.`
@@ -1035,7 +1101,7 @@ export default function StreetProjectsPage() {
 
   const activeProjects = projects.filter((project) => !project.archivedAt);
   const archivedProjects = projects.filter((project) => project.archivedAt);
-  const defaultPin: LatLng | null = tracks.length > 0 ? tracks[0][0] : null;
+  const defaultPin: LatLng | null = historyCenter(unifiedRoutes);
   const creating = mode === "create";
 
   return (
