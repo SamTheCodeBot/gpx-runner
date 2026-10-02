@@ -88,10 +88,33 @@ const PROJECT_HISTORY_MARGIN_METERS = 3_000;
  * geographic radius filter is doing the real work, not this count; the point
  * ceiling below is the actual cost control.
  */
+/**
+ * `simplifyMeters` was left at `boundTracksNearStart`'s default (20 m) in the
+ * first cut of this fix. 20 m is COARSER than `STREET_MATCH_RADIUS_METERS`
+ * (16 m, in coverage.ts) — so a run that genuinely passed within 16 m of a
+ * street could simplify to a path that no longer does, and a street he had
+ * run showed up incomplete. `buildFamiliarityIndex` already re-simplifies to
+ * 18 m internally, same as every other page; that was always the one
+ * intentional precision trade-off. This stage must stay well clear of it, not
+ * repeat it with a coarser number first.
+ *
+ * `maxTotalPoints` was 500,000 and real: once hit, `boundTracksNearStart`
+ * stops adding tracks — nearest-first, but ties among similarly-distant runs
+ * resolve by array order, and Firestore does not promise the same order
+ * between the cached read and the fresh one. For a project centred on the
+ * owner's own town, where most of his history legitimately qualifies as
+ * "nearby", that budget was the thing actually doing the cutting: the exact
+ * same project reloading from 142 complete streets to 66 on one page view,
+ * because the fresh fetch landed a different subset of home-turf runs under
+ * the same cap. A silently non-deterministic answer is worse than a slow
+ * correct one, so this is now sized to never be the limiting factor for one
+ * town's worth of personal history — a true backstop, not a lever.
+ */
 const PROJECT_HISTORY_TRACK_BUDGET = {
   maxTracks: 4_000,
-  maxPointsPerTrack: 600,
-  maxTotalPoints: 500_000,
+  maxPointsPerTrack: 3_000,
+  simplifyMeters: 8,
+  maxTotalPoints: 3_000_000,
 };
 
 /**
@@ -114,6 +137,7 @@ function buildProjectFamiliarityIndex(
   const nearby = selectTracksNearStart(routes, center, radiusMeters, PROJECT_HISTORY_TRACK_BUDGET.maxTracks);
   const bounded = boundTracksNearStart(nearby, center, {
     radiusMeters,
+    simplifyMeters: PROJECT_HISTORY_TRACK_BUDGET.simplifyMeters,
     maxPointsPerTrack: PROJECT_HISTORY_TRACK_BUDGET.maxPointsPerTrack,
     maxTotalPoints: PROJECT_HISTORY_TRACK_BUDGET.maxTotalPoints,
   });
