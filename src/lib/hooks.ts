@@ -428,7 +428,7 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         if (!hasFreshCache) setLoading(true);
         const q = query(collection(db, "routes"), where("userId", "==", userId));
         const snap = await getDocs(q);
-        const docs: Array<{ id: string; data: ReturnType<typeof d.data> }> = [];
+        const docs: Array<{ id: string; data: ReturnType<typeof snap.docs[number]["data"]> }> = [];
         // Collecting the plain docs is cheap (no decode yet); the expensive
         // part is deserializeRoute, which the chunk loop below spaces out.
         snap.forEach((d) => docs.push({ id: d.id, data: d.data() }));
