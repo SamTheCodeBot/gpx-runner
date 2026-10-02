@@ -74,15 +74,24 @@ const PROJECT_HISTORY_MARGIN_METERS = 3_000;
 
 /**
  * The same budget shape `boundTracksNearStart` already enforces for route
- * suggestions, sized for a street-coverage walk rather than a single loop:
- * more tracks (a town's worth of history, not one run's neighbourhood), same
- * per-track and total point ceilings so one project can never again cost a
- * full decade of unthinned GPS.
+ * suggestions, re-sized for a street-coverage walk rather than a single loop.
+ *
+ * `maxTracks` first shipped at 400, modelled on the suggestion engine's
+ * budget for "runs near one candidate loop". Wrong model: a street-completion
+ * project is usually drawn around the town the owner actually lives in, which
+ * is where most of his logged runs already are. Falkenberg is Magnus's home
+ * turf — of 1,438 runs, the large majority are near enough to count — and a
+ * 400-track cap, nearest-first, silently dropped everything past it. Streets
+ * he had genuinely run showed as incomplete, which is worse than the crash
+ * this budget exists to prevent: a wrong answer nobody notices is asking for
+ * trouble, and this one got noticed. `maxTracks` is now large enough that the
+ * geographic radius filter is doing the real work, not this count; the point
+ * ceiling below is the actual cost control.
  */
 const PROJECT_HISTORY_TRACK_BUDGET = {
-  maxTracks: 400,
+  maxTracks: 4_000,
   maxPointsPerTrack: 600,
-  maxTotalPoints: 150_000,
+  maxTotalPoints: 500_000,
 };
 
 /**
