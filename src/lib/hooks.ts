@@ -403,21 +403,50 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       }
     };
 
+    /**
+     * Decoding every document on one synchronous pass through `snap.forEach`
+     * was the actual shape of the owner's original "crashes on my iPhone, no
+     * data loads" report — it was never the Street Projects page alone.
+     * `deserializeRoute` decodes a polyline (`readTrackCoordinates`) and walks
+     * it again for country detection, per route; on a full-history account
+     * (Magnus: 1,438 runs) that is real, continuous CPU work with nothing
+     * ever yielded back to the browser. A desktop skates past it; an iPhone
+     * on a slow connection does not, and a tab that cannot paint for that
+     * long is indistinguishable from a tab that is dead.
+     *
+     * This decodes in chunks with a yield to the event loop between each,
+     * same final `GPXRoute[]` shape, same eventual `setRoutes` call every
+     * other page already expects — the data this produces is unchanged, only
+     * how long the main thread goes without a breath while producing it.
+     */
+    const DECODE_CHUNK_SIZE = 150;
+    const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
     const load = async () => {
       if (!db) return;
       try {
         if (!hasFreshCache) setLoading(true);
         const q = query(collection(db, "routes"), where("userId", "==", userId));
         const snap = await getDocs(q);
+        const docs: Array<{ id: string; data: ReturnType<typeof d.data> }> = [];
+        // Collecting the plain docs is cheap (no decode yet); the expensive
+        // part is deserializeRoute, which the chunk loop below spaces out.
+        snap.forEach((d) => docs.push({ id: d.id, data: d.data() }));
+
         const firestoreRoutes: GPXRoute[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          // A route carries geometry either way; one without any is a document
-          // that never finished writing and is not a route yet.
-          if (storedTrackLength(data) > 0) {
-            firestoreRoutes.push(deserializeRoute(d.id, data));
+        for (let start = 0; start < docs.length; start += DECODE_CHUNK_SIZE) {
+          if (cancelled) return;
+          const chunk = docs.slice(start, start + DECODE_CHUNK_SIZE);
+          for (const { id, data } of chunk) {
+            // A route carries geometry either way; one without any is a
+            // document that never finished writing and is not a route yet.
+            if (storedTrackLength(data) > 0) {
+              firestoreRoutes.push(deserializeRoute(id, data));
+            }
           }
-        });
+          if (start + DECODE_CHUNK_SIZE < docs.length) await yieldToBrowser();
+        }
+
         firestoreRoutes.sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf());
         if (cancelled) return;
         setRoutes(firestoreRoutes);
