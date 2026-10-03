@@ -314,6 +314,14 @@ export default function Map({
     });
     mapRef.current = map;
 
+    // TEMPORARY debugging aid (2026-10-03): expose the live map instance so
+    // the route-lines-missing bug can be inspected directly from the browser
+    // console instead of guessed at from source reading alone. Safe to
+    // remove once that investigation is closed.
+    if (typeof window !== "undefined") {
+      (window as unknown as { __debugMap?: maplibregl.Map }).__debugMap = map;
+    }
+
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
     let attributionControl: maplibregl.AttributionControl | null = null;
