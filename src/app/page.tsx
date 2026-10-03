@@ -28,13 +28,33 @@ export default function Home() {
   // ── Core data ───────────────────────────────────────────────────────────────
   // `routes` is storage: the route documents this page may upload to, rename and
   // delete. Every mutation below keeps using it.
-  const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
+  const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading, fetchFullRoute } = useGPXRoutes(user?.uid ?? null, { loadFullGeometry: false });
   // `unifiedRoutes` is display: the same routes plus provider-synced activities,
   // deduped and labelled with where each run came from. Read-only.
   const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [selectedRoute, setSelectedRoute] = useState<GPXRoute | null>(null);
+
+  /**
+   * The overview list only ever carries thinned (<=120 point) geometry now
+   * (loadFullGeometry: false, above) -- fine for lines drawn thin across the
+   * whole map, too coarse for km markers on the one route someone actually
+   * clicked. Show the thinned version immediately (feels instant, it's
+   * already in memory), then swap in full-resolution geometry for that one
+   * route once it arrives. If the fetch fails or the selection moves on
+   * before it resolves, the thinned version was never wrong, just less
+   * detailed -- never a blank map while waiting.
+   */
+  const selectRouteWithFullGeometry = (route: GPXRoute | null) => {
+    setSelectedRoute(route);
+    if (!route?.id) return;
+    const requestedId = route.id;
+    fetchFullRoute(requestedId).then((full) => {
+      if (!full) return;
+      setSelectedRoute((current) => (current?.id === requestedId ? { ...current, ...full } : current));
+    });
+  };
   const [showHeatmap, setShowHeatmap]      = useState(true);
   const [showPersonalHeatmap, setShowPersonalHeatmap] = useState(false);
   const [editingRoute, setEditingRoute]    = useState<GPXRoute | null>(null);
@@ -272,7 +292,7 @@ export default function Home() {
               getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
               countryOptions={countryOptions}
-              onSelectRoute={setSelectedRoute}
+              onSelectRoute={selectRouteWithFullGeometry}
               onDeleteRoute={handleDeleteRoute}
               onDownloadRoute={handleDownload}
               onEditRoute={setEditingRoute}
