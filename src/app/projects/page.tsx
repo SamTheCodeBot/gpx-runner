@@ -365,8 +365,17 @@ export default function StreetProjectsPage() {
   const [username, setUsername] = useState("");
   const [showDrawer, setShowDrawer] = useState(false);
 
-  const { routes, uploadFiles } = useGPXRoutes(user?.uid ?? null);
+  const { routes, uploadFiles, geometryComplete } = useGPXRoutes(user?.uid ?? null);
   const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
+  // Coverage is a 16 m match against the street grid; the thinned (<=120
+  // point) track the fast "summaries first" path hands out is real geometry,
+  // not a placeholder, but it is too coarse for that tolerance. Computing
+  // against it looked like streets he had run going incomplete, because at
+  // that resolution some of them genuinely no longer pass within 16 m of
+  // where they used to. Wait for full-resolution geometry before building
+  // the index at all, rather than show a number that corrects itself a
+  // second later with no indication it was ever wrong.
+  const historyReady = geometryComplete;
   const { profile, loading: profileLoading, saveProfile } = useUserProfile(user?.uid ?? null);
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -445,11 +454,17 @@ export default function StreetProjectsPage() {
 
   const familiarityIndexByProject = useMemo(() => {
     const result: Record<string, FamiliarityIndex> = {};
+    // Building this from thinned (<=120 point) geometry before the full
+    // decode lands produces a real but too-coarse index -- streets that
+    // genuinely are covered fall outside the 16 m match radius at that
+    // resolution. Wait for historyReady rather than show a number that
+    // silently corrects itself a moment later.
+    if (!historyReady) return result;
     for (const project of projects) {
       result[project.id] = buildProjectFamiliarityIndex(project.scope, unifiedRoutes);
     }
     return result;
-  }, [projects, unifiedRoutes]);
+  }, [projects, unifiedRoutes, historyReady]);
 
   const emptyFamiliarityIndex = useMemo(() => buildFamiliarityIndex([]), []);
 

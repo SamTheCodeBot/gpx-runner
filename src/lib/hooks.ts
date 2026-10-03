@@ -339,6 +339,13 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
 
   const [routes, setRoutes] = useState<GPXRoute[]>([]);
   const [loading, setLoading] = useState(false);
+  // True once full-resolution geometry has landed at least once for this
+  // account. The thinned (<=120 point) track loadSummariesFirst hands out
+  // is real geometry, not a placeholder, so this is NOT the same thing as
+  // "routes.length > 0" -- a consumer that needs street-level precision
+  // (coverage against a 16 m match radius) must wait for this, not just for
+  // something to render.
+  const [geometryComplete, setGeometryComplete] = useState(false);
 
   // Sync from Firestore when user is available. A fresh per-user local cache
   // avoids expensive repeat loads while preventing cross-account route leaks.
@@ -348,6 +355,7 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
       setRoutes([]);
       return;
     }
+    setGeometryComplete(false);
 
     let cancelled = false;
     let hasFreshCache = false;
@@ -455,6 +463,7 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         if (cancelled) return;
         setRoutes(firestoreRoutes);
         cacheRoutes(firestoreRoutes, userId);
+        setGeometryComplete(true);
       } catch (e) {
         console.error("Firestore load error", e);
       } finally {
