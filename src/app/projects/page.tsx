@@ -18,10 +18,10 @@ import { describeExclusions, partitionStreets } from "@/engine/streets/exclusion
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
-import { circleScope, scopeCenter, scopeRadiusMeters, type StreetScope } from "@/engine/streets/scope";
+import { circleScope, scopeCenter, type StreetScope } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
 import { MAX_SELECTED_STREETS } from "@/engine/streets/streetRoute";
-import { boundTracksNearStart, historyCenter, selectTracksNearStart } from "@/engine/trackHistory";
+import { historyCenter, toLatLngTrack } from "@/engine/trackHistory";
 import { logout, useAuth } from "@/lib/auth";
 import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
 import { termsAcknowledgement } from "@/lib/privacy";
@@ -62,87 +62,35 @@ const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), 
   ),
 });
 
-/**
- * How far outside a project's own circle a run can still matter.
- *
- * A street right on the boundary can be covered by a run whose recorded point
- * sits just outside the ring (GPS drift, or the project radius was drawn a
- * little tight). 3 km is generous for that without pulling in a neighbouring
- * town's running.
- */
-const PROJECT_HISTORY_MARGIN_METERS = 3_000;
 
 /**
- * The same budget shape `boundTracksNearStart` already enforces for route
- * suggestions, re-sized for a street-coverage walk rather than a single loop.
+ * One project's familiarity index.
  *
- * `maxTracks` first shipped at 400, modelled on the suggestion engine's
- * budget for "runs near one candidate loop". Wrong model: a street-completion
- * project is usually drawn around the town the owner actually lives in, which
- * is where most of his logged runs already are. Falkenberg is Magnus's home
- * turf — of 1,438 runs, the large majority are near enough to count — and a
- * 400-track cap, nearest-first, silently dropped everything past it. Streets
- * he had genuinely run showed as incomplete, which is worse than the crash
- * this budget exists to prevent: a wrong answer nobody notices is asking for
- * trouble, and this one got noticed. `maxTracks` is now large enough that the
- * geographic radius filter is doing the real work, not this count; the point
- * ceiling below is the actual cost control.
- */
-/**
- * `simplifyMeters` was left at `boundTracksNearStart`'s default (20 m) in the
- * first cut of this fix. 20 m is COARSER than `STREET_MATCH_RADIUS_METERS`
- * (16 m, in coverage.ts) — so a run that genuinely passed within 16 m of a
- * street could simplify to a path that no longer does, and a street he had
- * run showed up incomplete. `buildFamiliarityIndex` already re-simplifies to
- * 18 m internally, same as every other page; that was always the one
- * intentional precision trade-off. This stage must stay well clear of it, not
- * repeat it with a coarser number first.
+ * This used to geographically pre-filter the owner's history before handing
+ * it to buildFamiliarityIndex (selectTracksNearStart + boundTracksNearStart,
+ * the same bounding route suggestions use). Reverted (2026-10-03): on a
+ * real account it silently excluded most of the owner's own home-turf runs
+ * -- Falkenberg went from a correct 44% (247/563 streets, matching what the
+ * unbounded computation on production shows) to 14% (79/563) with the exact
+ * same street inventory underneath it. Three separate attempts at tuning
+ * that bounding's radius, track count and point budget each fixed one
+ * symptom (a crash, a reload instability, a precision loss) while the
+ * underlying exclusion bug was never actually found.
  *
- * `maxTotalPoints` was 500,000 and real: once hit, `boundTracksNearStart`
- * stops adding tracks — nearest-first, but ties among similarly-distant runs
- * resolve by array order, and Firestore does not promise the same order
- * between the cached read and the fresh one. For a project centred on the
- * owner's own town, where most of his history legitimately qualifies as
- * "nearby", that budget was the thing actually doing the cutting: the exact
- * same project reloading from 142 complete streets to 66 on one page view,
- * because the fresh fetch landed a different subset of home-turf runs under
- * the same cap. A silently non-deterministic answer is worse than a slow
- * correct one, so this is now sized to never be the limiting factor for one
- * town's worth of personal history — a true backstop, not a lever.
- */
-const PROJECT_HISTORY_TRACK_BUDGET = {
-  maxTracks: 4_000,
-  maxPointsPerTrack: 3_000,
-  simplifyMeters: 8,
-  maxTotalPoints: 3_000_000,
-};
-
-/**
- * One project's familiarity index, built only from runs that could possibly
- * reach it — never from the owner's entire history.
- *
- * `selectTracksNearStart` is the cheap pass (planar distance, no allocation)
- * that throws away everything outside the project before anything expensive
- * happens to it; `boundTracksNearStart` then thins what is left to a bounded
- * total point count. Both already exist for route suggestions, which had the
- * same "do not scan a lifetime of GPS synchronously" problem this page did.
+ * The crash this bounding was built to prevent has its own fix now --
+ * useGPXRoutes decodes in yielded chunks (see hooks.ts) -- so this page no
+ * longer needs to avoid processing the owner's whole history to stay
+ * responsive; it only needs to not do it synchronously, which it already
+ * does not. buildFamiliarityIndex's own internal 18 m simplification is the
+ * same one every other page already relies on. A correct answer that takes
+ * a little longer beats a fast, confidently wrong one.
  */
 function buildProjectFamiliarityIndex(
-  scope: StreetScope,
+  _scope: StreetScope,
   routes: Array<{ coordinates: [number, number][] }>,
 ): FamiliarityIndex {
-  const center = scopeCenter(scope);
-  const radiusMeters = scopeRadiusMeters(scope) + PROJECT_HISTORY_MARGIN_METERS;
-
-  const nearby = selectTracksNearStart(routes, center, radiusMeters, PROJECT_HISTORY_TRACK_BUDGET.maxTracks);
-  const bounded = boundTracksNearStart(nearby, center, {
-    radiusMeters,
-    simplifyMeters: PROJECT_HISTORY_TRACK_BUDGET.simplifyMeters,
-    maxPointsPerTrack: PROJECT_HISTORY_TRACK_BUDGET.maxPointsPerTrack,
-    maxTotalPoints: PROJECT_HISTORY_TRACK_BUDGET.maxTotalPoints,
-  });
-
-  return buildFamiliarityIndex(bounded);
+  const tracks = routes.map((route) => toLatLngTrack(route.coordinates)).filter((track) => track.length >= 2);
+  return buildFamiliarityIndex(tracks);
 }
 
 /**
