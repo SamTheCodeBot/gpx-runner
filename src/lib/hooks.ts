@@ -613,7 +613,7 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
     [saveRoutes]
   );
 
-  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading };
+  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading, geometryComplete };
 }
 
 // ─── useSyncedActivities / useUnifiedRoutes ───────────────────────────────────
