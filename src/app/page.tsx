@@ -325,6 +325,7 @@ export default function Home() {
                 fitAllRoutes={Boolean(filter.country)}
                 showPersonalHeatmap={showPersonalHeatmap}
                 onToggleHeatmap={() => setShowHeatmap(!showHeatmap)}
+                showHeatmapToggle={false}
                 onTogglePersonalHeatmap={() => setShowPersonalHeatmap(!showPersonalHeatmap)}
                 isLoading={isUploading}
                 selectedStartPoint={null}
@@ -371,17 +372,7 @@ export default function Home() {
                   <Icon name="whatshot" className="text-[10px] inline mr-0.5" />
                   {showPersonalHeatmap ? "Freq" : "Freq"}
                 </button>
-                <button
-                  onClick={() => setShowHeatmap(!showHeatmap)}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                    showHeatmap
-                      ? "bg-primary text-on-primary"
-                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
-                  }`}
-                >
-                  <Icon name="layers" className="text-[10px] inline mr-0.5" />
-                  {showHeatmap ? "Hide" : "Show"}
-                </button>
+
               </div>
             </div>
           </div>

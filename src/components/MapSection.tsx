@@ -35,6 +35,8 @@ interface MapSectionProps {
   isSelectingStartPoint: boolean;
   onMapClick: (lat: number, lon: number) => void;
   showMapControls?: boolean;
+  /** The owner asked for this gone on the Home/"My Routes" map (2026-10-03); other pages keep it. */
+  showHeatmapToggle?: boolean;
   showPersonalHeatmapControl?: boolean;
   familiaritySegments?: RouteFamiliaritySegment[];
 }
@@ -187,6 +189,7 @@ export function MapSection({
   heatmapPaceRange = null,
   onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
   showMapControls = true,
+  showHeatmapToggle = true,
   showPersonalHeatmapControl = true,
   familiaritySegments,
 }: MapSectionProps) {
@@ -222,7 +225,7 @@ export function MapSection({
       />
       {showMapControls && (
         <>
-          <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />
+          {showHeatmapToggle && <HeatmapToggle showHeatmap={showHeatmap} onToggleHeatmap={onToggleHeatmap} />}
           {showPersonalHeatmapControl && (
             <PersonalHeatmapToggle showPersonalHeatmap={showPersonalHeatmap} onToggle={onTogglePersonalHeatmap} />
           )}
