@@ -12,6 +12,7 @@ import {
 } from "../src/engine/streets/coverage";
 import { buildStreetInventory, type OsmWay } from "../src/engine/streets/inventory";
 import { computeProjectProgress } from "../src/engine/streets/project";
+import { buildProjectFamiliarityIndex } from "../src/engine/streets/projectFamiliarity";
 import { circleScope } from "../src/engine/streets/scope";
 import { destinationPoint, haversineMeters, polylineDistanceMeters } from "../src/engine/utils/geo";
 import { FALKENBERG_HOME, falkenbergWays } from "./helpers/falkenbergStreets";
@@ -157,6 +158,67 @@ describe("project progress over a whole town", () => {
 
     assert.ok(second.coveredMeters >= first.coveredMeters);
     assert.ok(second.streetsComplete >= first.streetsComplete);
+  });
+});
+
+describe("a project never silently drops the runner's own history (2026-10-03 regression)", () => {
+  // The exact shape of the bug: a bounding step that geographically or
+  // numerically filters tracks before building the familiarity index can
+  // silently exclude the owner's own home-turf runs. On a real account this
+  // took Falkenberg from a correct 44% (247/563 streets) to 14% (79/563)
+  // with the identical street inventory underneath it -- three rounds of
+  // tuning the bounding's radius, track count and point budget each masked
+  // a different symptom without ever finding the exclusion itself.
+  //
+  // This does not re-derive 44%/14% (that needs Magnus's real 1,438-run
+  // account); it asserts the general property that bug violated: handing
+  // buildProjectFamiliarityIndex MANY tracks that fully cover every street
+  // in scope must credit ALL of them, regardless of track count. A
+  // reintroduced track-count cap, geographic radius filter, or point
+  // budget that drops tracks before building the index will fail this.
+  it("credits every one of 2,000 home-turf runs, not a filtered subset", () => {
+    const scope = circleScope(HOME, 3000);
+    const streets = buildStreetInventory(falkenbergWays(), scope).streets.slice(0, 50);
+
+    // One real run per street would be a few dozen tracks; a prolific
+    // runner's account has thousands. The bug this guards against was a
+    // function of *count*, not of any one track's shape, so the test needs
+    // enough tracks that an old maxTracks-style cap would have bitten.
+    const routes: Array<{ coordinates: [number, number][] }> = [];
+    for (let i = 0; i < 2000; i += 1) {
+      const street = streets[i % streets.length];
+      routes.push({ coordinates: street.geometry.flat().map((p): [number, number] => [p.lng, p.lat]) });
+    }
+
+    const index = buildProjectFamiliarityIndex(scope, routes);
+    const coverage = computeProjectCoverage(streets, index);
+
+    assert.equal(
+      coverage.streetsComplete,
+      streets.length,
+      `every street in scope was run by at least one of 2,000 tracks; got ${coverage.streetsComplete} of ${streets.length}`,
+    );
+  });
+
+  it("gives the same answer whether history arrives in one order or a different one", () => {
+    // The specific non-determinism this bug produced: a point-budget cutoff
+    // that stops adding tracks part-way through, where ties between
+    // similarly-distant runs broke by array order -- Firestore's order is
+    // not guaranteed stable between a cached read and a fresh one. A
+    // reintroduced budget would make this flaky; buildProjectFamiliarityIndex
+    // must not care what order its input arrives in.
+    const scope = circleScope(HOME, 3000);
+    const streets = buildStreetInventory(falkenbergWays(), scope).streets.slice(0, 30);
+    const routes: Array<{ coordinates: [number, number][] }> = streets.map((street) => ({
+      coordinates: street.geometry.flat().map((p): [number, number] => [p.lng, p.lat]),
+    }));
+
+    const forward = computeProjectCoverage(streets, buildProjectFamiliarityIndex(scope, routes));
+    const shuffled = [...routes].reverse();
+    const backward = computeProjectCoverage(streets, buildProjectFamiliarityIndex(scope, shuffled));
+
+    assert.equal(forward.streetsComplete, backward.streetsComplete);
+    assert.equal(forward.streetsComplete, streets.length);
   });
 });
 

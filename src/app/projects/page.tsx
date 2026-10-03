@@ -21,7 +21,8 @@ import { buildStreetPickIndex, pickStreetAt } from "@/engine/streets/pick";
 import { circleScope, scopeCenter, type StreetScope } from "@/engine/streets/scope";
 import { encodeStreets } from "@/engine/streets/serialize";
 import { MAX_SELECTED_STREETS } from "@/engine/streets/streetRoute";
-import { historyCenter, toLatLngTrack } from "@/engine/trackHistory";
+import { buildProjectFamiliarityIndex } from "@/engine/streets/projectFamiliarity";
+import { historyCenter } from "@/engine/trackHistory";
 import { logout, useAuth } from "@/lib/auth";
 import { useGPXRoutes, useUnifiedRoutes, useUserProfile } from "@/lib/hooks";
 import { termsAcknowledgement } from "@/lib/privacy";
@@ -63,35 +64,6 @@ const StreetProjectMap = dynamic(() => import("@/components/StreetProjectMap"), 
 });
 
 
-/**
- * One project's familiarity index.
- *
- * This used to geographically pre-filter the owner's history before handing
- * it to buildFamiliarityIndex (selectTracksNearStart + boundTracksNearStart,
- * the same bounding route suggestions use). Reverted (2026-10-03): on a
- * real account it silently excluded most of the owner's own home-turf runs
- * -- Falkenberg went from a correct 44% (247/563 streets, matching what the
- * unbounded computation on production shows) to 14% (79/563) with the exact
- * same street inventory underneath it. Three separate attempts at tuning
- * that bounding's radius, track count and point budget each fixed one
- * symptom (a crash, a reload instability, a precision loss) while the
- * underlying exclusion bug was never actually found.
- *
- * The crash this bounding was built to prevent has its own fix now --
- * useGPXRoutes decodes in yielded chunks (see hooks.ts) -- so this page no
- * longer needs to avoid processing the owner's whole history to stay
- * responsive; it only needs to not do it synchronously, which it already
- * does not. buildFamiliarityIndex's own internal 18 m simplification is the
- * same one every other page already relies on. A correct answer that takes
- * a little longer beats a fast, confidently wrong one.
- */
-function buildProjectFamiliarityIndex(
-  _scope: StreetScope,
-  routes: Array<{ coordinates: [number, number][] }>,
-): FamiliarityIndex {
-  const tracks = routes.map((route) => toLatLngTrack(route.coordinates)).filter((track) => track.length >= 2);
-  return buildFamiliarityIndex(tracks);
-}
 
 /**
  * Street completion projects.
