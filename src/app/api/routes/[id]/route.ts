@@ -1,25 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { readTrackCoordinates } from "@/lib/track/polyline";
-import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
+import { requireUid } from "@/lib/firebaseAuthServer";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/routes/[id] - fetch full route with coordinates by ID
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const idToken = authHeader.slice(7);
-    let decodedToken;
-    try {
-      decodedToken = await verifyFirebaseIdToken(idToken);
-    } catch {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
+    const uid = await requireUid(req);
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const routeId = params.id;
     const db = adminDb();
@@ -32,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
 
     const data = docSnap.data();
-    if (!data || data.userId !== decodedToken.uid) {
+    if (!data || data.userId !== uid) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 

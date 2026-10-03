@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
+import { requireUid } from "@/lib/firebaseAuthServer";
 import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 
 export const dynamic = "force-dynamic";
@@ -8,20 +8,9 @@ export const dynamic = "force-dynamic";
 // GET /api/routes/summaries - returns lightweight route list (no coordinates/samples)
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const userId = await requireUid(req);
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const idToken = authHeader.slice(7);
-    let decodedToken;
-    try {
-      decodedToken = await verifyFirebaseIdToken(idToken);
-    } catch {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
-
-    const userId = decodedToken.uid;
     const db = adminDb();
 
     const q = db.collection("routes")

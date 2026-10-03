@@ -63,6 +63,35 @@ async function getFirebaseCerts(): Promise<Record<string, string>> {
   return certs;
 }
 
+/**
+ * Every API route's "who is asking" check, in one place.
+ *
+ * Before this, routes/summaries and routes/[id] each hand-rolled the same
+ * header-parse-plus-verify sequence inline, and street-projects/shared.ts had
+ * its own copy as requireUid. Three copies of the same five lines is exactly
+ * how one of them silently drifts from the others without anyone noticing --
+ * and when routes/summaries started 401ing for real, authenticated requests
+ * while the street-projects copy kept working, a byte-for-byte diff between
+ * the two found nothing, because there was nothing left to find by reading:
+ * the duplication itself was the risk, not a specific bug caught in the act.
+ * Returns null on any failure (missing header, malformed token, expired,
+ * wrong project) rather than throwing, so a route can do
+ * `const uid = await requireUid(req); if (!uid) return 401;` and never see
+ * the actual reason -- which is fine for a route, and logged here for anyone
+ * who later needs to know which check actually failed.
+ */
+export async function requireUid(req: Request): Promise<string | null> {
+  const header = req.headers.get("authorization");
+  if (!header?.startsWith("Bearer ")) return null;
+  try {
+    const token = await verifyFirebaseIdToken(header.slice(7));
+    return token.uid;
+  } catch (err) {
+    console.error("[requireUid] token rejected:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export async function verifyFirebaseIdToken(idToken: string): Promise<VerifiedFirebaseToken> {
   const projectId = requireProjectId();
   const parts = idToken.split(".");
