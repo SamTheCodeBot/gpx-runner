@@ -2,10 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { requireUid } from "@/lib/firebaseAuthServer";
 import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
+import { readTrackCoordinates } from "@/lib/track/polyline";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/routes/summaries - returns lightweight route list (no coordinates/samples)
+/**
+ * How many points an overview line needs. The map already simplifies a
+ * selected route's full track down to 500 points before drawing it
+ * (simplifyPositions in Map.tsx); the *overview* -- every route at once,
+ * drawn thin and half-transparent -- never needed more detail than this to
+ * look right, and never got less than "nothing" before this change.
+ */
+const OVERVIEW_POINT_CAP = 120;
+
+function thinForOverview(coords: [number, number][]): [number, number][] {
+  if (coords.length <= OVERVIEW_POINT_CAP) return coords;
+  const step = Math.ceil(coords.length / OVERVIEW_POINT_CAP);
+  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+}
+
+// GET /api/routes/summaries - returns a lightweight route list: every field
+// the stats bar and route list need, plus a thinned-to-120-point track good
+// enough for the overview map -- never the full-resolution geometry only a
+// selected route needs (that stays behind GET /api/routes/[id]).
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUid(req);
@@ -27,11 +46,14 @@ export async function GET(req: NextRequest) {
         "countries",
         "hasTcx",
         "strava",
+        "track",
+        "coordinates",
       );
     const snap = await q.get();
 
-    // Return only the fields needed for list rendering
-    // No coordinates, no samples — dramatically reduces payload
+    // Return the fields needed for list rendering plus a thinned track —
+    // no full-resolution geometry, no samples, still a fraction of the
+    // full-document payload per route.
     const summaries = snap.docs.map((doc) => {
       const d = doc.data();
       return {
@@ -47,6 +69,7 @@ export async function GET(req: NextRequest) {
         countries: d.countries || [],
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
+        coordinates: thinForOverview(readTrackCoordinates(d)),
       };
     });
 

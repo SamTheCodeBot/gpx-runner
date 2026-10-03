@@ -391,8 +391,12 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         const data = await res.json();
         if (cancelled || !Array.isArray(data.routes)) return;
 
+        // The server now sends a thinned (<=120 point) track per route,
+        // good enough for the overview map; no longer stripped to empty.
+        // The slower full decode below still runs and will overwrite this
+        // with full-resolution geometry once it lands.
         const summaries = (data.routes as RouteSummary[])
-          .map((route) => ({ ...route, coordinates: [] as [number, number][] }))
+          .map((route) => ({ ...route, coordinates: Array.isArray(route.coordinates) ? route.coordinates : ([] as [number, number][]) }))
           .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
 
         // Never overwrite geometry that already arrived: on a warm cache the
