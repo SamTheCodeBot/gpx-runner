@@ -79,13 +79,22 @@ function openGeometryCacheDb(): Promise<IDBDatabase | null> {
   });
 }
 
-async function readGeometryCache(userId: string): Promise<GeometryCacheEntry | null> {
+// "full" (Street Projects, every point) and "summaries" (Home, thinned to
+// 120) are deliberately different cache entries, not the same one two
+// pages happen to share -- using one page\u0027s geometry for the other would
+// either break Street Projects\u0027 16 m match (thinned data) or silently
+// bring back the full-memory-footprint crash Home was fixed to avoid.
+function geometryCacheKey(userId: string, mode: "full" | "summaries"): string {
+  return `${userId}:${mode}`;
+}
+
+async function readGeometryCache(userId: string, mode: "full" | "summaries"): Promise<GeometryCacheEntry | null> {
   const db = await openGeometryCacheDb();
   if (!db) return null;
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(GEOMETRY_CACHE_STORE, "readonly");
-      const req = tx.objectStore(GEOMETRY_CACHE_STORE).get(userId);
+      const req = tx.objectStore(GEOMETRY_CACHE_STORE).get(geometryCacheKey(userId, mode));
       req.onsuccess = () => {
         const entry = req.result as GeometryCacheEntry | undefined;
         resolve(entry && entry.version === ROUTE_CACHE_VERSION ? entry : null);
@@ -97,14 +106,14 @@ async function readGeometryCache(userId: string): Promise<GeometryCacheEntry | n
   });
 }
 
-async function writeGeometryCache(userId: string, routes: GPXRoute[]): Promise<void> {
+async function writeGeometryCache(userId: string, mode: "full" | "summaries", routes: GPXRoute[]): Promise<void> {
   const db = await openGeometryCacheDb();
   if (!db) return;
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(GEOMETRY_CACHE_STORE, "readwrite");
       const entry: GeometryCacheEntry = { version: ROUTE_CACHE_VERSION, cachedAt: Date.now(), routes };
-      tx.objectStore(GEOMETRY_CACHE_STORE).put(entry, userId);
+      tx.objectStore(GEOMETRY_CACHE_STORE).put(entry, geometryCacheKey(userId, mode));
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     } catch {
@@ -526,6 +535,10 @@ export function useGPXRoutes(
         // Never overwrite geometry that already arrived: on a warm cache the
         // full documents can beat the summaries home.
         setRoutes((current) => (current.length >= summaries.length ? current : summaries));
+        // Keyed "summaries", never "full" -- see geometryCacheKey\u0027s comment.
+        // Harmless for a loadFullGeometry: true caller (Suggest, Familiarity)
+        // that never reads this entry back; the one that matters is Home.
+        void writeGeometryCache(userId, "summaries", summaries);
         return true;
       } catch (e) {
         console.error("routes/summaries threw", e);
@@ -570,7 +583,7 @@ export function useGPXRoutes(
         // IndexedDB, not cacheRoutes/localStorage: see GEOMETRY_CACHE_DB\u0027s
         // comment -- this payload is exactly the size that cache silently
         // couldn\u0027t hold.
-        void writeGeometryCache(userId, fullRoutes);
+        void writeGeometryCache(userId, "full", fullRoutes);
         setGeometryComplete(true);
         return true;
       } catch (e) {
@@ -661,7 +674,7 @@ export function useGPXRoutes(
         // at all -- see GEOMETRY_CACHE_DB\u0027s comment for why this is a
         // separate cache from the localStorage one every other mode uses.
         void (async () => {
-          const cached = await readGeometryCache(userId).catch(() => null);
+          const cached = await readGeometryCache(userId, "full").catch(() => null);
           if (cancelled) return;
           if (cached && isFreshCache(cached.cachedAt)) {
             setRoutes(cached.routes);
@@ -678,7 +691,23 @@ export function useGPXRoutes(
           }
         })();
       } else {
-        void loadSummariesFirst().then((summariesOk) => {
+        void (async () => {
+          // Only loadFullGeometry: false (Home) can trust a cached thinned
+          // result as the FINAL answer and skip the network entirely -- a
+          // loadFullGeometry: true caller still needs its own full decode
+          // regardless, so checking this cache for it would only delay that
+          // without ever replacing it.
+          if (!loadFullGeometry) {
+            const cached = await readGeometryCache(userId, "summaries").catch(() => null);
+            if (cancelled) return;
+            if (cached && isFreshCache(cached.cachedAt)) {
+              setRoutes(cached.routes);
+              setGeometryComplete(true);
+              setLoading(false);
+              return;
+            }
+          }
+          const summariesOk = await loadSummariesFirst();
           if (cancelled) return;
           if (loadFullGeometry || !summariesOk) {
             load();
@@ -686,7 +715,7 @@ export function useGPXRoutes(
             setGeometryComplete(true);
             setLoading(false);
           }
-        });
+        })();
       }
     }
     return () => {
