@@ -169,7 +169,13 @@ export function IntervalsConnectionCard() {
     try {
       const run = await privacyJson<IngestionRunView>(user, "/api/intervals/sync", {
         method: "POST",
-        body: JSON.stringify({ mode }),
+        // force: true -- a manual sync is an explicit ask, not a background
+        // convenience pull, and the window is bounded (30/365 days), so
+        // re-downloading what is already held is cheap. This is also the
+        // self-serve way a fixed parser (e.g. 2026-10-04's GPS outlier
+        // filter) reaches activities that were already ingested with the
+        // old one: press this button again, nothing else required.
+        body: JSON.stringify({ mode, force: true }),
       });
       setMessage(summarizeRun(run));
       reload();

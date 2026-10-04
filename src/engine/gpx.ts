@@ -222,7 +222,63 @@ export function parseTrackFile(content: string, format?: TrackFileFormat): Track
   return summariseTrack(points, name);
 }
 
-export function summariseTrack(points: TrackPoint[], name?: string): TrackSummary {
+/**
+ * A GPS fix implying an impossible speed relative to the last point we kept.
+ *
+ * Multipath near tall buildings, overpasses and dense urban canyons produces
+ * exactly this: a point the receiver reports tens or hundreds of metres from
+ * where it actually was, for one sample, before snapping back. Index-based
+ * thinning (both the overview's 120-point budget and the detail view's
+ * 200-point one -- see thinForOverview and simplifyPositions, same algorithm,
+ * different budget) does not smooth this out; it just picks fewer points, so
+ * the same noisy fix becomes relatively MORE visible the harder a track is
+ * thinned. That is why the identical geometry looked worse in the all-routes
+ * overview than in the single selected route -- not two different bugs, one
+ * noise source amplified by two different sampling densities.
+ *
+ * 12 m/s is ~43 km/h: comfortably above any real foot-run speed (including a
+ * sprint finish), so this only ever catches a GPS fix no runner could have
+ * produced, never a fast but real stride.
+ *
+ * Compares against the last KEPT point, not the previous raw point, so one
+ * bad fix cannot make its own neighbour look "normal by comparison" and both
+ * get kept -- and a run of several consecutive bad fixes collapses to being
+ * judged only against the last good one, not accepted because they are
+ * mutually close to each other.
+ */
+const MAX_PLAUSIBLE_SPEED_MPS = 12;
+
+export function filterSpeedOutliers(points: TrackPoint[]): TrackPoint[] {
+  if (points.length < 3) return points;
+
+  const kept: TrackPoint[] = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const point = points[i];
+    const last = kept[kept.length - 1];
+
+    if (last.time && point.time) {
+      const dtSeconds = (new Date(point.time).valueOf() - new Date(last.time).valueOf()) / 1000;
+      if (dtSeconds > 0) {
+        const speed = haversineMeters(last as LatLng, point as LatLng) / dtSeconds;
+        if (speed > MAX_PLAUSIBLE_SPEED_MPS) continue; // drop: an impossible jump, not a real stride
+      }
+    }
+
+    kept.push(point);
+  }
+
+  // The real endpoint matters for distance/duration even if it was the last
+  // point examined above and happened to look like an outlier from its
+  // immediate predecessor -- dropping a run's actual finish would be worse
+  // than keeping one noisy sample.
+  const rawLast = points[points.length - 1];
+  if (kept[kept.length - 1] !== rawLast) kept.push(rawLast);
+
+  return kept;
+}
+
+export function summariseTrack(rawPoints: TrackPoint[], name?: string): TrackSummary {
+  const points = filterSpeedOutliers(rawPoints);
   let distanceMeters = 0;
   let elevationGainMeters = 0;
   let lastElevation: number | undefined;
