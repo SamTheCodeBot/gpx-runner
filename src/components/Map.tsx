@@ -17,6 +17,7 @@ import {
   type VisitGrid,
 } from "@/engine/heatmap";
 import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
+import { simplifyToBudget } from "@/lib/track/simplify";
 
 /**
  * What the heatmap is coloured by.
@@ -502,10 +503,17 @@ function segmentColour(input: {
   return `rgba(${r}, ${g}, ${b}, ${0.6 + position * 0.35})`;
 }
 
+// 2026-10-04: this used to be the same naive every-Nth-point-by-ARRAY-INDEX
+// cut as the old overview thinning (thinForOverview). routes/summaries was
+// switched to Visvalingam-Whyatt (src/lib/track/simplify.ts) earlier tonight
+// after an out-and-back/loop was shown to stitch a straight line across a
+// gap the runner never ran through -- but this function, which thins the
+// SAME kind of geometry for the selected-route detail view, was missed in
+// that pass, so the identical artefact kept showing here. Delegate to the
+// shared budget-preserving simplifier instead of keeping a second, divergent
+// copy of the naive cut.
 function simplifyPositions(coords: [number, number][], maxPoints = 200): [number, number][] {
-  if (coords.length <= maxPoints) return coords;
-  const step = Math.ceil(coords.length / maxPoints);
-  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+  return simplifyToBudget(coords, maxPoints);
 }
 
 export default function Map({
