@@ -169,8 +169,20 @@ function deserializeRouteSummary(id: string, data: any): RouteSummary {
   };
 }
 
-export function useGPXRoutes(userId: string | null, options: { loadRoutes?: boolean } = {}) {
+export function useGPXRoutes(
+  userId: string | null,
+  options: { loadRoutes?: boolean; loadFullGeometry?: boolean } = {},
+) {
   const loadRoutes = options.loadRoutes ?? true;
+  // false (opt-in required) means: never run the full Firestore decode for
+  // this account. The thinned (<=120 point) track loadSummariesFirst below
+  // provides becomes the PERMANENT overview geometry, not a placeholder --
+  // this is the only way to keep an account's full memory footprint from
+  // growing with how many routes it has. A specific selected route's full
+  // geometry is still available via fetchFullRoute, below, fetched one route
+  // at a time. Default true: Street Projects coverage and most pages still
+  // need every route at full resolution to stay correct.
+  const loadFullGeometry = options.loadFullGeometry ?? true;
   const isStorageObjectNotFound = (error: unknown) => {
     const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
     const message = error instanceof Error ? error.message : "";
@@ -387,17 +399,34 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
      * nothing to draw. So a half-hydrated page is a map with fewer lines on it
      * for a moment - never a wrong total, never a crash.
      */
-    const loadSummariesFirst = async () => {
+    // Returns whether the fast path produced a trustworthy, complete result.
+    // A caller that depends on this being the ONLY data source must check
+    // this return value and fall back to the full decode if it is false --
+    // see the 2026-10-04 incident note below for why that is not optional.
+    const loadSummariesFirst = async (): Promise<boolean> => {
       const currentUser = firebaseAuth?.currentUser;
-      if (!currentUser) return;
+      if (!currentUser) return false;
       try {
         const idToken = await currentUser.getIdToken();
         const res = await fetch("/api/routes/summaries", {
           headers: { Authorization: `Bearer ***}` },
+          // Force-bypass any HTTP cache. This endpoint is account-specific
+          // and force-dynamic server-side; a stale cached response (browser
+          // or intermediate) silently showing an old, smaller route count
+          // would look exactly like a server bug and waste another round of
+          // guessing.
+          cache: "no-store",
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.error("routes/summaries failed", res.status);
+          return false;
+        }
         const data = await res.json();
-        if (cancelled || !Array.isArray(data.routes)) return;
+        if (cancelled) return false;
+        if (!Array.isArray(data.routes)) {
+          console.error("routes/summaries: malformed response", data);
+          return false;
+        }
 
         // The server now sends a thinned (<=120 point) track per route,
         // good enough for the overview map; no longer stripped to empty.
@@ -410,8 +439,10 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
         // Never overwrite geometry that already arrived: on a warm cache the
         // full documents can beat the summaries home.
         setRoutes((current) => (current.length >= summaries.length ? current : summaries));
-      } catch {
-        // The Firestore load below is the real one; this is only a head start.
+        return true;
+      } catch (e) {
+        console.error("routes/summaries threw", e);
+        return false;
       }
     };
 
@@ -472,11 +503,33 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
     };
 
     if (!hasFreshCache) {
-      // Cheap, and it settles every total on the page. Geometry follows.
-      void loadSummariesFirst().finally(() => {
-        if (!cancelled) setLoading(false);
+      // Cheap, and it settles every total on the page. Geometry follows --
+      // unless this caller opted out of the full decode entirely, in which
+      // case the thinned summaries ARE the final geometry, permanently --
+      // but ONLY once confirmed to have actually worked.
+      //
+      // 2026-10-04 incident: shipping loadFullGeometry:false with NO
+      // fallback here, trusting routes/summaries to just work, turned a
+      // 401 on that endpoint into "my routes" showing 64 of 1,442 on
+      // desktop and zero on an iPhone -- worse than the slow page this was
+      // meant to replace, and silent (no error visible anywhere to the
+      // owner). Reverting that change restored the data, but then proved
+      // the full chunked decode ALONE still crashes a real iPhone (same
+      // memory-pressure message as before) -- chunking only ever fixed the
+      // freeze, never the footprint. Both the summaries endpoint and a
+      // path that never falls back to it are necessary; neither alone is
+      // sufficient. This is the fallback: if the fast path fails for any
+      // reason, the full decode runs regardless of loadFullGeometry, so
+      // this can only ever be as safe as it already was, never worse.
+      void loadSummariesFirst().then((summariesOk) => {
+        if (cancelled) return;
+        if (loadFullGeometry || !summariesOk) {
+          load();
+        } else {
+          setGeometryComplete(true);
+          setLoading(false);
+        }
       });
-      load();
     }
     return () => {
       cancelled = true;
@@ -613,7 +666,32 @@ export function useGPXRoutes(userId: string | null, options: { loadRoutes?: bool
     [saveRoutes]
   );
 
-  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading, geometryComplete };
+  /**
+   * One route's full-resolution geometry, fetched only when something
+   * actually needs to draw it precisely (a selected route's km markers and
+   * exact path) -- never as a way to backfill the whole account. Pairs with
+   * loadFullGeometry: false: the overview stays on thinned data forever,
+   * and only the one route being looked at pays the full-geometry cost.
+   */
+  const fetchFullRoute = useCallback(async (routeId: string): Promise<GPXRoute | null> => {
+    const currentUser = firebaseAuth?.currentUser;
+    if (!currentUser) return null;
+    try {
+      const idToken = await currentUser.getIdToken();
+      const res = await fetch(`/api/routes/${routeId}`, {
+        headers: { Authorization: `Bearer ***}` },
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data?.route ?? null) as GPXRoute | null;
+    } catch (e) {
+      console.error("fetchFullRoute error", e);
+      return null;
+    }
+  }, []);
+
+  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading, geometryComplete, fetchFullRoute };
 }
 
 // ─── useSyncedActivities / useUnifiedRoutes ───────────────────────────────────

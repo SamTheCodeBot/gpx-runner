@@ -28,7 +28,17 @@ export default function Home() {
   // ── Core data ───────────────────────────────────────────────────────────────
   // `routes` is storage: the route documents this page may upload to, rename and
   // delete. Every mutation below keeps using it.
-  const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading } = useGPXRoutes(user?.uid ?? null);
+  // loadFullGeometry: false -- the only page-specific knob standing between
+  // Magnus's phone and iOS Safari's memory-pressure crash (confirmed twice,
+  // 2026-10-03 and 2026-10-04, on a real iPhone, with every run's full GPS
+  // track held in memory at once, however gently the decode was chunked).
+  // Home's overview now runs permanently on the thinned (<=120 point) track
+  // routes/summaries already provides; selecting one route fetches that
+  // route's full geometry on demand via fetchFullRoute, below. If the
+  // summaries endpoint fails for any reason, useGPXRoutes falls back to the
+  // full decode itself -- this can only ever be as safe as before, never
+  // worse, regardless of whether that endpoint is healthy.
+  const { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading: isUploading, fetchFullRoute } = useGPXRoutes(user?.uid ?? null, { loadFullGeometry: false });
   // `unifiedRoutes` is display: the same routes plus provider-synced activities,
   // deduped and labelled with where each run came from. Read-only.
   const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
@@ -172,6 +182,20 @@ export default function Home() {
     setEditingRoute(null);
   };
 
+  /**
+   * Home's overview geometry is thinned (<=120 points) and permanent --
+   * selecting a route swaps in that one route's full-resolution geometry on
+   * demand, for precise km markers and path detail, without ever holding
+   * every route's full geometry in memory at once. Falls back to the
+   * thinned version already in `route` if the fetch fails for any reason.
+   */
+  const selectRouteWithFullGeometry = async (route: GPXRoute | null) => {
+    setSelectedRoute(route);
+    if (!route) return;
+    const full = await fetchFullRoute(route.id);
+    if (full) setSelectedRoute((current) => (current?.id === route.id ? full : current));
+  };
+
   const handleDownload = (route: GPXRoute) => downloadGPXFile(route);
 
   const handleToggleFavorite = async (routeId: string) => {
@@ -272,7 +296,7 @@ export default function Home() {
               getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
               countryOptions={countryOptions}
-              onSelectRoute={setSelectedRoute}
+              onSelectRoute={selectRouteWithFullGeometry}
               onDeleteRoute={handleDeleteRoute}
               onDownloadRoute={handleDownload}
               onEditRoute={setEditingRoute}
