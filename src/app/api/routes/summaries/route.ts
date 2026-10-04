@@ -5,6 +5,21 @@ import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 import { readTrackCoordinates } from "@/lib/track/polyline";
 
 export const dynamic = "force-dynamic";
+/**
+ * This route decodes every route's full-resolution polyline server-side
+ * (readTrackCoordinates -- a real decode, not a byte copy) before thinning
+ * each one down to 120 points. On a small account that is instant; on an
+ * account with 1,442 routes that is 1,442 decodes in one request, with no
+ * override here -- meaning Vercel's un-overridden default duration applied,
+ * while every OTHER route in this app doing comparable per-route work
+ * (street-projects, routes/suggest) already explicitly raises past it (see
+ * maxDuration elsewhere under src/app/api). A function killed by its own
+ * platform mid-response returns exactly what this bug looked like end to
+ * end: a plain failed response to the client, indistinguishable from a
+ * real auth failure unless someone thought to check the account size the
+ * failure correlated with.
+ */
+export const maxDuration = 60;
 
 /**
  * How many points an overview line needs. The map already simplifies a
