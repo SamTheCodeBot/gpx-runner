@@ -169,29 +169,8 @@ function deserializeRouteSummary(id: string, data: any): RouteSummary {
   };
 }
 
-export function useGPXRoutes(
-  userId: string | null,
-  options: { loadRoutes?: boolean; loadFullGeometry?: boolean } = {},
-) {
+export function useGPXRoutes(userId: string | null, options: { loadRoutes?: boolean } = {}) {
   const loadRoutes = options.loadRoutes ?? true;
-  // Home ("My Routes") decoding full-resolution geometry for all 1,438 of
-  // Magnus's routes, even spaced out over chunked yields, still meant that
-  // much GPS data sitting in memory at once -- enough to trip iOS Safari's
-  // own "A Problem Repeatedly Occurred" memory-pressure crash on a real
-  // iPhone (2026-10-03), after the chunking fix had already shipped.
-  // Chunking fixed the FREEZE; it never addressed the memory footprint.
-  //
-  // false (opt-in required) means: never run the full decode at all. The
-  // thinned (<=120 point) track loadSummariesFirst already provides is the
-  // only geometry the overview map gets, permanently -- not as a loading
-  // placeholder. A specific selected route's full-resolution geometry is
-  // fetched on demand via fetchFullRoute, below.
-  //
-  // Default true: Street Projects coverage and most of this app's other
-  // pages still need every route at full resolution to stay correct (see
-  // today's separate 44%/14% coverage bug from thinned data) -- only Home
-  // has opted into the lighter mode so far.
-  const loadFullGeometry = options.loadFullGeometry ?? true;
   const isStorageObjectNotFound = (error: unknown) => {
     const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
     const message = error instanceof Error ? error.message : "";
@@ -493,17 +472,11 @@ export function useGPXRoutes(
     };
 
     if (!hasFreshCache) {
-      // Cheap, and it settles every total on the page. Geometry follows --
-      // unless this caller opted out of the full decode entirely, in which
-      // case the thinned summaries ARE the final geometry, permanently.
+      // Cheap, and it settles every total on the page. Geometry follows.
       void loadSummariesFirst().finally(() => {
         if (!cancelled) setLoading(false);
       });
-      if (loadFullGeometry) {
-        load();
-      } else {
-        setGeometryComplete(true);
-      }
+      load();
     }
     return () => {
       cancelled = true;
@@ -640,32 +613,7 @@ export function useGPXRoutes(
     [saveRoutes]
   );
 
-  /**
-   * One route's full-resolution geometry, fetched only when something
-   * actually needs to draw it precisely (a selected route's km markers and
-   * exact path) -- never as a way to backfill the whole account. Pairs with
-   * loadFullGeometry: false: the overview stays on thinned data forever,
-   * and only the one route the owner is looking at pays the full-geometry
-   * cost, which is the entire point.
-   */
-  const fetchFullRoute = useCallback(async (routeId: string): Promise<GPXRoute | null> => {
-    const currentUser = firebaseAuth?.currentUser;
-    if (!currentUser) return null;
-    try {
-      const idToken = await currentUser.getIdToken();
-      const res = await fetch(`/api/routes/${routeId}`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data?.route ?? null) as GPXRoute | null;
-    } catch (e) {
-      console.error("fetchFullRoute error", e);
-      return null;
-    }
-  }, []);
-
-  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading, geometryComplete, fetchFullRoute };
+  return { routes, saveRoutes, uploadFiles, deleteRoute, updateRoute, loading, geometryComplete };
 }
 
 // ─── useSyncedActivities / useUnifiedRoutes ───────────────────────────────────
