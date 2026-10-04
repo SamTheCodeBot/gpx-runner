@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { requireUid } from "@/lib/firebaseAuthServer";
 import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
 import { encodePolyline, readTrackCoordinates } from "@/lib/track/polyline";
+import { simplifyToBudget } from "@/lib/track/simplify";
 
 export const dynamic = "force-dynamic";
 /**
@@ -31,9 +32,19 @@ export const maxDuration = 60;
 const OVERVIEW_POINT_CAP = 120;
 
 function thinForOverview(coords: [number, number][]): [number, number][] {
-  if (coords.length <= OVERVIEW_POINT_CAP) return coords;
-  const step = Math.ceil(coords.length / OVERVIEW_POINT_CAP);
-  return coords.filter((_, i) => i % step === 0 || i === coords.length - 1);
+  // 2026-10-04: this used to be the same blind every-Nth-point cut every
+  // other mode in this file uses. That is harmless on a roughly straight
+  // stretch, but on an out-and-back leg or a tight loop it can connect two
+  // points that are many array-indices apart (so eligible to survive a
+  // sparse cut) while sitting metres apart on the ground -- drawing one long
+  // straight line across a gap the runner never ran through. See
+  // simplify.ts for the full incident writeup: a real account's
+  // intervals.icu-sourced run showed exactly this, confirmed by the SAME
+  // route looking correct in the single-route detail view (a 200-point
+  // budget, same naive cut, just less aggressive) and wrong in this
+  // 120-point overview -- one algorithm blind to turns, amplified harder by
+  // a smaller budget on a denser source track, not two different bugs.
+  return simplifyToBudget(coords, OVERVIEW_POINT_CAP);
 }
 
 // GET /api/routes/summaries - returns a lightweight route list: every field
