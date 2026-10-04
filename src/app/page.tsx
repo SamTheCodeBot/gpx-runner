@@ -340,7 +340,14 @@ export default function Home() {
               <Icon name={routesPanelCollapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
             </button>
 
-            <div className="h-52 sm:h-64 md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
+            {/*
+             * h-[45vh], not h-52/h-64: Street Projects already sized its own
+             * mobile map at 45% of viewport height, and the owner asked for
+             * Home to match it -- this page\u0027s fixed 13rem/16rem was simply
+             * much smaller on a phone than the equivalent page elsewhere in
+             * the app, for no reason tied to this page\u0027s own layout.
+             */}
+            <div className="h-[45vh] md:h-full p-4 md:pr-6 md:pt-6 md:pb-4">
               <MapSection
                 routes={filteredRoutes}
                 selectedRoute={selectedRoute}

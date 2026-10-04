@@ -6,7 +6,7 @@ import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { auth as firebaseAuth, db, storage } from "@/lib/firebase";
 import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
-import { readTrackCoordinates, storedTrackLength } from "@/lib/track/polyline";
+import { decodePolyline, readTrackCoordinates, storedTrackLength } from "@/lib/track/polyline";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
 import {
@@ -481,8 +481,16 @@ export function useGPXRoutes(
           console.error("routes/summaries?full=1: malformed response", data);
           return false;
         }
-        const fullRoutes = (data.routes as RouteSummary[])
-          .map((route) => ({ ...route, coordinates: Array.isArray(route.coordinates) ? route.coordinates : ([] as [number, number][]) }))
+        // ?full=1 sends `trackEncoded` (the same polyline5 string already on
+        // disk), not a decoded `coordinates` array -- decoding happens here,
+        // once, client-side, instead of server-side only to re-inflate into
+        // JSON floats for the trip over. See the route\u0027s own comment for
+        // the ~11x this saves on the wire.
+        const fullRoutes = (data.routes as Array<RouteSummary & { trackEncoded?: string }>)
+          .map((route) => ({
+            ...route,
+            coordinates: typeof route.trackEncoded === "string" ? decodePolyline(route.trackEncoded) : (Array.isArray(route.coordinates) ? route.coordinates : []),
+          }))
           .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
         setRoutes(fullRoutes);
         cacheRoutes(fullRoutes, userId);

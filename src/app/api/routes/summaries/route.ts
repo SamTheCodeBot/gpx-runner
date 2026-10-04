@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { requireUid } from "@/lib/firebaseAuthServer";
 import { FIRESTORE_QUOTA_CODE, isQuotaExhausted } from "@/lib/firestoreQuota";
-import { readTrackCoordinates } from "@/lib/track/polyline";
+import { encodePolyline, readTrackCoordinates } from "@/lib/track/polyline";
 
 export const dynamic = "force-dynamic";
 /**
@@ -41,15 +41,22 @@ function thinForOverview(coords: [number, number][]): [number, number][] {
 // enough for the overview map -- never the full-resolution geometry only a
 // selected route needs (that stays behind GET /api/routes/[id]).
 //
-// ?full=1 skips the thinning step and returns full-resolution coordinates
-// instead -- still with the SAME .select() projection below, which already
-// excludes `samples` (per-point elevation/heart-rate/pace, downsampled to
-// 900 points on write, never read by any caller of this endpoint). Street
-// Projects needs every point at full resolution for its 16 m street-match
-// radius -- thinning to 120 points breaks that accuracy, already proven the
-// hard way earlier (the 44%/14% coverage regression) -- but never needed
-// `samples` at all. This mode gets it the geometry it actually needs
-// without the metric data it was downloading and discarding the whole time.
+// ?full=1 skips the thinning step and returns every point instead -- still
+// with the SAME .select() projection below, which already excludes
+// `samples` (per-point elevation/heart-rate/pace, downsampled to 900 points
+// on write, never read by any caller of this endpoint). Street Projects
+// needs every point at full resolution for its 16 m street-match radius --
+// thinning to 120 points breaks that accuracy, already proven the hard way
+// earlier (the 44%/14% coverage regression).
+//
+// Sent as `trackEncoded` (the same polyline5 string already on disk, not a
+// decoded array) rather than `coordinates`: decoding server-side only to
+// re-encode as JSON floats inflates full-resolution geometry roughly 11x
+// over its own encoded form (measured: a 3,000-point track is ~6 KB
+// encoded, ~65 KB as a JSON coordinate array) -- a cost this mode never
+// needed to pay, since the client already has decodePolyline available
+// for every other route it handles. Owner-reported drop from 40 MB to
+// 15 MB after the samples fix alone; this is the second half of that gap.
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUid(req);
@@ -83,7 +90,7 @@ export async function GET(req: NextRequest) {
     // full-document payload per route.
     const summaries = snap.docs.map((doc) => {
       const d = doc.data();
-      return {
+      const base = {
         id: doc.id,
         name: d.name || "Untitled",
         date: d.date || new Date(0).toISOString(),
@@ -96,8 +103,15 @@ export async function GET(req: NextRequest) {
         countries: d.countries || [],
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
-        coordinates: full ? readTrackCoordinates(d) : thinForOverview(readTrackCoordinates(d)),
       };
+      // Full mode: the compact encoded string, not a decoded array -- see
+      // the file-level comment above for why. Thinned mode is unchanged:
+      // 120 points is already small enough that encoding adds complexity
+      // for no real saving, and every existing caller expects an array.
+      if (full) {
+        return { ...base, coordinates: [] as [number, number][], trackEncoded: encodePolyline(readTrackCoordinates(d)) };
+      }
+      return { ...base, coordinates: thinForOverview(readTrackCoordinates(d)) };
     });
 
     // Sort by date descending (newest first)
