@@ -285,7 +285,16 @@ export default function StreetProjectsPage() {
   const [username, setUsername] = useState("");
   const [showDrawer, setShowDrawer] = useState(false);
 
-  const { routes, uploadFiles, geometryComplete } = useGPXRoutes(user?.uid ?? null);
+  // fullGeometryViaServer: this page\u0027s coverage engine needs every point
+  // at full resolution (its 16 m street-match radius breaks on thinned
+  // data -- see the reverted geographic-bounding regression, aef6f6b) but
+  // never reads `.samples` -- yet the default client-side decode fetched
+  // and held every route\u0027s full samples array anyway. Confirmed via the
+  // owner\u0027s network tab: 40 MB here vs. 2 MB on My Routes for the same
+  // 1,442-route account. This asks the server for the same geometry
+  // without the samples, falling back to the full client decode (today\u0027s
+  // existing behavior) if that request fails for any reason.
+  const { routes, uploadFiles, geometryComplete } = useGPXRoutes(user?.uid ?? null, { fullGeometryViaServer: true });
   const { routes: unifiedRoutes } = useUnifiedRoutes(user?.uid ?? null, routes);
   // Coverage is a 16 m match against the street grid; the thinned (<=120
   // point) track the fast "summaries first" path hands out is real geometry,

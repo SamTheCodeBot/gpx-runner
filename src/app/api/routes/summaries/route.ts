@@ -40,10 +40,22 @@ function thinForOverview(coords: [number, number][]): [number, number][] {
 // the stats bar and route list need, plus a thinned-to-120-point track good
 // enough for the overview map -- never the full-resolution geometry only a
 // selected route needs (that stays behind GET /api/routes/[id]).
+//
+// ?full=1 skips the thinning step and returns full-resolution coordinates
+// instead -- still with the SAME .select() projection below, which already
+// excludes `samples` (per-point elevation/heart-rate/pace, downsampled to
+// 900 points on write, never read by any caller of this endpoint). Street
+// Projects needs every point at full resolution for its 16 m street-match
+// radius -- thinning to 120 points breaks that accuracy, already proven the
+// hard way earlier (the 44%/14% coverage regression) -- but never needed
+// `samples` at all. This mode gets it the geometry it actually needs
+// without the metric data it was downloading and discarding the whole time.
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUid(req);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const full = req.nextUrl.searchParams.get("full") === "1";
 
     const db = adminDb();
 
@@ -84,7 +96,7 @@ export async function GET(req: NextRequest) {
         countries: d.countries || [],
         hasTcx: d.hasTcx ?? false,
         strava: d.strava || null,
-        coordinates: thinForOverview(readTrackCoordinates(d)),
+        coordinates: full ? readTrackCoordinates(d) : thinForOverview(readTrackCoordinates(d)),
       };
     });
 

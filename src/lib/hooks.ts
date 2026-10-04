@@ -171,7 +171,7 @@ function deserializeRouteSummary(id: string, data: any): RouteSummary {
 
 export function useGPXRoutes(
   userId: string | null,
-  options: { loadRoutes?: boolean; loadFullGeometry?: boolean } = {},
+  options: { loadRoutes?: boolean; loadFullGeometry?: boolean; fullGeometryViaServer?: boolean } = {},
 ) {
   const loadRoutes = options.loadRoutes ?? true;
   // false (opt-in required) means: never run the full Firestore decode for
@@ -183,6 +183,19 @@ export function useGPXRoutes(
   // at a time. Default true: Street Projects coverage and most pages still
   // need every route at full resolution to stay correct.
   const loadFullGeometry = options.loadFullGeometry ?? true;
+  // true: skip the client-side Firestore decode (getDocs + deserializeRoute
+  // for every document) entirely and instead ask the server for the exact
+  // same full-resolution coordinates via GET /api/routes/summaries?full=1 --
+  // same .select() projection as the thinned version, which already excludes
+  // `samples` (per-point elevation/heart-rate/pace, decoded and transferred
+  // by the client path for every route, never read by Street Projects\u0027
+  // coverage engine). Confirmed via the owner\u0027s own network tab: 40 MB for
+  // 1,442 routes via the client decode vs. ~2 MB for the same account\u0027s
+  // thinned summaries -- most of that gap is samples nobody was reading.
+  // Falls back to the client decode on any failure, same insurance pattern
+  // as loadFullGeometry: false\u0027s fallback below -- this can only ever be as
+  // safe as the existing client-decode path, never worse.
+  const fullGeometryViaServer = options.fullGeometryViaServer ?? false;
   const isStorageObjectNotFound = (error: unknown) => {
     const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
     const message = error instanceof Error ? error.message : "";
@@ -446,6 +459,41 @@ export function useGPXRoutes(
       }
     };
 
+    // Same endpoint, ?full=1: full-resolution coordinates, same .select()
+    // projection (no `samples`). See fullGeometryViaServer above for why
+    // this exists and what it replaces for a caller that opts in.
+    const loadFullGeometryFromServer = async (): Promise<boolean> => {
+      const currentUser = firebaseAuth?.currentUser;
+      if (!currentUser) return false;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch("/api/routes/summaries?full=1", {
+          headers: { Authorization: "Bearer " + idToken },
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          console.error("routes/summaries?full=1 failed", res.status);
+          return false;
+        }
+        const data = await res.json();
+        if (cancelled) return false;
+        if (!Array.isArray(data.routes)) {
+          console.error("routes/summaries?full=1: malformed response", data);
+          return false;
+        }
+        const fullRoutes = (data.routes as RouteSummary[])
+          .map((route) => ({ ...route, coordinates: Array.isArray(route.coordinates) ? route.coordinates : ([] as [number, number][]) }))
+          .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
+        setRoutes(fullRoutes);
+        cacheRoutes(fullRoutes, userId);
+        setGeometryComplete(true);
+        return true;
+      } catch (e) {
+        console.error("routes/summaries?full=1 threw", e);
+        return false;
+      }
+    };
+
     /**
      * Decoding every document on one synchronous pass through `snap.forEach`
      * was the actual shape of the owner's original "crashes on my iPhone, no
@@ -521,15 +569,30 @@ export function useGPXRoutes(
       // sufficient. This is the fallback: if the fast path fails for any
       // reason, the full decode runs regardless of loadFullGeometry, so
       // this can only ever be as safe as it already was, never worse.
-      void loadSummariesFirst().then((summariesOk) => {
-        if (cancelled) return;
-        if (loadFullGeometry || !summariesOk) {
-          load();
-        } else {
-          setGeometryComplete(true);
-          setLoading(false);
-        }
-      });
+      if (fullGeometryViaServer) {
+        // A different caller shape entirely: skip the thinned summaries
+        // round-trip (pointless when the goal is full resolution anyway)
+        // and go straight for the real thing, falling back to the proven
+        // client decode only if the server path fails for any reason.
+        void loadFullGeometryFromServer().then((ok) => {
+          if (cancelled) return;
+          if (ok) {
+            setLoading(false);
+          } else {
+            load();
+          }
+        });
+      } else {
+        void loadSummariesFirst().then((summariesOk) => {
+          if (cancelled) return;
+          if (loadFullGeometry || !summariesOk) {
+            load();
+          } else {
+            setGeometryComplete(true);
+            setLoading(false);
+          }
+        });
+      }
     }
     return () => {
       cancelled = true;
