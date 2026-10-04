@@ -39,6 +39,80 @@ const ROUTE_CACHE_VERSION = 3;
 const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
 const ROUTE_CACHE_MAX_BYTES = 4_500_000;
 
+/**
+ * localStorage caps out around a few MB per origin, and this app\u0027s own
+ * ROUTE_CACHE_MAX_BYTES budget (above) already degrades a too-big payload
+ * down to 75 routes marked incomplete rather than write something that
+ * might not fit. Full-resolution geometry for 1,442 routes sails past
+ * that -- so Street Projects\u0027 full-geometry cache (fullGeometryViaServer)
+ * was landing in that degraded, \"incomplete\" state every time, which never
+ * counts as fresh, which meant a full refetch on every single visit no
+ * matter how recent the last one was (owner-reported: \"2-5s every time\").
+ *
+ * IndexedDB has no such ceiling in practice (quota is a share of actual
+ * disk space, not a fixed few MB) and this is exactly what it is for.
+ * Scoped to this one cache: nothing else in this file reads or writes it.
+ */
+const GEOMETRY_CACHE_DB = "gpx-geometry-cache";
+const GEOMETRY_CACHE_STORE = "routes";
+
+interface GeometryCacheEntry {
+  version: number;
+  cachedAt: number;
+  routes: GPXRoute[];
+}
+
+function openGeometryCacheDb(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const req = indexedDB.open(GEOMETRY_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(GEOMETRY_CACHE_STORE)) {
+        req.result.createObjectStore(GEOMETRY_CACHE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    // A private-browsing tab or a user with IndexedDB disabled gets null,
+    // not a thrown error -- every caller below already treats that as a
+    // plain cache miss.
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function readGeometryCache(userId: string): Promise<GeometryCacheEntry | null> {
+  const db = await openGeometryCacheDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(GEOMETRY_CACHE_STORE, "readonly");
+      const req = tx.objectStore(GEOMETRY_CACHE_STORE).get(userId);
+      req.onsuccess = () => {
+        const entry = req.result as GeometryCacheEntry | undefined;
+        resolve(entry && entry.version === ROUTE_CACHE_VERSION ? entry : null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function writeGeometryCache(userId: string, routes: GPXRoute[]): Promise<void> {
+  const db = await openGeometryCacheDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(GEOMETRY_CACHE_STORE, "readwrite");
+      const entry: GeometryCacheEntry = { version: ROUTE_CACHE_VERSION, cachedAt: Date.now(), routes };
+      tx.objectStore(GEOMETRY_CACHE_STORE).put(entry, userId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export interface RouteFilter {
   year?: string;
   month?: string;
@@ -493,7 +567,10 @@ export function useGPXRoutes(
           }))
           .sort((a, b) => new Date(b.date).valueOf() - new Date(a.date).valueOf()) as GPXRoute[];
         setRoutes(fullRoutes);
-        cacheRoutes(fullRoutes, userId);
+        // IndexedDB, not cacheRoutes/localStorage: see GEOMETRY_CACHE_DB\u0027s
+        // comment -- this payload is exactly the size that cache silently
+        // couldn\u0027t hold.
+        void writeGeometryCache(userId, fullRoutes);
         setGeometryComplete(true);
         return true;
       } catch (e) {
@@ -579,17 +656,27 @@ export function useGPXRoutes(
       // this can only ever be as safe as it already was, never worse.
       if (fullGeometryViaServer) {
         // A different caller shape entirely: skip the thinned summaries
-        // round-trip (pointless when the goal is full resolution anyway)
-        // and go straight for the real thing, falling back to the proven
-        // client decode only if the server path fails for any reason.
-        void loadFullGeometryFromServer().then((ok) => {
+        // round-trip (pointless when the goal is full resolution anyway),
+        // and check the IndexedDB-backed cache before touching the network
+        // at all -- see GEOMETRY_CACHE_DB\u0027s comment for why this is a
+        // separate cache from the localStorage one every other mode uses.
+        void (async () => {
+          const cached = await readGeometryCache(userId).catch(() => null);
+          if (cancelled) return;
+          if (cached && isFreshCache(cached.cachedAt)) {
+            setRoutes(cached.routes);
+            setGeometryComplete(true);
+            setLoading(false);
+            return;
+          }
+          const ok = await loadFullGeometryFromServer();
           if (cancelled) return;
           if (ok) {
             setLoading(false);
           } else {
             load();
           }
-        });
+        })();
       } else {
         void loadSummariesFirst().then((summariesOk) => {
           if (cancelled) return;
