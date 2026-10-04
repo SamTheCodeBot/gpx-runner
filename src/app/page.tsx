@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useAuth, logout } from "@/lib/auth";
 import { downloadGPXFile } from "@/lib/utils";
 import { routeCountryNames } from "@/lib/countries";
 import { useGPXRoutes, useRouteStats, useRouteFilter, useUnifiedRoutes, useUserProfile, useFavorites } from "@/lib/hooks";
 import { Icon, EditModal, UploadModal, LoginScreen } from "@/components/ui";
-import { termsAcknowledgement } from "@/lib/privacy";
+import { termsAcknowledgement, privacyJson, useIntervalsConnection } from "@/lib/privacy";
 import { StatsBar } from "@/components/StatsBar";
 import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
@@ -67,6 +67,33 @@ export default function Home() {
   }, [unifiedRoutes, filter.list, favorites]);
   const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
+
+  // ── intervals.icu auto-import ──────────────────────────────────────────────
+  // Opt-in, per the checkbox on the intervals.icu settings card
+  // (profile.intervalsIcu.autoImport). When it is on and the provider is
+  // actually connected, pull the last 30 days once per visit -- same request
+  // the manual "Sync last 30 days" button makes, just fired for the user
+  // instead of waiting for a click. Never runs ahead of consent: a profile
+  // flag alone cannot start a connection, only skip asking twice for a sync
+  // the user already agreed to.
+  const { data: intervalsConnectState } = useIntervalsConnection();
+  const autoImportRanRef = useRef(false);
+  useEffect(() => {
+    if (autoImportRanRef.current) return;
+    if (!user || loading) return;
+    if (!profile?.intervalsIcu?.autoImport) return;
+    if (!intervalsConnectState?.connection) return;
+    autoImportRanRef.current = true;
+    privacyJson(user, "/api/intervals/sync", {
+      method: "POST",
+      body: JSON.stringify({ mode: "recent" }),
+    }).catch((e) => {
+      // Silent by design: this is a convenience prefetch, not a user action.
+      // The intervals.icu card on the profile page still shows last-sync
+      // status and lets them retry by hand.
+      console.error("[auto-import] intervals.icu sync failed", e);
+    });
+  }, [user, loading, profile?.intervalsIcu?.autoImport, intervalsConnectState?.connection]);
 
   const stats = useMemo(() => {
     if (!filteredRoutes.length) return null;

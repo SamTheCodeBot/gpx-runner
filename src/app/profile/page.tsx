@@ -331,8 +331,26 @@ export default function ProfilePage() {
             <p className="text-[10px] text-on-surface-variant/60 mt-1">Email cannot be changed</p>
           </div>
 
-          {/* Strava connection */}
-          <div className="bg-surface-container-lowest rounded-3xl p-6 shadow-sm border border-outline-variant/10">
+          {/* Strava connection -- temporarily disabled.
+              Not removed: handlers, state and the backend routes are
+              untouched below, this is a pure UI gate. Folded shut by
+              default so a feature nobody can use does not take up
+              profile-page space, and greyed out + non-interactive if
+              someone opens the fold-out anyway. */}
+          <details className="group bg-surface-container-lowest rounded-3xl shadow-sm border border-outline-variant/10 opacity-60 grayscale">
+            <summary className="flex items-start gap-3 p-6 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+              <div className="w-10 h-10 rounded-2xl bg-on-surface-variant/10 flex items-center justify-center shrink-0">
+                <Icon name="directions_run" className="text-on-surface-variant text-xl" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant">Strava</p>
+                <h2 className="text-sm font-extrabold text-on-surface-variant mt-0.5">Strava</h2>
+                <p className="text-xs text-on-surface-variant mt-1">Not supported for the moment.</p>
+              </div>
+              <Icon name="expand_more" className="text-on-surface-variant text-xl shrink-0 mt-1 transition-transform group-open:rotate-180" />
+            </summary>
+
+            <div className="px-6 pb-6 pointer-events-none" aria-disabled="true">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[#fc4c02]/10 flex items-center justify-center shrink-0">
                 <Icon name="directions_run" className="text-[#fc4c02] text-xl" />
@@ -409,7 +427,8 @@ export default function ProfilePage() {
                 {stravaBusy ? <><Icon name="progress_activity" className="text-base animate-spin" /> Connecting...</> : "Connect to Strava"}
               </button>
             )}
-          </div>
+            </div>
+          </details>
 
           {/* intervals.icu connection — consent is asked inside this card, at the
               moment of connecting, never at signup. */}
