@@ -420,11 +420,21 @@ export function MobileDrawer({ isOpen, onClose, user, profile, profileLoading, o
 
   return (
     <>
+      {/*
+       * z-[65]/z-[66], not z-40/z-50: Street Projects gives its own sticky
+       * header a stacking context at z-[60] (to stay above its Leaflet map,
+       * which pins its own panes up to z-40 with !important) -- every other
+       * page\u0027s mobile header sits at z-20 and never conflicts, which is why
+       * this only ever showed up there. z-50 loses to that z-[60] header, so
+       * this nav drawer rendered underneath it on that one page (reported on
+       * iPhone, 2026-10-04). Staying below the real dialogs at z-[70] (edit/
+       * upload/profile modals) so an open dialog still wins over the drawer.
+       */}
       {/* Backdrop */}
-      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[65] bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer */}
-      <aside className="fixed inset-y-0 left-0 z-50 w-72 bg-primary text-on-primary flex flex-col shadow-xl animate-slide-in">
+      <aside className="fixed inset-y-0 left-0 z-[66] w-72 bg-primary text-on-primary flex flex-col shadow-xl animate-slide-in">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
           <div className="flex items-center gap-3">
