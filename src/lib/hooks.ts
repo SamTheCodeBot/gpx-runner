@@ -8,6 +8,7 @@ import { GPXRoute, type CanonicalActivity } from "@/app/types";
 import { routeCountryNames, routeHasCountry } from "@/lib/countries";
 import { decodePolyline, readTrackCoordinates, storedTrackLength } from "@/lib/track/polyline";
 import { haversine, parseGPXFile, parseTCXFile, nextColor, downloadGPXFile } from "@/lib/utils";
+import { simplifyToBudget } from "@/lib/track/simplify";
 import { mergeActivityRecords, type UnifiedRun } from "@/lib/ingestion/activityMerge";
 import {
   boundTracksNearStart,
@@ -35,7 +36,7 @@ function nextPaint(): Promise<void> {
 }
 import type { FamiliarityReport, FamiliarityTarget } from "@/engine/familiarityReport";
 
-const ROUTE_CACHE_VERSION = 3;
+const ROUTE_CACHE_VERSION = 4;
 const ROUTE_CACHE_TTL_MS = 15 * 60 * 1000;
 const ROUTE_CACHE_MAX_BYTES = 4_500_000;
 
@@ -301,15 +302,25 @@ export function useGPXRoutes(
       : undefined;
     const routeWithCompactSamples = { ...route, samples: compactSamples };
 
-    if (route.coordinates.length <= maxCoordinates) return routeWithCompactSamples;
+if (route.coordinates.length <= maxCoordinates) return routeWithCompactSamples;
 
-    const step = Math.ceil(route.coordinates.length / maxCoordinates);
+    // 2026-10-04: this used to be the same naive every-Nth-point-by-ARRAY-INDEX
+    // cut as thinForOverview/simplifyPositions, with the same out-and-back/loop
+    // stitching bug -- except THIS copy ran upstream of both of those, baking
+    // an already-damaged 500-point track straight into localStorage. Fixing the
+    // two render-time callers alone was not enough: any route already cached by
+    // this function came back out of cache at exactly 500 points, so the
+    // downstream simplifyToBudget call in Map.tsx saw coords.length <= maxPoints
+    // and passed the already-mangled array straight through untouched. Delegate
+    // to the same shared simplifier here too, so a route is never thinned by the
+    // naive cut at any point in the pipeline. ROUTE_CACHE_VERSION bumped alongside
+    // this so every existing cached entry (built by the old, broken version of
+    // this function) is discarded on next load instead of continuing to serve
+    // pre-damaged geometry until it happens to expire or get manually cleared.
     return {
       ...route,
       samples: compactSamples,
-      coordinates: route.coordinates.filter((_, index) => (
-        index === 0 || index === route.coordinates.length - 1 || index % step === 0
-      )),
+      coordinates: simplifyToBudget(route.coordinates, maxCoordinates),
     };
   }, []);
 
