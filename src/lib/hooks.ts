@@ -409,7 +409,7 @@ export function useGPXRoutes(
       try {
         const idToken = await currentUser.getIdToken();
         const res = await fetch("/api/routes/summaries", {
-          headers: { Authorization: `Bearer ***}` },
+          headers: { Authorization: "Bearer " + idToken },
           // Force-bypass any HTTP cache. This endpoint is account-specific
           // and force-dynamic server-side; a stale cached response (browser
           // or intermediate) silently showing an old, smaller route count
@@ -679,7 +679,7 @@ export function useGPXRoutes(
     try {
       const idToken = await currentUser.getIdToken();
       const res = await fetch(`/api/routes/${routeId}`, {
-        headers: { Authorization: `Bearer ***}` },
+        headers: { Authorization: "Bearer " + idToken },
         cache: "no-store",
       });
       if (!res.ok) return null;
@@ -902,7 +902,7 @@ export function useRouteSummaries(userId: string | null) {
       try {
         const idToken = await user.getIdToken();
         const res = await fetch("/api/routes/summaries", {
-          headers: { Authorization: `Bearer ${idToken}` },
+      headers: { Authorization: "Bearer " + idToken },
         });
         if (!res.ok) throw new Error(`Route summary fetch failed: ${res.status}`);
         const data = await res.json();
