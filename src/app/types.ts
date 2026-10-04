@@ -444,4 +444,14 @@ export interface UserProfile {
     connectedAt: string;
     updatedAt: string;
   };
+  /**
+   * Per-user preference for the intervals.icu provider. Separate from the
+   * connection record itself (that lives server-side, see
+   * ProviderConnectionView) -- this is just "when I log in, pull my recent
+   * runs for me" vs. "I will press sync myself". Defaults to off: connecting
+   * never implies consent to run automatically on every visit.
+   */
+  intervalsIcu?: {
+    autoImport?: boolean;
+  };
 }
