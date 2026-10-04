@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth";
+import { useUserProfile } from "@/lib/hooks";
 import {
   formatDateTime,
   privacyJson,
@@ -127,6 +129,9 @@ function describeHistory(progress: HistoryProgressView): string {
 
 export function IntervalsConnectionCard() {
   const { user, authLoading, data, setData, loading, error, reload } = useIntervalsConnection();
+  const { user: authUser } = useAuth();
+  const { profile, saveProfile } = useUserProfile(authUser?.uid ?? null);
+  const [autoImportBusy, setAutoImportBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [callbackStatus, setCallbackStatus] = useState("");
   const [busy, setBusy] = useState<"recent" | "history" | "disconnect" | null>(null);
@@ -261,6 +266,24 @@ export function IntervalsConnectionCard() {
     }
   };
 
+  /**
+   * "Automatically import on login" is a per-user preference, not a provider
+   * capability -- it lives on the profile document (see
+   * UserProfile.intervalsIcu), next to where Home reads it on every load.
+   * Saved immediately on toggle, same as every other profile field; no
+   * separate "save settings" button to forget to press.
+   */
+  const setAutoImport = async (next: boolean) => {
+    setAutoImportBusy(true);
+    try {
+      await saveProfile({ intervalsIcu: { ...(profile?.intervalsIcu ?? {}), autoImport: next } });
+    } catch (caught) {
+      setActionError(toErrorView(caught));
+    } finally {
+      setAutoImportBusy(false);
+    }
+  };
+
   const handleConnected = (fresh: ProviderConnectionView) => {
     setDialogOpen(false);
     setCallbackStatus("");
@@ -360,6 +383,21 @@ export function IntervalsConnectionCard() {
                   </dd>
                 </div>
               </dl>
+
+              <label className="mt-4 flex items-start gap-3 rounded-xl bg-surface-container/60 px-3 py-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-outline-variant text-primary focus:ring-2 focus:ring-primary/40"
+                  checked={Boolean(profile?.intervalsIcu?.autoImport)}
+                  disabled={autoImportBusy}
+                  onChange={(e) => setAutoImport(e.target.checked)}
+                />
+                <span className="text-xs text-on-surface-variant leading-snug">
+                  <span className="font-bold text-on-surface">Automatically import on login.</span>{" "}
+                  Pulls your last 30 days from intervals.icu each time you open GPX Runner, the
+                  same as pressing &quot;Sync last 30 days&quot; yourself.
+                </span>
+              </label>
 
               <div className="mt-4 grid grid-cols-1 gap-2">
                 <button
