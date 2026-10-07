@@ -1,10 +1,24 @@
+import { randomUUID } from "crypto";
+
 import { adminDb } from "@/lib/firebaseAdmin";
 import { applyExclusionChange, pruneExclusions } from "@/engine/streets/exclusions";
 import { mergeNearbyStreets, type StreetExtension } from "@/engine/streets/nearby";
 import type { Street } from "@/engine/streets/inventory";
-import { decodeScope, decodeStreets, encodeScope, encodeStreets, chunkStreets, type WireStreet } from "@/engine/streets/serialize";
+import {
+  decodeScope,
+  decodeStreets,
+  decodeExcludedSegments,
+  encodeScope,
+  encodeStreets,
+  encodeExcludedSegments,
+  chunkStreets,
+  type WireStreet,
+  type WireExcludedSegment,
+  type ExcludedSegment,
+} from "@/engine/streets/serialize";
 import type { StreetScope } from "@/engine/streets/scope";
 import type { StreetProjectSummary } from "@/engine/streets/project";
+import type { LatLng } from "@/types";
 
 /**
  * Storage for street completion projects.
@@ -40,6 +54,11 @@ type ProjectDoc = {
   /** Street ids the owner has struck off. Absent on projects made before this. */
   excludedStreetIds?: string[];
   /**
+   * Individual stretches struck off one street at a time — the "this bit
+   * isn't actually a street" case, distinct from excluding the whole thing.
+   */
+  excludedSegments?: WireExcludedSegment[];
+  /**
    * Street ids the owner added from outside the project area.
    *
    * Recorded because a refresh only ever reads *inside* the scope: without
@@ -65,6 +84,7 @@ function toSummary(id: string, data: ProjectDoc): StoredProject {
     lastRefreshedAt: data.lastRefreshedAt ?? null,
     pendingAdditionCount: data.pendingAdditionCount ?? 0,
     excludedStreetIds: data.excludedStreetIds ?? [],
+    excludedSegments: decodeExcludedSegments(data.excludedSegments),
     addedStreetIds: data.addedStreetIds ?? [],
   };
 }
@@ -97,6 +117,7 @@ export async function createProject(input: {
     lastRefreshedAt: null,
     pendingAdditionCount: 0,
     excludedStreetIds: [],
+    excludedSegments: [],
     addedStreetIds: [],
   };
 
@@ -211,6 +232,9 @@ export async function addStreetsToProject(
     chunkCount: chunks.length,
     addedStreetIds: addedIds,
     excludedStreetIds: pruneExclusions(loaded.project.excludedStreetIds, merged),
+    excludedSegments: encodeExcludedSegments(
+      pruneExcludedSegments(loaded.project.excludedSegments, merged),
+    ),
   });
 
   await batch.commit();
@@ -256,6 +280,71 @@ export async function setStreetExclusions(
 
   const fresh = await ref.get();
   return { project: toSummary(fresh.id, fresh.data() as ProjectDoc), excludedStreetIds: next };
+}
+
+/**
+ * Drop struck-off stretches whose street the project no longer holds.
+ *
+ * The same reasoning as `pruneExclusions`, at the finer grain: a snapshot
+ * rewrite (adopt, add-nearby) can retire a street id entirely, and a stretch
+ * still pointing at it would sit in the document counting against nothing.
+ */
+function pruneExcludedSegments(segments: ExcludedSegment[], streets: Street[]): ExcludedSegment[] {
+  const live = new Set(streets.map((street) => street.id));
+  return segments.filter((segment) => live.has(segment.streetId));
+}
+
+/**
+ * Strike one stretch of one street off this project.
+ *
+ * Deliberately not keyed to an OSM way: the stretch the owner points at is
+ * whatever the map just drew him as missing, and that is measured against his
+ * own run history, not against where a mapper happened to cut the way. Stored
+ * with its own id so a street can collect more than one of these over time,
+ * and so any one of them can be undone without touching the rest.
+ */
+export async function addExcludedSegment(
+  ownerUid: string,
+  projectId: string,
+  input: { streetId: string; pieces: LatLng[][]; meters: number },
+): Promise<{ project: StoredProject; segment: ExcludedSegment } | null> {
+  const loaded = await loadProject(ownerUid, projectId);
+  if (!loaded) return null;
+  if (!loaded.streets.some((street) => street.id === input.streetId)) return null;
+
+  const segment: ExcludedSegment = {
+    id: randomUUID(),
+    streetId: input.streetId,
+    createdAt: new Date().toISOString(),
+    meters: input.meters,
+    pieces: input.pieces,
+  };
+
+  const ref = adminDb().collection(PROJECT_COLLECTION).doc(projectId);
+  const next = [...loaded.project.excludedSegments, segment];
+  await ref.update({ excludedSegments: encodeExcludedSegments(next) });
+
+  const fresh = await ref.get();
+  return { project: toSummary(fresh.id, fresh.data() as ProjectDoc), segment };
+}
+
+/** Put a struck-off stretch back. */
+export async function removeExcludedSegment(
+  ownerUid: string,
+  projectId: string,
+  segmentId: string,
+): Promise<StoredProject | null> {
+  const loaded = await loadProject(ownerUid, projectId);
+  if (!loaded) return null;
+
+  const next = loaded.project.excludedSegments.filter((segment) => segment.id !== segmentId);
+  if (next.length === loaded.project.excludedSegments.length) return loaded.project;
+
+  const ref = adminDb().collection(PROJECT_COLLECTION).doc(projectId);
+  await ref.update({ excludedSegments: encodeExcludedSegments(next) });
+
+  const fresh = await ref.get();
+  return toSummary(fresh.id, fresh.data() as ProjectDoc);
 }
 
 /**

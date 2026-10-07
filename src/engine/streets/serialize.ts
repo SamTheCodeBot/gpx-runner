@@ -53,15 +53,43 @@ function round(value: number): number {
   return Number(value.toFixed(PRECISION));
 }
 
-export function encodeStreet(street: Street): WireStreet {
+/**
+ * Flatten any list of pieces into the `{geometry, pieces}` pair Firestore can
+ * hold — shared by streets and by the segments struck off one at a time,
+ * because both are "a few disconnected runs of coordinates" and Firestore's
+ * ban on nested arrays does not care which.
+ */
+export function encodePieces(pieces: LatLng[][]): { geometry: number[]; pieces: number[] } {
   const geometry: number[] = [];
-  const pieces: number[] = [];
+  const counts: number[] = [];
 
-  for (const piece of street.geometry) {
+  for (const piece of pieces) {
     if (piece.length < 2) continue;
-    pieces.push(piece.length);
+    counts.push(piece.length);
     for (const point of piece) geometry.push(round(point.lat), round(point.lng));
   }
+
+  return { geometry, pieces: counts };
+}
+
+export function decodePieces(wire: { geometry?: number[]; pieces?: number[] }): LatLng[][] {
+  const flat = wire.geometry ?? [];
+  const counts = wire.pieces;
+  if (!Array.isArray(counts) || counts.length === 0) {
+    return flat.length >= 4 ? [decodePiece(flat)] : [];
+  }
+
+  const out: LatLng[][] = [];
+  let offset = 0;
+  for (const count of counts) {
+    out.push(decodePiece(flat.slice(offset, offset + count * 2)));
+    offset += count * 2;
+  }
+  return out;
+}
+
+export function encodeStreet(street: Street): WireStreet {
+  const { geometry, pieces } = encodePieces(street.geometry);
 
   return {
     id: street.id,
@@ -92,20 +120,7 @@ function decodeGeometry(wire: WireStreet | LegacyWireStreet): LatLng[][] {
     return (geometry as number[][]).map(decodePiece);
   }
 
-  const flat = geometry as number[];
-  const pieces = wire.pieces;
-  if (!Array.isArray(pieces) || pieces.length === 0) {
-    // No cut list: the whole run is one piece.
-    return flat.length >= 4 ? [decodePiece(flat)] : [];
-  }
-
-  const out: LatLng[][] = [];
-  let offset = 0;
-  for (const count of pieces) {
-    out.push(decodePiece(flat.slice(offset, offset + count * 2)));
-    offset += count * 2;
-  }
-  return out;
+  return decodePieces({ geometry: geometry as number[], pieces: wire.pieces });
 }
 
 function decodePiece(flat: number[]): LatLng[] {
@@ -121,6 +136,63 @@ export function encodeStreets(streets: Street[]): WireStreet[] {
 export function decodeStreets(wire: Array<WireStreet | LegacyWireStreet> | undefined): Street[] {
   if (!Array.isArray(wire)) return [];
   return wire.map(decodeStreet).filter((street) => street.geometry.length > 0);
+}
+
+/**
+ * One stretch the owner has struck off a street, kept separately from the
+ * street's own geometry.
+ *
+ * This is the "exclude the missing part, not the whole street" decision: the
+ * street stays exactly as OSM drew it, and this is laid over it as a mask at
+ * read time. An id of its own because a street can end up with more than one
+ * bad stretch found on different days, and each has to be undoable on its own.
+ */
+export type WireExcludedSegment = {
+  id: string;
+  streetId: string;
+  createdAt: string;
+  meters: number;
+  geometry: number[];
+  pieces: number[];
+};
+
+export type ExcludedSegment = {
+  id: string;
+  streetId: string;
+  createdAt: string;
+  meters: number;
+  pieces: LatLng[][];
+};
+
+export function encodeExcludedSegment(segment: ExcludedSegment): WireExcludedSegment {
+  const { geometry, pieces } = encodePieces(segment.pieces);
+  return {
+    id: segment.id,
+    streetId: segment.streetId,
+    createdAt: segment.createdAt,
+    meters: Math.round(segment.meters * 10) / 10,
+    geometry,
+    pieces,
+  };
+}
+
+export function decodeExcludedSegment(wire: WireExcludedSegment): ExcludedSegment {
+  return {
+    id: wire.id,
+    streetId: wire.streetId,
+    createdAt: wire.createdAt,
+    meters: wire.meters ?? 0,
+    pieces: decodePieces(wire).filter((piece) => piece.length >= 2),
+  };
+}
+
+export function encodeExcludedSegments(segments: ExcludedSegment[]): WireExcludedSegment[] {
+  return segments.map(encodeExcludedSegment);
+}
+
+export function decodeExcludedSegments(wire: WireExcludedSegment[] | undefined): ExcludedSegment[] {
+  if (!Array.isArray(wire)) return [];
+  return wire.map(decodeExcludedSegment).filter((segment) => segment.pieces.length > 0);
 }
 
 export function encodeScope(scope: StreetScope): WireScope {

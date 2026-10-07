@@ -5,7 +5,19 @@ import type { User } from "firebase/auth";
 import type { Street } from "@/engine/streets/inventory";
 import type { BoundaryCandidate } from "@/engine/streets/overpass";
 import type { StreetScope } from "@/engine/streets/scope";
-import { decodeScope, decodeStreets, encodeScope, type WireScope, type WireStreet } from "@/engine/streets/serialize";
+import {
+  decodeScope,
+  decodeStreets,
+  decodeExcludedSegments,
+  encodeScope,
+  type WireScope,
+  type WireStreet,
+  type WireExcludedSegment,
+  type ExcludedSegment,
+} from "@/engine/streets/serialize";
+import type { LatLng } from "@/types";
+
+export type { ExcludedSegment };
 
 /**
  * The browser's side of street completion projects.
@@ -31,6 +43,8 @@ export type ProjectSummary = {
   pendingAdditionCount: number;
   /** Streets struck off by the owner. Out of every percentage, still in the map. */
   excludedStreetIds: string[];
+  /** Individual stretches struck off one street at a time. */
+  excludedSegments: ExcludedSegment[];
   /** Streets let in from outside the project area. */
   addedStreetIds: string[];
 };
@@ -94,6 +108,7 @@ function toSummary(raw: any): ProjectSummary {
     lastRefreshedAt: raw.lastRefreshedAt ?? null,
     pendingAdditionCount: raw.pendingAdditionCount ?? 0,
     excludedStreetIds: raw.excludedStreetIds ?? [],
+    excludedSegments: decodeExcludedSegments(raw.excludedSegments as WireExcludedSegment[]),
     addedStreetIds: raw.addedStreetIds ?? [],
   };
 }
@@ -177,6 +192,39 @@ export async function setStreetExclusions(
 }
 
 /**
+ * Strike one stretch of a street off — the "this bit isn't a street" case.
+ *
+ * `pieces` is handed over exactly as drawn: the same `missing` geometry the
+ * coverage walk already produced for the focused street, not re-derived from a
+ * tap. That is what lets the stored stretch line up with the map pixel for
+ * pixel instead of a second, slightly different reading of the same road.
+ */
+export async function excludeStreetSegment(
+  user: User,
+  projectId: string,
+  input: { streetId: string; pieces: LatLng[][]; meters: number },
+): Promise<ProjectSummary> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/exclude-segment`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return toSummary(payload.project);
+}
+
+/** Put a struck-off stretch back. */
+export async function restoreStreetSegment(
+  user: User,
+  projectId: string,
+  segmentId: string,
+): Promise<ProjectSummary> {
+  const payload = await authed(user, `/api/street-projects/${projectId}/exclude-segment`, {
+    method: "DELETE",
+    body: JSON.stringify({ segmentId }),
+  });
+  return toSummary(payload.project);
+}
+
+/**
  * What is just outside the project area.
  *
  * The circle was a guess. This is the correction: streets wholly outside it,
@@ -248,6 +296,7 @@ export async function addNearbyStreets(
       lastRefreshedAt: raw.lastRefreshedAt ?? null,
       pendingAdditionCount: raw.pendingAdditionCount ?? 0,
       excludedStreetIds: raw.excludedStreetIds ?? [],
+      excludedSegments: decodeExcludedSegments(raw.excludedSegments as WireExcludedSegment[]),
       addedStreetIds: raw.addedStreetIds ?? [],
     },
     streets: decodeStreets(payload.streets as WireStreet[]),
@@ -319,6 +368,7 @@ export async function addStreetAt(
       lastRefreshedAt: raw.lastRefreshedAt ?? null,
       pendingAdditionCount: raw.pendingAdditionCount ?? 0,
       excludedStreetIds: raw.excludedStreetIds ?? [],
+      excludedSegments: decodeExcludedSegments(raw.excludedSegments as WireExcludedSegment[]),
       addedStreetIds: raw.addedStreetIds ?? [],
     },
     streets: decodeStreets(payload.streets as WireStreet[]),
