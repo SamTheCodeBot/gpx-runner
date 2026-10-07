@@ -34,6 +34,8 @@ export type StreetProjectSummary = {
    * back must not need a refetch — but they are out of every percentage.
    */
   excludedStreetIds: string[];
+  /** Individual stretches struck off one street at a time, the finer sibling of the above. */
+  excludedSegments: import("./serialize").ExcludedSegment[];
   /**
    * Streets let in from outside the area. Kept apart from the rest because a
    * refresh only reads inside the scope, and must not call these gone.

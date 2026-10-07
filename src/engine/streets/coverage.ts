@@ -1,6 +1,6 @@
 import { LatLng } from "../../types";
 import { nearestFamiliarDistanceMeters, type FamiliarityIndex } from "../familiarity";
-import { densifyPolyline, haversineMeters, midpoint } from "../utils/geo";
+import { densifyPolyline, haversineMeters, midpoint, pointToSegmentDistanceMeters } from "../utils/geo";
 import type { Street } from "./inventory";
 
 /**
@@ -17,6 +17,17 @@ import type { Street } from "./inventory";
 
 /** Matched against the familiarity corridor: 10 m certain, 16 m still the same road. */
 export const STREET_MATCH_RADIUS_METERS = 16;
+
+/**
+ * How close a sample has to fall to a struck-off stretch to be swallowed by it.
+ *
+ * Wider than the familiarity match: an excluded stretch is remembered as the
+ * points `describeStreetCoverage` handed back at the moment it was struck off,
+ * which is already a walk of *this* street's own geometry — so the two should
+ * line up almost exactly, and the margin exists only for the rounding a trip
+ * through Firestore's five-decimal wire format introduces.
+ */
+export const EXCLUDED_SEGMENT_MATCH_RADIUS_METERS = 10;
 
 /**
  * A street counts as done at 90%, or when what is left is a few paces.
@@ -43,7 +54,24 @@ export type StreetCoverage = {
   ratio: number;
   remainingMeters: number;
   complete: boolean;
+  /** Struck off this street specifically, and already out of `lengthMeters`. */
+  excludedMeters: number;
 };
+
+/** A street's struck-off stretches, exactly as they were when the owner cut them. */
+export type SegmentExclusionsByStreet = Map<string, LatLng[][]>;
+
+function isOnExcludedGround(point: LatLng, pieces: LatLng[][] | undefined): boolean {
+  if (!pieces || pieces.length === 0) return false;
+  for (const piece of pieces) {
+    for (let i = 1; i < piece.length; i += 1) {
+      if (pointToSegmentDistanceMeters(point, piece[i - 1], piece[i]) <= EXCLUDED_SEGMENT_MATCH_RADIUS_METERS) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 export type ProjectCoverage = {
   streets: StreetCoverage[];
@@ -112,13 +140,15 @@ export function isStreetComplete(lengthMeters: number, coveredMeters: number): b
  * traversals that agree by luck — the failure mode being a street labelled
  * complete with a long red stretch drawn down the middle of it.
  */
+type RunState = "covered" | "missing" | "excluded";
+
 type CoverageRun = {
   points: LatLng[];
-  covered: boolean;
+  state: RunState;
   meters: number;
 };
 
-function walkStreet(street: Street, index: FamiliarityIndex): CoverageRun[] {
+function walkStreet(street: Street, index: FamiliarityIndex, excludedPieces?: LatLng[][]): CoverageRun[] {
   const runs: CoverageRun[] = [];
 
   for (const piece of street.geometry) {
@@ -131,21 +161,29 @@ function walkStreet(street: Street, index: FamiliarityIndex): CoverageRun[] {
       const stepMeters = haversineMeters(from, to);
       if (stepMeters <= 0) continue;
 
-      const covered = isOnRunGround(midpoint(from, to), index);
+      const mid = midpoint(from, to);
+      // Struck off takes priority over the familiarity read: a stretch the
+      // owner has ruled out is not "missing" just because he has never run it,
+      // and the whole point of striking it off is that it stops asking.
+      const state: RunState = isOnExcludedGround(mid, excludedPieces)
+        ? "excluded"
+        : isOnRunGround(mid, index)
+          ? "covered"
+          : "missing";
 
       if (!current) {
-        current = { points: [from, to], covered, meters: stepMeters };
+        current = { points: [from, to], state, meters: stepMeters };
         continue;
       }
 
-      if (covered === current.covered) {
+      if (state === current.state) {
         current.points.push(to);
         current.meters += stepMeters;
         continue;
       }
 
       runs.push(current);
-      current = { points: [from, to], covered, meters: stepMeters };
+      current = { points: [from, to], state, meters: stepMeters };
     }
 
     // Pieces are never welded together: a street split by the scope edge is two
@@ -156,19 +194,30 @@ function walkStreet(street: Street, index: FamiliarityIndex): CoverageRun[] {
   return runs;
 }
 
-export function computeStreetCoverage(street: Street, index: FamiliarityIndex): StreetCoverage {
-  const runs = walkStreet(street, index);
+export function computeStreetCoverage(
+  street: Street,
+  index: FamiliarityIndex,
+  excludedPieces?: LatLng[][],
+): StreetCoverage {
+  const runs = walkStreet(street, index, excludedPieces);
   let covered = 0;
+  let excluded = 0;
   let length = 0;
 
   for (const run of runs) {
+    if (run.state === "excluded") {
+      excluded += run.meters;
+      continue;
+    }
     length += run.meters;
-    if (run.covered) covered += run.meters;
+    if (run.state === "covered") covered += run.meters;
   }
 
   // Measured length rather than the stored one, so ratio and remainder are
   // answers to the same question and can never disagree at the boundary.
-  const lengthMeters = length > 0 ? length : street.lengthMeters;
+  // The struck-off stretch is never part of it: it shrinks the denominator the
+  // same way a whole excluded street does, just at the scale of one stretch.
+  const lengthMeters = length > 0 ? length : Math.max(0, street.lengthMeters - excluded);
   const coveredMeters = Math.min(covered, lengthMeters);
 
   return {
@@ -180,11 +229,16 @@ export function computeStreetCoverage(street: Street, index: FamiliarityIndex): 
     ratio: lengthMeters > 0 ? coveredMeters / lengthMeters : 0,
     remainingMeters: Math.max(0, lengthMeters - coveredMeters),
     complete: isStreetComplete(lengthMeters, coveredMeters),
+    excludedMeters: excluded,
   };
 }
 
-export function computeProjectCoverage(streets: Street[], index: FamiliarityIndex): ProjectCoverage {
-  const covered = streets.map((street) => computeStreetCoverage(street, index));
+export function computeProjectCoverage(
+  streets: Street[],
+  index: FamiliarityIndex,
+  excludedSegments?: SegmentExclusionsByStreet,
+): ProjectCoverage {
+  const covered = streets.map((street) => computeStreetCoverage(street, index, excludedSegments?.get(street.id)));
 
   const totalMeters = covered.reduce((sum, street) => sum + street.lengthMeters, 0);
   const coveredMeters = covered.reduce((sum, street) => sum + street.coveredMeters, 0);
@@ -210,11 +264,12 @@ export function computeProjectCoverage(streets: Street[], index: FamiliarityInde
 export function splitStreetByCoverage(
   street: Street,
   index: FamiliarityIndex,
+  excludedPieces?: LatLng[][],
 ): { covered: LatLng[][]; missing: LatLng[][] } {
-  const runs = walkStreet(street, index);
+  const runs = walkStreet(street, index, excludedPieces);
   return {
-    covered: runs.filter((run) => run.covered).map((run) => run.points),
-    missing: runs.filter((run) => !run.covered).map((run) => run.points),
+    covered: runs.filter((run) => run.state === "covered").map((run) => run.points),
+    missing: runs.filter((run) => run.state === "missing").map((run) => run.points),
   };
 }
 
@@ -236,29 +291,38 @@ export function splitStreetByCoverage(
 export type StreetCoverageSplit = {
   covered: LatLng[][];
   missing: LatLng[][];
+  /** Struck off this street specifically, drawn the same muted way a whole excluded street is. */
+  excluded: LatLng[][];
   coveredMeters: number;
   missingMeters: number;
   lengthMeters: number;
   complete: boolean;
 };
 
-export function describeStreetCoverage(street: Street, index: FamiliarityIndex): StreetCoverageSplit {
-  const runs = walkStreet(street, index);
+export function describeStreetCoverage(
+  street: Street,
+  index: FamiliarityIndex,
+  excludedPieces?: LatLng[][],
+): StreetCoverageSplit {
+  const runs = walkStreet(street, index, excludedPieces);
+  const excludedLines = runs.filter((run) => run.state === "excluded").map((run) => run.points);
 
   let coveredMeters = 0;
   let lengthMeters = 0;
   for (const run of runs) {
+    if (run.state === "excluded") continue;
     lengthMeters += run.meters;
-    if (run.covered) coveredMeters += run.meters;
+    if (run.state === "covered") coveredMeters += run.meters;
   }
-  if (lengthMeters <= 0) lengthMeters = street.lengthMeters;
+  if (lengthMeters <= 0 && excludedLines.length === 0) lengthMeters = street.lengthMeters;
 
   const complete = isStreetComplete(lengthMeters, Math.min(coveredMeters, lengthMeters));
 
   if (complete) {
     return {
-      covered: runs.map((run) => run.points),
+      covered: runs.filter((run) => run.state !== "excluded").map((run) => run.points),
       missing: [],
+      excluded: excludedLines,
       coveredMeters: lengthMeters,
       missingMeters: 0,
       lengthMeters,
@@ -267,8 +331,9 @@ export function describeStreetCoverage(street: Street, index: FamiliarityIndex):
   }
 
   return {
-    covered: runs.filter((run) => run.covered).map((run) => run.points),
-    missing: runs.filter((run) => !run.covered).map((run) => run.points),
+    covered: runs.filter((run) => run.state === "covered").map((run) => run.points),
+    missing: runs.filter((run) => run.state === "missing").map((run) => run.points),
+    excluded: excludedLines,
     coveredMeters,
     missingMeters: Math.max(0, lengthMeters - coveredMeters),
     lengthMeters,

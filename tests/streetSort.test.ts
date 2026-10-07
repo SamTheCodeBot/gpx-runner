@@ -23,6 +23,7 @@ function street(name: string, ratio: number, lengthMeters: number, complete = fa
     ratio,
     remainingMeters: lengthMeters - coveredMeters,
     complete,
+    excludedMeters: 0,
   };
 }
 

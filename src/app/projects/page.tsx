@@ -10,6 +10,7 @@ import {
   computeProjectCoverage,
   describeStreetCoverage,
   sortStreetCoverage,
+  type SegmentExclusionsByStreet,
   type StreetCoverage,
   type StreetCoverageSplit,
   type StreetSort,
@@ -40,9 +41,11 @@ import {
   previewScope,
   addNearbyStreets,
   addStreetAt,
+  excludeStreetSegment,
   findNearbyStreets,
   identifyStreetAt,
   refreshProject,
+  restoreStreetSegment,
   setStreetExclusions,
   type NearbyResult,
   type PlannedStreetRoute,
@@ -406,6 +409,24 @@ export default function StreetProjectsPage() {
     return result;
   }, [projects]);
 
+  // Struck-off stretches, by project and then by the street they belong to —
+  // the same reasoning as above, one level finer. Read off the project summary
+  // for the same reason: the server's list of what he has ruled out is the
+  // only copy of that decision that is allowed to exist.
+  const excludedSegmentsByProject = useMemo(() => {
+    const result: Record<string, SegmentExclusionsByStreet> = {};
+    for (const project of projects) {
+      const byStreet: SegmentExclusionsByStreet = new Map();
+      for (const segment of project.excludedSegments) {
+        const existing = byStreet.get(segment.streetId);
+        if (existing) existing.push(...segment.pieces);
+        else byStreet.set(segment.streetId, [...segment.pieces]);
+      }
+      result[project.id] = byStreet;
+    }
+    return result;
+  }, [projects]);
+
   const coverageById = useMemo(() => {
     const result: Record<string, ReturnType<typeof computeProjectCoverage>> = {};
     for (const [id, streets] of Object.entries(streetsById)) {
@@ -413,11 +434,15 @@ export default function StreetProjectsPage() {
       // what he has actually taken on, which is what he asked for.
       const { active } = partitionStreets(streets, excludedIdsByProject[id] ?? []);
       if (active.length > 0) {
-        result[id] = computeProjectCoverage(active, familiarityIndexByProject[id] ?? emptyFamiliarityIndex);
+        result[id] = computeProjectCoverage(
+          active,
+          familiarityIndexByProject[id] ?? emptyFamiliarityIndex,
+          excludedSegmentsByProject[id],
+        );
       }
     }
     return result;
-  }, [streetsById, familiarityIndexByProject, emptyFamiliarityIndex, excludedIdsByProject]);
+  }, [streetsById, familiarityIndexByProject, emptyFamiliarityIndex, excludedIdsByProject, excludedSegmentsByProject]);
 
   const selectedProject = projects.find((project) => project.id === selectedId) ?? null;
   // Memoised because the map split below is the one genuinely expensive thing
@@ -469,9 +494,12 @@ export default function StreetProjectsPage() {
   const coverageDetailById = useMemo(() => {
     const result = new Map<string, StreetCoverageSplit>();
     const index = (selectedId ? familiarityIndexByProject[selectedId] : undefined) ?? emptyFamiliarityIndex;
-    for (const street of selectedStreets) result.set(street.id, describeStreetCoverage(street, index));
+    const excludedSegments = selectedId ? excludedSegmentsByProject[selectedId] : undefined;
+    for (const street of selectedStreets) {
+      result.set(street.id, describeStreetCoverage(street, index, excludedSegments?.get(street.id)));
+    }
     return result;
-  }, [selectedStreets, selectedId, familiarityIndexByProject, emptyFamiliarityIndex]);
+  }, [selectedStreets, selectedId, familiarityIndexByProject, emptyFamiliarityIndex, excludedSegmentsByProject]);
 
   const mapStreets = useMemo(
     () =>
@@ -526,6 +554,14 @@ export default function StreetProjectsPage() {
   const focusLines = useMemo(() => {
     const detail = focusStreetId ? coverageDetailById.get(focusStreetId) : undefined;
     return detail ? { covered: detail.covered, missing: detail.missing } : undefined;
+  }, [focusStreetId, coverageDetailById]);
+
+  // The focused street's own struck-off stretches, folded into the same muted
+  // line the "taken out" tab draws for a whole excluded street — one visual
+  // language for "this does not count", whatever scale it was cut at.
+  const focusExcludedLines = useMemo(() => {
+    const detail = focusStreetId ? coverageDetailById.get(focusStreetId) : undefined;
+    return detail && detail.excluded.length > 0 ? detail.excluded : undefined;
   }, [focusStreetId, coverageDetailById]);
 
   const focusedStreet = useMemo(
@@ -995,6 +1031,57 @@ export default function StreetProjectsPage() {
   };
 
   /**
+   * Strike just the unrun stretch of a street off, leaving the rest counted.
+   *
+   * The finer sibling of `handleToggleExclusion`: that one answers "this whole
+   * street is not runnable", this one answers "this street is runnable, but
+   * not *that* bit of it" — the grass verge OSM drew as pavement, the stub
+   * that dead-ends at a fence. The geometry sent up is exactly what the map is
+   * already drawing red for this street, not re-derived from anything else.
+   */
+  const handleExcludeMissing = useCallback(async () => {
+    if (!user || !selectedProject || !focusStreetId || !focusDetail) return;
+    if (focusDetail.missing.length === 0 || focusDetail.missingMeters <= 0) return;
+
+    setExcluding(true);
+    setErrorMessage(null);
+    try {
+      const updated = await excludeStreetSegment(user, selectedProject.id, {
+        streetId: focusStreetId,
+        pieces: focusDetail.missing,
+        meters: focusDetail.missingMeters,
+      });
+      setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
+      setStatusMessage(
+        `${Math.round(focusDetail.missingMeters)} m struck off. That stretch no longer counts against this street.`,
+      );
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not strike that stretch off.");
+    } finally {
+      setExcluding(false);
+    }
+  }, [user, selectedProject, focusStreetId, focusDetail]);
+
+  /** Put one struck-off stretch back — the way back the exclude button always needs beside it. */
+  const handleRestoreSegment = useCallback(
+    async (segmentId: string) => {
+      if (!user || !selectedProject) return;
+      setExcluding(true);
+      setErrorMessage(null);
+      try {
+        const updated = await restoreStreetSegment(user, selectedProject.id, segmentId);
+        setProjects((current) => current.map((project) => (project.id === updated.id ? updated : project)));
+        setStatusMessage("That stretch is back in the project.");
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not restore that stretch.");
+      } finally {
+        setExcluding(false);
+      }
+    },
+    [user, selectedProject],
+  );
+
+  /**
    * Strike a road off the project, or put it back.
    *
    * The tag rules cannot know that the 80 km/h road with no pavement is not
@@ -1240,11 +1327,18 @@ export default function StreetProjectsPage() {
                 // out would hide the only thing worth looking at. It stands out
                 // by being cased in white and coloured instead.
                 lines={creating ? undefined : mapLines}
-                excluded={creating ? undefined : excludedLines}
+
                 candidates={creating ? undefined : nearbyLines}
                 checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
                 focusLines={creating ? undefined : focusLines}
+                excluded={
+                  creating
+                    ? undefined
+                    : focusExcludedLines
+                      ? [...(excludedLines ?? []), ...focusExcludedLines]
+                      : excludedLines
+                }
                 route={creating ? undefined : routeGeometry}
                 pin={
                   creating
@@ -1326,6 +1420,17 @@ export default function StreetProjectsPage() {
                           of {Math.round(focusDetail.lengthMeters)} m
                         </span>
                       </span>
+                    )}
+
+                    {focusDetail && !focusDetail.complete && focusDetail.missingMeters > 0 && (
+                      <button
+                        onClick={handleExcludeMissing}
+                        disabled={excluding}
+                        title="Not a real street here — strike off just this stretch, keep the rest"
+                        className="text-[10px] font-extrabold text-error shrink-0 disabled:opacity-40"
+                      >
+                        Exclude missing part
+                      </button>
                     )}
 
                     <button
