@@ -4,7 +4,8 @@ import { buildStreetInventory, type StreetInventory } from "@/engine/streets/inv
 import { circleScope, scopeAreaKm2, type StreetScope } from "@/engine/streets/scope";
 import { verifyFirebaseIdToken } from "@/lib/firebaseAuthServer";
 import { OverpassError, fetchBoundaryCandidates, fetchBoundaryScope, fetchStreetWays } from "@/lib/overpass";
-import { decodeScope, type WireScope } from "@/engine/streets/serialize";
+import { decodeScope, encodeScope, encodeExcludedSegments, type WireScope } from "@/engine/streets/serialize";
+import type { StreetProjectSummary } from "@/engine/streets/project";
 
 /**
  * The bits every street-project endpoint needs: who is asking, what area they
@@ -99,6 +100,32 @@ export async function inventoryForScope(
 }
 
 export { fetchBoundaryCandidates };
+
+/**
+ * A stored project, over the wire.
+ *
+ * Every route that hands a project back to the browser has to re-encode the
+ * two fields that are kept compact on the way in but live decoded in memory
+ * on the server: the scope ring and the struck-off stretches. Spreading
+ * `result.project` straight into a response and only fixing up `scope` is
+ * the bug this project shipped with once — the browser's `decodeExcludedSegments`
+ * expects Firestore's flat wire shape, and a plain, already-decoded
+ * `ExcludedSegment[]` silently empties under it instead of throwing. One
+ * place to get this right, rather than every route remembering it alone.
+ */
+export function toWireProject<T extends StreetProjectSummary & { ownerUid?: string }>(
+  project: T,
+): Omit<T, "scope" | "excludedSegments" | "ownerUid"> & {
+  scope: ReturnType<typeof encodeScope>;
+  excludedSegments: ReturnType<typeof encodeExcludedSegments>;
+} {
+  return {
+    ...project,
+    scope: encodeScope(project.scope),
+    excludedSegments: encodeExcludedSegments(project.excludedSegments),
+    ownerUid: undefined,
+  };
+}
 
 /** Overpass being busy is a fact about the world, not a bug in the app. */
 export function overpassErrorResponse(error: unknown): NextResponse {

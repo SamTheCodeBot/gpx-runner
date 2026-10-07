@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { encodeScope } from "@/engine/streets/serialize";
 import { addExcludedSegment, removeExcludedSegment } from "@/lib/streetProjects";
-import { requireUid } from "../../shared";
+import { requireUid, toWireProject } from "../../shared";
 import type { LatLng } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!result) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json({
-    project: { ...result.project, scope: encodeScope(result.project.scope), ownerUid: undefined },
+    project: toWireProject(result.project),
     segment: result.segment,
   });
 }
@@ -68,5 +67,5 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const project = await removeExcludedSegment(uid, params.id, segmentId);
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ project: { ...project, scope: encodeScope(project.scope), ownerUid: undefined } });
+  return NextResponse.json({ project: toWireProject(project) });
 }

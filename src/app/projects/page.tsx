@@ -556,13 +556,11 @@ export default function StreetProjectsPage() {
     return detail ? { covered: detail.covered, missing: detail.missing } : undefined;
   }, [focusStreetId, coverageDetailById]);
 
-  // The focused street's own struck-off stretches, folded into the same muted
-  // line the "taken out" tab draws for a whole excluded street — one visual
-  // language for "this does not count", whatever scale it was cut at.
-  const focusExcludedLines = useMemo(() => {
-    const detail = focusStreetId ? coverageDetailById.get(focusStreetId) : undefined;
-    return detail && detail.excluded.length > 0 ? detail.excluded : undefined;
-  }, [focusStreetId, coverageDetailById]);
+  // A struck-off stretch is drawn as nothing at all, deliberately: he asked
+  // for "not a street", and a muted grey line is still a line saying
+  // something lives there. The map underneath still shows whatever is
+  // actually on the ground — which, for a stretch he just ruled out, is
+  // usually nothing.
 
   const focusedStreet = useMemo(
     () => selectedCoverage?.streets.find((street) => street.streetId === focusStreetId) ?? null,
@@ -1332,13 +1330,7 @@ export default function StreetProjectsPage() {
                 checked={creating ? undefined : checkedLines}
                 focus={creating ? undefined : focusGeometry}
                 focusLines={creating ? undefined : focusLines}
-                excluded={
-                  creating
-                    ? undefined
-                    : focusExcludedLines
-                      ? [...(excludedLines ?? []), ...focusExcludedLines]
-                      : excludedLines
-                }
+                excluded={creating ? undefined : excludedLines}
                 route={creating ? undefined : routeGeometry}
                 pin={
                   creating
