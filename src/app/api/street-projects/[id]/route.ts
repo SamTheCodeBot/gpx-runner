@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { encodeScope, encodeStreets } from "@/engine/streets/serialize";
+import { encodeStreets } from "@/engine/streets/serialize";
 import { loadPendingAdditions, loadProject, updateProject } from "@/lib/streetProjects";
-import { requireUid } from "../shared";
+import { requireUid, toWireProject } from "../shared";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const pending = await loadPendingAdditions(uid, params.id);
 
   return NextResponse.json({
-    project: { ...loaded.project, scope: encodeScope(loaded.project.scope), ownerUid: undefined },
+    project: toWireProject(loaded.project),
     streets: encodeStreets(loaded.streets),
     pending: {
       foundAt: pending.foundAt,
@@ -45,5 +45,5 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   });
 
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ project: { ...project, scope: encodeScope(project.scope), ownerUid: undefined } });
+  return NextResponse.json({ project: toWireProject(project) });
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { encodeScope, encodeStreets } from "@/engine/streets/serialize";
+import { encodeStreets } from "@/engine/streets/serialize";
 import { adoptPendingAdditions } from "@/lib/streetProjects";
-import { requireUid } from "../../shared";
+import { requireUid, toWireProject } from "../../shared";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!result) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json({
-    project: { ...result.project, scope: encodeScope(result.project.scope), ownerUid: undefined },
+    project: toWireProject(result.project),
     adopted: encodeStreets(result.adopted),
   });
 }

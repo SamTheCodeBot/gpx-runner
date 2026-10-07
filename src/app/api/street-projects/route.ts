@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { encodeScope, encodeStreets } from "@/engine/streets/serialize";
+import { encodeStreets } from "@/engine/streets/serialize";
 import { createProject, listProjects } from "@/lib/streetProjects";
 import {
   inventoryForScope,
@@ -9,6 +9,7 @@ import {
   requestDeadline,
   requireUid,
   resolveScope,
+  toWireProject,
 } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const projects = await listProjects(uid);
   return NextResponse.json({
-    projects: projects.map((project) => ({ ...project, scope: encodeScope(project.scope), ownerUid: undefined })),
+    projects: projects.map(toWireProject),
   });
 }
 
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
     // A project that opened at 0% would be telling him his 1,458 km never
     // happened.
     return NextResponse.json({
-      project: { ...project, scope: encodeScope(project.scope), ownerUid: undefined },
+      project: toWireProject(project),
       streets: encodeStreets(inventory.streets),
     });
   } catch (error) {

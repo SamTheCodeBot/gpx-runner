@@ -220,6 +220,13 @@ export function computeStreetCoverage(
   const lengthMeters = length > 0 ? length : Math.max(0, street.lengthMeters - excluded);
   const coveredMeters = Math.min(covered, lengthMeters);
 
+  // Nothing left uncounted is done, not stuck. isStreetComplete(0, 0) reads
+  // false because a street with no measurable length at all is usually a
+  // broken snapshot — but a street with no length left *because every metre
+  // of it was struck off* is the opposite of broken: it is the one case where
+  // the owner has already said the whole thing is settled.
+  const complete = lengthMeters <= 0 && excluded > 0 ? true : isStreetComplete(lengthMeters, coveredMeters);
+
   return {
     streetId: street.id,
     name: street.name,
@@ -228,7 +235,7 @@ export function computeStreetCoverage(
     coveredMeters,
     ratio: lengthMeters > 0 ? coveredMeters / lengthMeters : 0,
     remainingMeters: Math.max(0, lengthMeters - coveredMeters),
-    complete: isStreetComplete(lengthMeters, coveredMeters),
+    complete,
     excludedMeters: excluded,
   };
 }
@@ -316,7 +323,12 @@ export function describeStreetCoverage(
   }
   if (lengthMeters <= 0 && excludedLines.length === 0) lengthMeters = street.lengthMeters;
 
-  const complete = isStreetComplete(lengthMeters, Math.min(coveredMeters, lengthMeters));
+  // Same rule as computeStreetCoverage: nothing left uncounted because it was
+  // all struck off reads as done, not as a street stuck below 100% forever.
+  const complete =
+    lengthMeters <= 0 && excludedLines.length > 0
+      ? true
+      : isStreetComplete(lengthMeters, Math.min(coveredMeters, lengthMeters));
 
   if (complete) {
     return {
