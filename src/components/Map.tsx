@@ -46,14 +46,71 @@ interface MapProps {
   suggestedRoute?: RouteSuggestion | null;
   selectedStartPoint?: [number, number] | null;
   onMapClick?: (lat: number, lon: number) => void;
+  /**
+   * Fires instead of onMapClick when the click landed on (or near) one or
+   * more route polylines. Carries every route that passed close enough to
+   * the click, nearest first -- not just the one polyline Leaflet's own
+   * canvas hit-testing happened to pick, which with many stacked, retraced
+   * routes is only ever the topmost one.
+   */
+  onRouteClick?: (routes: GPXRoute[]) => void;
   isSelectingStartPoint?: boolean;
   darkMode?: boolean;
   familiaritySegments?: RouteFamiliaritySegment[];
 }
 
-function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lon: number) => void }) {
-  useMapEvents({
+/** Shortest distance, in screen pixels, from a point to a line segment. */
+function pointToSegmentPx(p: L.Point, a: L.Point, b: L.Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Mouse clicks and the stubbier fingertip both need to land within this. */
+const ROUTE_CLICK_TOLERANCE_PX = 12;
+
+function MapEvents({
+  onMapClick,
+  onRouteClick,
+  routeCandidates,
+  isSelectingStartPoint,
+}: {
+  onMapClick?: (lat: number, lon: number) => void;
+  onRouteClick?: (routes: GPXRoute[]) => void;
+  routeCandidates: GPXRoute[];
+  isSelectingStartPoint?: boolean;
+}) {
+  const map = useMapEvents({
     click: (e) => {
+      if (!isSelectingStartPoint && onRouteClick && routeCandidates.length > 0) {
+        const clickPt = map.latLngToContainerPoint(e.latlng);
+        const matches: Array<{ route: GPXRoute; dist: number }> = [];
+
+        for (const route of routeCandidates) {
+          const coords = route.coordinates;
+          if (!coords || coords.length < 2) continue;
+          let minDist = Infinity;
+          for (let i = 1; i < coords.length; i += 1) {
+            const a = map.latLngToContainerPoint([coords[i - 1][1], coords[i - 1][0]]);
+            const b = map.latLngToContainerPoint([coords[i][1], coords[i][0]]);
+            const dist = pointToSegmentPx(clickPt, a, b);
+            if (dist < minDist) minDist = dist;
+            if (minDist <= ROUTE_CLICK_TOLERANCE_PX) break;
+          }
+          if (minDist <= ROUTE_CLICK_TOLERANCE_PX) matches.push({ route, dist: minDist });
+        }
+
+        if (matches.length > 0) {
+          matches.sort((x, y) => x.dist - y.dist);
+          onRouteClick(matches.map((m) => m.route));
+          return;
+        }
+      }
+
       if (onMapClick) {
         onMapClick(e.latlng.lat, e.latlng.lng);
       }
@@ -529,6 +586,7 @@ export default function Map({
   suggestedRoute,
   selectedStartPoint,
   onMapClick,
+  onRouteClick,
   isSelectingStartPoint,
   darkMode = true,
   familiaritySegments = [],
@@ -626,7 +684,12 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapResizeHandler />
-      <MapEvents onMapClick={onMapClick} />
+      <MapEvents
+        onMapClick={onMapClick}
+        onRouteClick={onRouteClick}
+        routeCandidates={selectedRoute ? [selectedRoute] : routes}
+        isSelectingStartPoint={isSelectingStartPoint}
+      />
       <RouteClusterMarkers routes={routes} enabled={!selectedRoute && !suggestedRoute && routes.length > 0} />
       <PersonalHeatmapCanvas
         routes={routes}

@@ -58,13 +58,28 @@ export default function Home() {
   const [username, setUsername]             = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [routesPanelCollapsed, setRoutesPanelCollapsed] = useState(false);
+  /**
+   * Set by clicking a route's line on the map. Narrows the list to just the
+   * route(s) whose line passed under the click -- the map is the only way to
+   * find an old route you can picture the shape of but can't place in a list
+   * sorted and paged by date. More than one id means several routes overlap
+   * at that exact spot (the same loop run many times); exactly one means the
+   * click already identified it, so it's selected immediately, same as
+   * clicking it in the list would.
+   */
+  const [mapRouteMatchIds, setMapRouteMatchIds] = useState<string[] | null>(null);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
   const listFilteredRoutes = useMemo(() => {
-    if (filter.list === "favorites") return unifiedRoutes.filter((route) => favorites.includes(route.id));
-    return unifiedRoutes;
-  }, [unifiedRoutes, filter.list, favorites]);
+    let out = unifiedRoutes;
+    if (filter.list === "favorites") out = out.filter((route) => favorites.includes(route.id));
+    if (mapRouteMatchIds) {
+      const matchSet = new Set(mapRouteMatchIds);
+      out = out.filter((route) => matchSet.has(route.id));
+    }
+    return out;
+  }, [unifiedRoutes, filter.list, favorites, mapRouteMatchIds]);
   const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
@@ -233,6 +248,37 @@ export default function Home() {
     // No-op — kept for compatibility with MapSection interface
   };
 
+  /**
+   * Clicking a route's line on the map. One match behaves exactly like
+   * clicking that route in the list -- select it, fetch its full geometry.
+   * More than one match (several routes overlapping at that exact spot, e.g.
+   * the same loop run on different days) narrows the list to just those
+   * candidates instead of guessing, so an old route buried past page 1 of a
+   * long history is never more than a map click plus one more click away.
+   */
+  const handleMapRouteClick = (matches: GPXRoute[]) => {
+    if (matches.length === 0) return;
+    if (matches.length === 1) {
+      setMapRouteMatchIds(null);
+      selectRouteWithFullGeometry(matches[0]);
+    } else {
+      setSelectedRoute(null);
+      setMapRouteMatchIds(matches.map((route) => route.id));
+    }
+  };
+
+  const clearMapRouteMatch = () => setMapRouteMatchIds(null);
+
+  const handleSearchChange = (q: string) => {
+    if (mapRouteMatchIds) setMapRouteMatchIds(null);
+    setSearchQuery(q);
+  };
+
+  const handleFilterChange = (f: typeof filter) => {
+    if (mapRouteMatchIds) setMapRouteMatchIds(null);
+    setFilter(f);
+  };
+
   const getYearOptions = () =>
     Array.from(new Set(unifiedRoutes.map((r) => r.date.substring(0, 4)).filter(Boolean))).sort().reverse();
 
@@ -311,14 +357,31 @@ export default function Home() {
 
             <StatsBar stats={stats} />
 
+            {mapRouteMatchIds && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary-container/60 border border-primary-container rounded-xl text-xs">
+                <span className="font-medium text-on-primary-container">
+                  <Icon name="my_location" className="text-xs align-middle mr-1" />
+                  {mapRouteMatchIds.length === 1
+                    ? "Showing the route you clicked on the map"
+                    : "Showing " + mapRouteMatchIds.length + " routes that pass through where you clicked"}
+                </span>
+                <button
+                  onClick={clearMapRouteMatch}
+                  className="font-bold text-primary hover:underline shrink-0"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
             <RouteList
               filteredRoutes={filteredRoutes}
               selectedRoute={selectedRoute}
               searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              onSearchChange={handleSearchChange}
               showFilters={showFilters}
               filter={filter}
-              setFilter={setFilter}
+              setFilter={handleFilterChange}
               setShowFilters={setShowFilters}
               getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
@@ -389,6 +452,7 @@ export default function Home() {
                 selectedStartPoint={null}
                 isSelectingStartPoint={false}
                 onMapClick={handleMapClick}
+                onRouteClick={handleMapRouteClick}
                 showPersonalHeatmapControl={false}
               />
             </div>
