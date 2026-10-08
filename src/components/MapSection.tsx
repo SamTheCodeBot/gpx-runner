@@ -34,6 +34,8 @@ interface MapSectionProps {
   selectedStartPoint: [number, number] | null;
   isSelectingStartPoint: boolean;
   onMapClick: (lat: number, lon: number) => void;
+  /** See Map's onRouteClick: fires with every route near the click, nearest first. */
+  onRouteClick?: (routes: GPXRoute[]) => void;
   showMapControls?: boolean;
   /** The owner asked for this gone on the Home/"My Routes" map (2026-10-03); other pages keep it. */
   showHeatmapToggle?: boolean;
@@ -187,7 +189,7 @@ export function MapSection({
   heatmapGrid = null,
   heatmapStops = [],
   heatmapPaceRange = null,
-  onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick,
+  onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick, onRouteClick,
   showMapControls = true,
   showHeatmapToggle = true,
   showPersonalHeatmapControl = true,
@@ -213,6 +215,7 @@ export function MapSection({
         selectedStartPoint={selectedStartPoint}
         isSelectingStartPoint={isSelectingStartPoint}
         onMapClick={onMapClick}
+        onRouteClick={onRouteClick}
         darkMode={false}
         familiaritySegments={familiaritySegments}
       />
