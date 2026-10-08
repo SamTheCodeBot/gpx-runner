@@ -72,15 +72,25 @@ export default function Home() {
   // ── Derived ────────────────────────────────────────────────────────────────
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
   const listFilteredRoutes = useMemo(() => {
-    let out = unifiedRoutes;
-    if (filter.list === "favorites") out = out.filter((route) => favorites.includes(route.id));
-    if (mapRouteMatchIds) {
-      const matchSet = new Set(mapRouteMatchIds);
-      out = out.filter((route) => matchSet.has(route.id));
-    }
-    return out;
-  }, [unifiedRoutes, filter.list, favorites, mapRouteMatchIds]);
+    if (filter.list === "favorites") return unifiedRoutes.filter((route) => favorites.includes(route.id));
+    return unifiedRoutes;
+  }, [unifiedRoutes, filter.list, favorites]);
+  // `filteredRoutes` also drives what the map draws and fits to, so a map
+  // click narrowing the ROUTE LIST must never narrow this -- otherwise
+  // clearing that narrowing changes the map's own route set, which moves
+  // the camera back out to fit everything (reported 2026-10-08: "zooms back
+  // to Falkenberg"). The map-click narrowing is display-list-only; see
+  // `routeListDisplay` below.
   const filteredRoutes = useRouteFilter(listFilteredRoutes, filter, searchQuery);
+  // What the route LIST actually renders: filteredRoutes, further narrowed
+  // to the candidates a map click matched, if any. The map itself never
+  // sees this narrower set -- only the list does -- so clearing it back to
+  // null is purely a list-side change and never moves the camera.
+  const routeListDisplay = useMemo(() => {
+    if (!mapRouteMatchIds) return filteredRoutes;
+    const matchSet = new Set(mapRouteMatchIds);
+    return filteredRoutes.filter((route) => matchSet.has(route.id));
+  }, [filteredRoutes, mapRouteMatchIds]);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   // ── intervals.icu auto-import ──────────────────────────────────────────────
@@ -375,7 +385,7 @@ export default function Home() {
             )}
 
             <RouteList
-              filteredRoutes={filteredRoutes}
+              filteredRoutes={routeListDisplay}
               selectedRoute={selectedRoute}
               searchQuery={searchQuery}
               onSearchChange={handleSearchChange}
