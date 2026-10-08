@@ -12,6 +12,24 @@ import { Sidebar, MobileDrawer } from "@/components/Sidebar";
 import { RouteList } from "@/components/RouteList";
 import { MapSection } from "@/components/MapSection";
 import type { GPXRoute } from "./types";
+import type { MapViewBounds } from "@/components/Map";
+
+/**
+ * Whether any point of a route falls inside the map's current viewport.
+ * Coordinates are [lon, lat]; bounds come straight off Leaflet's own
+ * getBounds(). Handles the antimeridian (west > east) the cheap way --
+ * good enough for "is this on screen", not a general geometry library.
+ */
+function routeIntersectsBounds(route: GPXRoute, bounds: MapViewBounds): boolean {
+  const { south, west, north, east } = bounds;
+  const crossesAntimeridian = west > east;
+  for (const [lon, lat] of route.coordinates) {
+    if (lat < south || lat > north) continue;
+    const lonInRange = crossesAntimeridian ? (lon >= west || lon <= east) : (lon >= west && lon <= east);
+    if (lonInRange) return true;
+  }
+  return false;
+}
 
 export default function Home() {
   const { user, loading: authLoading } = useAuth();
@@ -68,6 +86,14 @@ export default function Home() {
    * clicking it in the list would.
    */
   const [mapRouteMatchIds, setMapRouteMatchIds] = useState<string[] | null>(null);
+  /**
+   * The map's current viewport, kept live by Map's onBoundsChange. Lets the
+   * list follow the map instead of the other way around: pan to Barcelona,
+   * flip "In view" on, and the list narrows to whatever is actually on
+   * screen -- without ever asking the map to move to match the list.
+   */
+  const [mapBounds, setMapBounds] = useState<MapViewBounds | null>(null);
+  const [filterByMapView, setFilterByMapView] = useState(false);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const { favorites, toggleFavorite } = useFavorites(user?.uid ?? null);
@@ -87,10 +113,16 @@ export default function Home() {
   // sees this narrower set -- only the list does -- so clearing it back to
   // null is purely a list-side change and never moves the camera.
   const routeListDisplay = useMemo(() => {
-    if (!mapRouteMatchIds) return filteredRoutes;
-    const matchSet = new Set(mapRouteMatchIds);
-    return filteredRoutes.filter((route) => matchSet.has(route.id));
-  }, [filteredRoutes, mapRouteMatchIds]);
+    let out = filteredRoutes;
+    if (mapRouteMatchIds) {
+      const matchSet = new Set(mapRouteMatchIds);
+      out = out.filter((route) => matchSet.has(route.id));
+    }
+    if (filterByMapView && mapBounds) {
+      out = out.filter((route) => routeIntersectsBounds(route, mapBounds));
+    }
+    return out;
+  }, [filteredRoutes, mapRouteMatchIds, filterByMapView, mapBounds]);
   const { profile, saveProfile, loading } = useUserProfile(user?.uid ?? null);
 
   // ── intervals.icu auto-import ──────────────────────────────────────────────
@@ -121,16 +153,16 @@ export default function Home() {
   }, [user, loading, profile?.intervalsIcu?.autoImport, intervalsConnectState?.connection]);
 
   const stats = useMemo(() => {
-    if (!filteredRoutes.length) return null;
-    const totalDistance = filteredRoutes.reduce((s, r) => s + (r.distance || 0), 0) / 1000;
-    const totalElevation = filteredRoutes.reduce((s, r) => s + (r.elevationGain || 0), 0);
+    if (!routeListDisplay.length) return null;
+    const totalDistance = routeListDisplay.reduce((s, r) => s + (r.distance || 0), 0) / 1000;
+    const totalElevation = routeListDisplay.reduce((s, r) => s + (r.elevationGain || 0), 0);
     return {
-      totalRuns: filteredRoutes.length,
+      totalRuns: routeListDisplay.length,
       totalDistance: Math.round(totalDistance * 10) / 10,
       totalElevation: Math.round(totalElevation),
       totalTime: 0,
     };
-  }, [filteredRoutes]);
+  }, [routeListDisplay]);
 
   const countryOptions = useMemo(() => (
     Array.from(new Set(unifiedRoutes.flatMap((route) => routeCountryNames(route)))).sort((a, b) => a.localeCompare(b))
@@ -393,6 +425,8 @@ export default function Home() {
               filter={filter}
               setFilter={handleFilterChange}
               setShowFilters={setShowFilters}
+              filterByMapView={filterByMapView}
+              onToggleFilterByMapView={() => setFilterByMapView((v) => !v)}
               getYearOptions={getYearOptions}
               getMonthOptions={getMonthOptions}
               countryOptions={countryOptions}
@@ -463,6 +497,7 @@ export default function Home() {
                 isSelectingStartPoint={false}
                 onMapClick={handleMapClick}
                 onRouteClick={handleMapRouteClick}
+                onBoundsChange={setMapBounds}
                 showPersonalHeatmapControl={false}
               />
             </div>

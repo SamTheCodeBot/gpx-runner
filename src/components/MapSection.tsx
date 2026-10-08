@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { Icon } from "./ui";
 import type { GPXRoute } from "@/app/types";
-import type { PersonalHeatmapMode } from "@/components/Map";
+import type { MapViewBounds, PersonalHeatmapMode } from "@/components/Map";
 import { frequencyStops, RECENCY_BANDS, type VisitGrid } from "@/engine/heatmap";
 import type { RouteFamiliaritySegment } from "@/lib/routeFamiliarity";
 
@@ -36,6 +36,8 @@ interface MapSectionProps {
   onMapClick: (lat: number, lon: number) => void;
   /** See Map's onRouteClick: fires with every route near the click, nearest first. */
   onRouteClick?: (routes: GPXRoute[]) => void;
+  /** See Map's onBoundsChange: the current viewport, for a "routes in view" list filter. */
+  onBoundsChange?: (bounds: MapViewBounds) => void;
   showMapControls?: boolean;
   /** The owner asked for this gone on the Home/"My Routes" map (2026-10-03); other pages keep it. */
   showHeatmapToggle?: boolean;
@@ -189,7 +191,7 @@ export function MapSection({
   heatmapGrid = null,
   heatmapStops = [],
   heatmapPaceRange = null,
-  onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick, onRouteClick,
+  onToggleHeatmap, onTogglePersonalHeatmap, isLoading, selectedStartPoint, isSelectingStartPoint, onMapClick, onRouteClick, onBoundsChange,
   showMapControls = true,
   showHeatmapToggle = true,
   showPersonalHeatmapControl = true,
@@ -216,6 +218,7 @@ export function MapSection({
         isSelectingStartPoint={isSelectingStartPoint}
         onMapClick={onMapClick}
         onRouteClick={onRouteClick}
+        onBoundsChange={onBoundsChange}
         darkMode={false}
         familiaritySegments={familiaritySegments}
       />

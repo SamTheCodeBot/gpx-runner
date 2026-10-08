@@ -27,6 +27,9 @@ interface RouteListProps {
   filter: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" };
   setFilter: (f: { year?: string; month?: string; type?: string; country?: string; list?: "all" | "favorites" }) => void;
   setShowFilters: (v: boolean) => void;
+  /** Narrows the list to routes with a point inside the map's current viewport. */
+  filterByMapView: boolean;
+  onToggleFilterByMapView: () => void;
   getYearOptions: () => string[];
   getMonthOptions: () => string[];
   countryOptions: string[];
@@ -44,6 +47,7 @@ interface RouteListProps {
 export function RouteList({
   filteredRoutes, selectedRoute, searchQuery, onSearchChange,
   showFilters, filter, setFilter, setShowFilters, getYearOptions, getMonthOptions,
+  filterByMapView, onToggleFilterByMapView,
   countryOptions,
   onSelectRoute, onDeleteRoute, onDownloadRoute, onEditRoute,
   fileInputRef, onFileUpload, onRouteUpload, favorites, onToggleFavorite,
@@ -122,6 +126,19 @@ export function RouteList({
             )}
           </div>
         ) : null}
+        {/* Routes in view: narrows the list to whatever the map is currently showing. */}
+        <button
+          onClick={onToggleFilterByMapView}
+          title="Only show routes with a point inside the current map view"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+            filterByMapView
+              ? "bg-primary-container border-primary-container text-on-primary-container"
+              : "bg-surface-container border-outline-variant text-on-surface-variant hover:border-outline"
+          }`}
+        >
+          <Icon name="my_location" className="text-xs" />
+          {filterByMapView ? "In view" : "All areas"}
+        </button>
         {(filter.year || filter.month || filter.type || filter.country || filter.list) && (
           <button
             onClick={() => setFilter({})}

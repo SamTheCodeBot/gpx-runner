@@ -32,6 +32,9 @@ import { simplifyToBudget } from "@/lib/track/simplify";
  */
 export type PersonalHeatmapMode = "frequency" | "recency" | "pace";
 
+/** The map's current viewport, as plain numbers -- Home turns this into a route list filter. */
+export type MapViewBounds = { south: number; west: number; north: number; east: number };
+
 interface MapProps {
   routes: GPXRoute[];
   selectedRoute: GPXRoute | null;
@@ -54,6 +57,8 @@ interface MapProps {
    * routes is only ever the topmost one.
    */
   onRouteClick?: (routes: GPXRoute[]) => void;
+  /** Fires on mount and after every pan/zoom, so Home can filter the route list to what is on screen. */
+  onBoundsChange?: (bounds: MapViewBounds) => void;
   isSelectingStartPoint?: boolean;
   darkMode?: boolean;
   familiaritySegments?: RouteFamiliaritySegment[];
@@ -127,6 +132,15 @@ function MapController({ routes, selectedRoute, suggestedRoute, fitAllRoutes = f
 }) {
   const map = useMap();
   const lastFitKeyRef = useRef<string | null>(null);
+  // The "show everything" fit is a one-time, first-paint convenience, not
+  // a standing reaction to every change in the filtered route set. Without
+  // this guard, clearing a search, a filter, or the map-click route match
+  // (2026-10-08: "I should stay where I am ... not zoom back to Falkenberg")
+  // all change which routes are in `routes`, which re-ran this branch and
+  // yanked the camera back out to fit the whole history every time. Once
+  // the user has a view, only an explicit selection -- a specific route or
+  // a suggested one, both handled by the branches above -- may move it.
+  const hasFitAllOnceRef = useRef(false);
 
   useEffect(() => {
     let targetCoords: [number, number][] = [];
@@ -139,9 +153,11 @@ function MapController({ routes, selectedRoute, suggestedRoute, fitAllRoutes = f
       targetCoords = selectedRoute.coordinates;
       fitKey = `selected:${selectedRoute.id}`;
     } else if (routes.length > 0) {
+      if (hasFitAllOnceRef.current) return;
       targetCoords = routes.flatMap((r) => r.coordinates);
       if (targetCoords.length === 0) return;
-      fitKey = `all:${fitAllRoutes ? "full" : "cluster"}:${routes.map((route) => route.id).sort().join("|")}`;
+      fitKey = `all:${fitAllRoutes ? "full" : "cluster"}:initial`;
+      hasFitAllOnceRef.current = true;
     } else {
       return;
     }
@@ -190,6 +206,27 @@ function MapController({ routes, selectedRoute, suggestedRoute, fitAllRoutes = f
     }
     lastFitKeyRef.current = fitKey;
   }, [map, routes, selectedRoute, suggestedRoute, fitAllRoutes]);
+
+  return null;
+}
+
+/** Reports the viewport, on mount and after every pan/zoom -- not during a drag, only once it settles. */
+function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (bounds: MapViewBounds) => void }) {
+  const map = useMapEvents({
+    moveend: () => report(),
+    zoomend: () => report(),
+  });
+
+  const report = () => {
+    if (!onBoundsChange) return;
+    const b = map.getBounds();
+    onBoundsChange({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() });
+  };
+
+  useEffect(() => {
+    report();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
 
   return null;
 }
@@ -587,6 +624,7 @@ export default function Map({
   selectedStartPoint,
   onMapClick,
   onRouteClick,
+  onBoundsChange,
   isSelectingStartPoint,
   darkMode = true,
   familiaritySegments = [],
@@ -684,6 +722,7 @@ export default function Map({
 
       <MapController routes={routes} selectedRoute={selectedRoute} suggestedRoute={suggestedRoute ?? null} fitAllRoutes={fitAllRoutes} />
       <MapResizeHandler />
+      <MapBoundsReporter onBoundsChange={onBoundsChange} />
       <MapEvents
         onMapClick={onMapClick}
         onRouteClick={onRouteClick}
