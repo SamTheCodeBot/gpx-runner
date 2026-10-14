@@ -32,9 +32,23 @@ import type { LatLng } from "@/types";
 
 const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter",
+  "https://z.overpass-api.de/api/interpreter",
 ];
+
+/**
+ * Swapped 2026-10-14: overpass.kumi.systems and overpass.private.coffee both
+ * now resolve to the same host (flanders.servers.private.coffee), and that
+ * host stopped answering — confirmed by direct request (0 bytes, full
+ * timeout) from two independent network paths, repeatable, not a one-off.
+ * With both of them still in rotation, roughly two attempts in three burned
+ * the whole per-attempt timeout on a dead socket before ever reaching
+ * overpass-api.de, which had free capacity (4/4 slots) the entire time.
+ * Replaced with overpass.osm.ch (confirmed live, ~1s) and z.overpass-api.de
+ * (a distinct instance in the same cluster as the first entry — busy at the
+ * moment of writing, 504, but a busy answer is handled by the backoff below;
+ * it is the silent kind of failure that cooldown exists for).
+ */
 
 /** A street list is worth a week; towns do not change by the hour. */
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
