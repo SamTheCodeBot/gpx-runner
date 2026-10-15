@@ -113,6 +113,39 @@ const FOCUS_MAX_ZOOM = 17;
  * dropping the selection returns to the overview — so the two lists feel like
  * the same gesture rather than two features that happen to both use Leaflet.
  */
+/**
+ * Leaflet sizes its canvas once, on mount, from whatever its container
+ * measured at that instant -- it has no way to know the container later
+ * grew or shrank from a CSS class toggle (the expand/collapse button on
+ * the Street project page, 2026-10-15) rather than an actual window
+ * resize, which is the only event Leaflet listens for by default. Left
+ * alone, the DOM div genuinely does fill the new space -- but the map
+ * tiles inside it stay the old size, leaving exactly the grey gap Magnus
+ * reported from a real screenshot: streets gone from below, nothing grew
+ * to replace them.
+ *
+ * A ResizeObserver on the map's own container, calling invalidateSize()
+ * on every change, fixes this generally -- not just for this one toggle,
+ * but for a sidebar collapsing, a phone rotating, or anything else that
+ * changes the container's size without the window itself resizing.
+ */
+function ResizeOnContainerChange() {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    const observer = new ResizeObserver(() => {
+      // Leaflet reads the container's CURRENT size when this runs, so no
+      // need to pass the observed size through -- just prompt a re-read.
+      map.invalidateSize();
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
+
+  return null;
+}
+
 function FitToTarget({
   ring,
   focus,
@@ -193,6 +226,7 @@ export default function StreetProjectMap({
       <BaseMapLayer darkMode={darkMode} />
       <ClickCatcher onMapClick={onMapClick} />
       <FitToTarget ring={ring} focus={focus} route={route} fitKey={fitKey} />
+      <ResizeOnContainerChange />
 
       {ring.length >= 3 && (
         <Polygon
