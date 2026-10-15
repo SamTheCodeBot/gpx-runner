@@ -339,6 +339,12 @@ export default function StreetProjectsPage() {
   const [mapMode, setMapMode] = useState<MapMode>("all");
   const [detailTab, setDetailTab] = useState<DetailTab>("streets");
   const [showDone, setShowDone] = useState(false);
+  // Takes over everything below the title row -- the view switch and the
+  // street-list/add/excluded tabs go away while this is true, the sidebar
+  // does not (that stays reachable regardless of what the map is doing).
+  // Magnus, 2026-10-15: wants to see the map bigger sometimes, and back to
+  // normal just as easily -- a toggle, not a separate route or a resize.
+  const [mapExpanded, setMapExpanded] = useState(false);
   // Struck-off roads stay on the map by default, muted: he has to be able to
   // see what he took out, and put it back from the same place he removed it.
   const [showExcluded, setShowExcluded] = useState(true);
@@ -1316,7 +1322,7 @@ export default function StreetProjectsPage() {
               creating ? "border-t lg:border-t-0 lg:border-l border-outline-variant/30" : ""
             }`}
           >
-            <div className="h-[45vh] lg:h-[55%] shrink-0 relative">
+            <div className={`relative ${mapExpanded ? "flex-1" : "h-[45vh] lg:h-[55%] shrink-0"}`}>
               <StreetProjectMap
                 ring={creating ? createRing : selectedProject ? selectedProject.scope.ring : []}
                 // The surrounding streets stay drawn while one is picked. The
@@ -1357,6 +1363,21 @@ export default function StreetProjectsPage() {
                         : selectedProject?.id
                 }
               />
+
+              {/* Top-right, clear of Leaflet's own zoom buttons (top-left)
+                  and of the picking-start banner (centered). One button,
+                  swaps icon and title -- expand to take the rest of the
+                  column, collapse back to the normal split with the tabs
+                  below. Available whenever there is a map to look at,
+                  create mode included -- picking a start pin benefits from
+                  room just as much as reading street names does. */}
+              <button
+                onClick={() => setMapExpanded((current) => !current)}
+                title={mapExpanded ? "Shrink the map back to normal size" : "Expand the map to fill the column"}
+                className="absolute top-3 right-3 z-[500] w-9 h-9 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg flex items-center justify-center hover:bg-surface-container-low transition-colors"
+              >
+                <Icon name={mapExpanded ? "collapse_content" : "expand_content"} className="text-lg text-on-surface" />
+              </button>
 
               {!creating && pickingStart && (
                 <div className="absolute inset-0 z-[500] flex items-start justify-center pt-4 pointer-events-none">
@@ -1438,8 +1459,13 @@ export default function StreetProjectsPage() {
 
             {/* The view switch sits under the map, not on it. Floated top-left
                 it landed on Leaflet's own zoom buttons, and two controls in one
-                corner means every tap is a guess. */}
-            {!creating && selectedProject && (
+                corner means every tap is a guess.
+
+                Hidden while the map is expanded -- there is no "under the
+                map" left to put it in, and showing it floating over an
+                expanded map would put it right back where this comment
+                says it does not belong. */}
+            {!creating && selectedProject && !mapExpanded && (
               <div className="shrink-0 flex justify-center border-b border-outline-variant/30 px-4 py-2">
                 <div className="inline-flex rounded-full bg-surface-container-low p-0.5">
                   {MAP_MODES.map((option) => (
@@ -1459,6 +1485,7 @@ export default function StreetProjectsPage() {
               </div>
             )}
 
+            {!mapExpanded && (
             <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar">
               {selectedProject && selectedCoverage ? (
                 <ProjectDetail
@@ -1532,6 +1559,7 @@ export default function StreetProjectsPage() {
                 </p>
               )}
             </div>
+            )}
           </div>
           </div>
         </div>
